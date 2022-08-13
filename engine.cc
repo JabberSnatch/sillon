@@ -2,6 +2,7 @@
 #include "loader/iotk.hpp"
 #include "loader/bstk.hpp"
 
+#include <cstdio>
 #include <cstdint>
 #include <iostream>
 
@@ -31,6 +32,32 @@ struct context_t
 
     uint32_t last_key;
     iotk::input_t lastInput;
+
+    std::vector<struct MovingGlyph*> glyphs;
+    std::string display_string;
+};
+
+struct Glyph
+{
+    float x, y;
+    uint32_t char_index;
+};
+
+struct MovingGlyph
+{
+    static void _LogicUpdate(void* _state, context_t* _context, iotk::input_t const* _input)
+    {
+        ((MovingGlyph*)_state)->LogicUpdate(_context, _input);
+    }
+
+    float x, y;
+    uint32_t char_index;
+    MovingGlyph(uint32_t _char_index) :
+        x{ (float)_char_index / 128.f }, y{ 0.f }, char_index{ _char_index }
+    {}
+    void LogicUpdate(context_t* _context, iotk::input_t const* _input) {
+        y += _input->time_delta * 0.1f;
+    }
 };
 
 static bool UpdateSwapchain(context_t* _context, uint32_t const _size[2])
@@ -128,7 +155,7 @@ static void LoadConstantResources(context_t* _context)
     VkPushConstantRange push_constants{};
     push_constants.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     push_constants.offset = 0;
-    push_constants.size = 4;
+    push_constants.size = sizeof(MovingGlyph);
 
     VkPipelineLayoutCreateInfo pipeline_create{};
     pipeline_create.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -264,16 +291,26 @@ static void LoadMainPipeline(context_t* _context)
 
     static char const vshader[] = R"_(
     #version 450
-    const vec2 kTriVertices[] = vec2[3]( vec2(-1.0, 3.0), vec2(-1.0, -1.0), vec2(3.0, -1.0) );
+    const vec2 kTriVertices[] = vec2[4]( vec2(-1.0, -1.0),
+                                         vec2(1.0, -1.0),
+                                         vec2(-1.0, 1.0),
+                                         vec2(1.0, 1.0) );
+
     layout(location = 0) out vec2 texCoords;
     layout(push_constant) uniform DataBlock {
+        float x;
+        float y;
         uint char_index;
     };
+
     void main() {
-        gl_Position = vec4(kTriVertices[gl_VertexIndex], 0.0, 1.0);
+        vec2 quad = kTriVertices[gl_VertexIndex];
+        vec2 glyphloc = vec2(x, y) * 2.0 - vec2(1.0);
+        gl_Position = vec4(glyphloc + ((quad + 1.0) / 16.0), 0.0, 1.0);
+
         uint char_row = char_index >> 4;
         uint char_col = char_index & 0xf;
-        texCoords = ((gl_Position.xy * 0.5 + vec2(0.5)) + vec2(float(char_row), float(char_col))) / 16.0;
+        texCoords = ((quad * 0.5 + vec2(0.5)) + vec2(float(char_row), float(char_col))) / 16.0;
     }
     )_";
     static uint32_t const vsize = sizeof(vshader) - 1u;
@@ -408,12 +445,30 @@ static void TestDraw(context_t* _context, uint32_t const _size[2])
                             1u, &_context->descriptor_set,
                             0u, nullptr);
 
-    vkCmdPushConstants(command_buffer,
-                       _context->pipeline_layout,
-                       VK_SHADER_STAGE_VERTEX_BIT,
-                       0u, 4u, &_context->last_key);
+    for (MovingGlyph const* glyph : _context->glyphs)
+    {
+        vkCmdPushConstants(command_buffer,
+                           _context->pipeline_layout,
+                           VK_SHADER_STAGE_VERTEX_BIT,
+                           0u, sizeof(MovingGlyph), glyph);
 
-    vkCmdDraw(command_buffer, 3u, 1u, 0u, 0u);
+        vkCmdDraw(command_buffer, 4u, 1u, 0u, 0u);
+    }
+
+    for (uint32_t index = 0u; index < _context->display_string.size(); ++index)
+    {
+        float x = (float)(index & 0xf) / 16.f;
+        float y = (float)(index >> 4u) / 16.f;
+        Glyph glyph{ x, y, (uint32_t)_context->display_string[index] };
+
+        vkCmdPushConstants(command_buffer,
+                           _context->pipeline_layout,
+                           VK_SHADER_STAGE_VERTEX_BIT,
+                           0u, sizeof(MovingGlyph), &glyph);
+
+        vkCmdDraw(command_buffer, 4u, 1u, 0u, 0u);
+    }
+
     vkCmdEndRenderPass(command_buffer);
 
     command_buffer.End();
@@ -449,10 +504,6 @@ static void TestDraw(context_t* _context, uint32_t const _size[2])
     vkDestroySemaphore(_context->vulkan->device, acquire_semaphore, nullptr);
 }
 
-static void EngineLoad(context_t* _context)
-{
-}
-
 // geometry
 // camera
 // structured data
@@ -477,6 +528,10 @@ extern "C" {
     DLLEXPORT void ModuleInterface_Shutdown(context_t* _context)
     {
         std::cout << "Shutdown" << std::endl;
+
+        for (MovingGlyph* glyph : _context->glyphs)
+            delete glyph;
+
         vkDestroyPipeline(_context->vulkan->device, _context->graphics_pipeline, nullptr);
         vkDestroyPipelineLayout(_context->vulkan->device, _context->pipeline_layout, nullptr);
 
@@ -498,18 +553,32 @@ extern "C" {
         std::cout << "Reload" << std::endl;
 
         vkDestroyPipeline(_context->vulkan->device, _context->graphics_pipeline, nullptr);
+        vkDestroyPipelineLayout(_context->vulkan->device, _context->pipeline_layout, nullptr);
+
+        vkDestroyImage(_context->vulkan->device, _context->font.image, nullptr);
+        vkFreeMemory(_context->vulkan->device, _context->font.memory, nullptr);
+        vkDestroyBuffer(_context->vulkan->device, _context->staging.buffer, nullptr);
+        vkFreeMemory(_context->vulkan->device, _context->staging.memory, nullptr);
+
+        vkDestroySampler(_context->vulkan->device, _context->sampler, nullptr);
+        vkDestroyDescriptorPool(_context->vulkan->device, _context->descriptor_pool, nullptr);
+        vkDestroyDescriptorSetLayout(_context->vulkan->device, _context->descset_layout, nullptr);
         _context->swapchain.Release();
 
         _context->vulkan.release();
         _context->vulkan.reset(new vktk::Context(_context->window.hinstance,
                                                  _context->window.hwindow));
 
+        LoadConstantResources(_context);
         UpdateSwapchain(_context, _context->window.size);
         LoadMainPipeline(_context);
     }
 
     DLLEXPORT void ModuleInterface_LogicUpdate(context_t* _context, iotk::input_t const* _input)
     {
+        for (MovingGlyph* glyph : _context->glyphs)
+            glyph->LogicUpdate(_context, _input);
+
         for (uint32_t index = 1u; index < 256; ++index)
         {
             if (_context->lastInput.key_down[index] != _input->key_down[index])
@@ -518,7 +587,15 @@ extern "C" {
                 {
                     std::cout << "key down " << std::hex << index << std::endl;
                     if (index > (uint32_t)iotk::kASCIIBegin)
-                        _context->last_key = index - (uint32_t)iotk::kASCIIBegin;
+                    {
+                        uint32_t char_index = index - (uint32_t)iotk::kASCIIBegin;
+                        _context->last_key = char_index;
+
+                        _context->display_string.push_back((char)index);
+
+                        MovingGlyph* glyph = new MovingGlyph{ char_index };
+                        _context->glyphs.push_back(glyph);
+                    }
                 }
                 else
                     std::cout << "key up " << std::hex << index << std::endl;
