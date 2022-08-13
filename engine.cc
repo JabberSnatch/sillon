@@ -20,13 +20,14 @@ struct context_t
     std::unique_ptr<vktk::Context> vulkan;
     vktk::Swapchain swapchain;
     VkPipeline graphics_pipeline;
-    VkPipelineLayout pipeline_layout;
 
+    VkPipelineLayout pipeline_layout;
     vktk::Texture font;
     vktk::Buffer staging;
     VkSampler sampler;
     VkDescriptorPool descriptor_pool;
     VkDescriptorSet descriptor_set;
+    VkDescriptorSetLayout descset_layout;
 
     uint32_t last_key;
     iotk::input_t lastInput;
@@ -47,6 +48,214 @@ static bool UpdateSwapchain(context_t* _context, uint32_t const _size[2])
     }
 
     return result;
+}
+
+#define BMPTK_IMPLEMENTATION
+#include "bmp/bmptk.h"
+#include <vector>
+#include <fstream>
+
+std::vector<uint8_t> LoadFile(char const* _path)
+{
+    std::ifstream source_file(_path, std::ios_base::binary);
+
+    source_file.seekg(0, std::ios_base::end);
+    size_t size = source_file.tellg();
+    source_file.seekg(0, std::ios_base::beg);
+
+    std::vector<uint8_t> memory{};
+    memory.resize(size);
+
+    source_file.read((char*)memory.data(), size);
+
+    return memory;
+}
+
+static void LoadConstantResources(context_t* _context)
+{
+    VkDescriptorPoolSize descpool_sizes[1] = {
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 },
+    };
+
+    VkDescriptorPoolCreateInfo descpool_create{};
+    descpool_create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    descpool_create.pNext = nullptr;
+    descpool_create.flags = 0u;
+    descpool_create.maxSets = 1u;
+    descpool_create.poolSizeCount = sizeof(descpool_sizes) / sizeof(descpool_sizes[0]);
+    descpool_create.pPoolSizes = descpool_sizes;
+    CHECKCALL(vkCreateDescriptorPool, _context->vulkan->device,
+              &descpool_create, nullptr, &_context->descriptor_pool);
+
+    VkDescriptorSetLayoutBinding binding{};
+    binding.binding = 0;
+    binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    binding.descriptorCount = 1;
+    binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    binding.pImmutableSamplers = nullptr;
+
+    VkDescriptorSetLayoutCreateInfo descset_create{};
+    descset_create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    descset_create.pNext = nullptr;
+    descset_create.flags = 0u;
+    descset_create.bindingCount = 1;
+    descset_create.pBindings = &binding;
+    CHECKCALL(vkCreateDescriptorSetLayout, _context->vulkan->device,
+              &descset_create, nullptr, &_context->descset_layout);
+
+    VkDescriptorSetAllocateInfo descset_allocate{};
+    descset_allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    descset_allocate.pNext= nullptr;
+    descset_allocate.descriptorPool = _context->descriptor_pool;
+    descset_allocate.descriptorSetCount = 1u;
+    descset_allocate.pSetLayouts = &_context->descset_layout;
+    CHECKCALL(vkAllocateDescriptorSets, _context->vulkan->device,
+              &descset_allocate, &_context->descriptor_set);
+
+    VkSamplerCreateInfo sampler_create{};
+    sampler_create.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    sampler_create.pNext = nullptr;
+    sampler_create.flags = 0u;
+    sampler_create.magFilter = VK_FILTER_NEAREST;
+    sampler_create.minFilter = VK_FILTER_NEAREST;
+    sampler_create.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    sampler_create.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_create.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_create.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    CHECKCALL(vkCreateSampler, _context->vulkan->device,
+              &sampler_create, nullptr, &_context->sampler);
+
+    VkPushConstantRange push_constants{};
+    push_constants.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    push_constants.offset = 0;
+    push_constants.size = 4;
+
+    VkPipelineLayoutCreateInfo pipeline_create{};
+    pipeline_create.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipeline_create.pNext = nullptr;
+    pipeline_create.flags = 0u;
+    pipeline_create.setLayoutCount = 1u;
+    pipeline_create.pSetLayouts = &_context->descset_layout;
+    pipeline_create.pushConstantRangeCount = 1u;
+    pipeline_create.pPushConstantRanges = &push_constants;
+
+    CHECKCALL(vkCreatePipelineLayout, _context->vulkan->device, &pipeline_create, nullptr,
+              &_context->pipeline_layout);
+
+    std::vector<uint8_t> fontfile = LoadFile("../font.bmp");
+    bmptk::BitmapFile bmp{};
+    bmptk::Result result = bmptk::LoadBMP(fontfile.data(), &bmp);
+
+    _context->staging = _context->vulkan->CreateBuffer(
+        abs(bmp.width)*abs(bmp.height),
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+
+    void* mappedData = nullptr;
+    CHECKCALL(vkMapMemory, _context->vulkan->device,
+              _context->staging.memory, 0u, VK_WHOLE_SIZE, 0u, &mappedData);
+
+    uint8_t* imageBuffer = (uint8_t*)mappedData;
+    for (uint32_t y = 0; y < abs(bmp.height); ++y)
+    {
+        for (uint32_t x = 0; x < abs(bmp.width); ++x)
+        {
+            bmptk::PixelValue src = bmptk::GetPixel(&bmp, x, y);
+            uint8_t* dst = imageBuffer + x + y*abs(bmp.width);
+            *dst = src.red;
+        }
+    }
+
+    vkUnmapMemory(_context->vulkan->device, _context->staging.memory);
+
+    _context->font = _context->vulkan->CreateTexture(
+        abs(bmp.width), abs(bmp.height), 1,
+        VK_IMAGE_TYPE_2D, VK_FORMAT_R8_UNORM,
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT
+        | VK_IMAGE_USAGE_SAMPLED_BIT);
+
+    vktk::CommandBuffer command_buffer = _context->vulkan->CreateCommandBuffer();
+    command_buffer.Begin();
+
+    VkImageMemoryBarrier image_memory_barrier{};
+    image_memory_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    image_memory_barrier.pNext = nullptr;
+    image_memory_barrier.srcAccessMask = VK_ACCESS_NONE;
+    image_memory_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    image_memory_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    image_memory_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    image_memory_barrier.srcQueueFamilyIndex = 0u;
+    image_memory_barrier.dstQueueFamilyIndex = 0u;
+    image_memory_barrier.image = _context->font.image;
+    image_memory_barrier.subresourceRange = VkImageSubresourceRange{
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        0u, 1u, 0u, 1u
+    };
+
+    VkBufferMemoryBarrier buffer_memory_barrier{};
+    buffer_memory_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    buffer_memory_barrier.pNext = nullptr;
+    buffer_memory_barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
+    buffer_memory_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    buffer_memory_barrier.srcQueueFamilyIndex = 0u;
+    buffer_memory_barrier.dstQueueFamilyIndex = 0u;
+    buffer_memory_barrier.buffer = _context->staging.buffer;
+    buffer_memory_barrier.offset = 0u;
+    buffer_memory_barrier.size = abs(bmp.width)*abs(bmp.height);
+
+    vkCmdPipelineBarrier(command_buffer,
+                         VK_PIPELINE_STAGE_HOST_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0u,
+                         0u, nullptr,
+                         1u, &buffer_memory_barrier,
+                         1u, &image_memory_barrier);
+
+    VkBufferImageCopy copy_region{};
+    copy_region.bufferOffset = 0u;
+    copy_region.bufferRowLength = 0u;
+    copy_region.bufferImageHeight = 0u;
+    copy_region.imageSubresource = VkImageSubresourceLayers {
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        0u, 0u, 1u
+    };
+    copy_region.imageOffset = VkOffset3D{ 0u, 0u, 0u };
+    copy_region.imageExtent = VkExtent3D{
+        (uint32_t)abs(bmp.width),
+        (uint32_t)abs(bmp.height), 1u };
+
+    vkCmdCopyBufferToImage(command_buffer,
+                           _context->staging.buffer,
+                           _context->font.image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           1,
+                           &copy_region);
+
+    image_memory_barrier.oldLayout = image_memory_barrier.newLayout;
+    image_memory_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    image_memory_barrier.srcAccessMask = image_memory_barrier.dstAccessMask;
+    image_memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(command_buffer,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         0u,
+                         0u, nullptr,
+                         0u, nullptr,
+                         1u, &image_memory_barrier);
+
+    command_buffer.End();
+
+    VkSubmitInfo submit_info{};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.pNext = nullptr;
+    submit_info.waitSemaphoreCount = 0u;
+    submit_info.pWaitSemaphores = nullptr;
+    submit_info.pWaitDstStageMask = nullptr;
+    submit_info.commandBufferCount = 1u;
+    submit_info.pCommandBuffers = &command_buffer.handle;
+    submit_info.signalSemaphoreCount = 0u;
+    submit_info.pSignalSemaphores = nullptr;
+    vkQueueSubmit(_context->vulkan->present_queue, 1, &submit_info, VK_NULL_HANDLE);
 }
 
 static void LoadMainPipeline(context_t* _context)
@@ -93,40 +302,6 @@ static void LoadMainPipeline(context_t* _context)
                                              fshader,
                                              fsize);
 
-    VkDescriptorSetLayoutBinding binding{};
-    binding.binding = 0;
-    binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    binding.descriptorCount = 1;
-    binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    binding.pImmutableSamplers = nullptr;
-
-    VkDescriptorSetLayoutCreateInfo descset_create{};
-    descset_create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    descset_create.pNext = nullptr;
-    descset_create.flags = 0u;
-    descset_create.bindingCount = 1;
-    descset_create.pBindings = &binding;
-    VkDescriptorSetLayout descset_layout{};
-    CHECKCALL(vkCreateDescriptorSetLayout, _context->vulkan->device,
-              &descset_create, nullptr, &descset_layout);
-
-    VkPushConstantRange push_constants{};
-    push_constants.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    push_constants.offset = 0;
-    push_constants.size = 4;
-
-    VkPipelineLayoutCreateInfo pipeline_create{};
-    pipeline_create.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipeline_create.pNext = nullptr;
-    pipeline_create.flags = 0u;
-    pipeline_create.setLayoutCount = 1u;
-    pipeline_create.pSetLayouts = &descset_layout;
-    pipeline_create.pushConstantRangeCount = 1u;
-    pipeline_create.pPushConstantRanges = &push_constants;
-
-    CHECKCALL(vkCreatePipelineLayout, _context->vulkan->device, &pipeline_create, nullptr,
-              &_context->pipeline_layout);
-
     _context->graphics_pipeline = _context->vulkan->CreatePipeline(
         _context->pipeline_layout,
         _context->swapchain.render_pass,
@@ -138,38 +313,6 @@ static void LoadMainPipeline(context_t* _context)
     VkDescriptorPoolSize descpool_sizes[1] = {
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 },
     };
-
-    VkDescriptorPoolCreateInfo descpool_create{};
-    descpool_create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    descpool_create.pNext = nullptr;
-    descpool_create.flags = 0u;
-    descpool_create.maxSets = 1u;
-    descpool_create.poolSizeCount = sizeof(descpool_sizes) / sizeof(descpool_sizes[0]);
-    descpool_create.pPoolSizes = descpool_sizes;
-    CHECKCALL(vkCreateDescriptorPool, _context->vulkan->device,
-              &descpool_create, nullptr, &_context->descriptor_pool);
-
-    VkDescriptorSetAllocateInfo descset_allocate{};
-    descset_allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    descset_allocate.pNext= nullptr;
-    descset_allocate.descriptorPool = _context->descriptor_pool;
-    descset_allocate.descriptorSetCount = 1u;
-    descset_allocate.pSetLayouts = &descset_layout;
-    CHECKCALL(vkAllocateDescriptorSets, _context->vulkan->device,
-              &descset_allocate, &_context->descriptor_set);
-
-    VkSamplerCreateInfo sampler_create{};
-    sampler_create.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    sampler_create.pNext = nullptr;
-    sampler_create.flags = 0u;
-    sampler_create.magFilter = VK_FILTER_NEAREST;
-    sampler_create.minFilter = VK_FILTER_NEAREST;
-    sampler_create.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    sampler_create.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_create.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_create.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    CHECKCALL(vkCreateSampler, _context->vulkan->device,
-              &sampler_create, nullptr, &_context->sampler);
 
     vkDestroyShaderModule(_context->vulkan->device, vmodule, nullptr);
     vkDestroyShaderModule(_context->vulkan->device, fmodule, nullptr);
@@ -302,6 +445,7 @@ static void TestDraw(context_t* _context, uint32_t const _size[2])
 
     vkQueueWaitIdle(_context->vulkan->present_queue);
 
+    vkDestroyImageView(_context->vulkan->device, image_view, nullptr);
     vkDestroySemaphore(_context->vulkan->device, acquire_semaphore, nullptr);
 }
 
@@ -314,27 +458,6 @@ static void EngineLoad(context_t* _context)
 // structured data
 // serialisation
 
-#define BMPTK_IMPLEMENTATION
-#include "bmp/bmptk.h"
-#include <vector>
-#include <fstream>
-
-std::vector<uint8_t> LoadFile(char const* _path)
-{
-    std::ifstream source_file(_path, std::ios_base::binary);
-
-    source_file.seekg(0, std::ios_base::end);
-    size_t size = source_file.tellg();
-    source_file.seekg(0, std::ios_base::beg);
-
-    std::vector<uint8_t> memory{};
-    memory.resize(size);
-
-    source_file.read((char*)memory.data(), size);
-
-    return memory;
-}
-
 extern "C" {
 
     DLLEXPORT context_t* ModuleInterface_Create(bstk::OSWindow const* _window)
@@ -344,123 +467,9 @@ extern "C" {
         context->window = *_window;
         context->vulkan.reset(new vktk::Context(_window->hinstance, _window->hwindow));
 
+        LoadConstantResources(context);
         UpdateSwapchain(context, context->window.size);
         LoadMainPipeline(context);
-
-        std::vector<uint8_t> fontfile = LoadFile("../font.bmp");
-        bmptk::BitmapFile bmp{};
-        bmptk::Result result = bmptk::LoadBMP(fontfile.data(), &bmp);
-
-        context->staging = context->vulkan->CreateBuffer(
-            abs(bmp.width)*abs(bmp.height),
-            VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-
-        void* mappedData = nullptr;
-        CHECKCALL(vkMapMemory, context->vulkan->device,
-                  context->staging.memory, 0u, VK_WHOLE_SIZE, 0u, &mappedData);
-
-        uint8_t* imageBuffer = (uint8_t*)mappedData;
-        for (uint32_t y = 0; y < abs(bmp.height); ++y)
-        {
-            for (uint32_t x = 0; x < abs(bmp.width); ++x)
-            {
-                bmptk::PixelValue src = bmptk::GetPixel(&bmp, x, y);
-                uint8_t* dst = imageBuffer + x + y*abs(bmp.width);
-                *dst = src.red;
-            }
-        }
-
-        vkUnmapMemory(context->vulkan->device, context->staging.memory);
-
-        context->font = context->vulkan->CreateTexture(
-            abs(bmp.width), abs(bmp.height), 1,
-            VK_IMAGE_TYPE_2D, VK_FORMAT_R8_UNORM,
-            VK_IMAGE_USAGE_TRANSFER_DST_BIT
-            | VK_IMAGE_USAGE_SAMPLED_BIT);
-
-        vktk::CommandBuffer command_buffer = context->vulkan->CreateCommandBuffer();
-        command_buffer.Begin();
-
-        VkImageMemoryBarrier image_memory_barrier{};
-        image_memory_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        image_memory_barrier.pNext = nullptr;
-        image_memory_barrier.srcAccessMask = VK_ACCESS_NONE;
-        image_memory_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        image_memory_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        image_memory_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        image_memory_barrier.srcQueueFamilyIndex = 0u;
-        image_memory_barrier.dstQueueFamilyIndex = 0u;
-        image_memory_barrier.image = context->font.image;
-        image_memory_barrier.subresourceRange = VkImageSubresourceRange{
-            VK_IMAGE_ASPECT_COLOR_BIT,
-            0u, 1u, 0u, 1u
-        };
-
-        VkBufferMemoryBarrier buffer_memory_barrier{};
-        buffer_memory_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-        buffer_memory_barrier.pNext = nullptr;
-        buffer_memory_barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
-        buffer_memory_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        buffer_memory_barrier.srcQueueFamilyIndex = 0u;
-        buffer_memory_barrier.dstQueueFamilyIndex = 0u;
-        buffer_memory_barrier.buffer = context->staging.buffer;
-        buffer_memory_barrier.offset = 0u;
-        buffer_memory_barrier.size = abs(bmp.width)*abs(bmp.height);
-
-        vkCmdPipelineBarrier(command_buffer,
-                             VK_PIPELINE_STAGE_HOST_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             0u,
-                             0u, nullptr,
-                             1u, &buffer_memory_barrier,
-                             1u, &image_memory_barrier);
-
-        VkBufferImageCopy copy_region{};
-        copy_region.bufferOffset = 0u;
-        copy_region.bufferRowLength = 0u;
-        copy_region.bufferImageHeight = 0u;
-        copy_region.imageSubresource = VkImageSubresourceLayers {
-            VK_IMAGE_ASPECT_COLOR_BIT,
-            0u, 0u, 1u
-        };
-        copy_region.imageOffset = VkOffset3D{ 0u, 0u, 0u };
-        copy_region.imageExtent = VkExtent3D{
-            (uint32_t)abs(bmp.width),
-            (uint32_t)abs(bmp.height), 1u };
-
-        vkCmdCopyBufferToImage(command_buffer,
-                               context->staging.buffer,
-                               context->font.image,
-                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                               1,
-                               &copy_region);
-
-        image_memory_barrier.oldLayout = image_memory_barrier.newLayout;
-        image_memory_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        image_memory_barrier.srcAccessMask = image_memory_barrier.dstAccessMask;
-        image_memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-        vkCmdPipelineBarrier(command_buffer,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                             0u,
-                             0u, nullptr,
-                             0u, nullptr,
-                             1u, &image_memory_barrier);
-
-        command_buffer.End();
-
-        VkSubmitInfo submit_info{};
-        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submit_info.pNext = nullptr;
-        submit_info.waitSemaphoreCount = 0u;
-        submit_info.pWaitSemaphores = nullptr;
-        submit_info.pWaitDstStageMask = nullptr;
-        submit_info.commandBufferCount = 1u;
-        submit_info.pCommandBuffers = &command_buffer.handle;
-        submit_info.signalSemaphoreCount = 0u;
-        submit_info.pSignalSemaphores = nullptr;
-        vkQueueSubmit(context->vulkan->present_queue, 1, &submit_info, VK_NULL_HANDLE);
 
         return context;
     }
@@ -469,6 +478,17 @@ extern "C" {
     {
         std::cout << "Shutdown" << std::endl;
         vkDestroyPipeline(_context->vulkan->device, _context->graphics_pipeline, nullptr);
+        vkDestroyPipelineLayout(_context->vulkan->device, _context->pipeline_layout, nullptr);
+
+        vkDestroyImage(_context->vulkan->device, _context->font.image, nullptr);
+        vkFreeMemory(_context->vulkan->device, _context->font.memory, nullptr);
+        vkDestroyBuffer(_context->vulkan->device, _context->staging.buffer, nullptr);
+        vkFreeMemory(_context->vulkan->device, _context->staging.memory, nullptr);
+
+        vkDestroySampler(_context->vulkan->device, _context->sampler, nullptr);
+        vkDestroyDescriptorPool(_context->vulkan->device, _context->descriptor_pool, nullptr);
+        vkDestroyDescriptorSetLayout(_context->vulkan->device, _context->descset_layout, nullptr);
+
         _context->swapchain.Release();
         delete _context;
     }
