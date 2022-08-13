@@ -1,6 +1,6 @@
-#include "iotk.hpp"
 #include "vktk.hpp"
-#include "bstk.hpp"
+#include "loader/iotk.hpp"
+#include "loader/bstk.hpp"
 
 #include <cstdint>
 #include <iostream>
