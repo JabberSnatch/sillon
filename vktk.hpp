@@ -52,7 +52,7 @@ struct FPTable
 struct Context;
 
 struct Swapchain {
-    uint32_t size[2] = { 0, 0 };
+    VkExtent2D size = { 0, 0 };
     Context const* vulkan;
 
     VkFormat format;
@@ -62,6 +62,9 @@ struct Swapchain {
     std::vector<VkImageView> views;
     std::vector<VkFramebuffer> framebuffers;
 
+    uint32_t index;
+
+    VkFramebuffer AcquireNext(VkSemaphore _signal);
     void Release();
 };
 

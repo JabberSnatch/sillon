@@ -463,8 +463,8 @@ VkPipeline Context::CreatePipeline(VkPipelineLayout _layout,
 Swapchain Context::CreateSwapchain(uint32_t const _size[2])
 {
     Swapchain swapchain{};
-    swapchain.size[0] = _size[0];
-    swapchain.size[1] = _size[1];
+    swapchain.size.width = _size[0];
+    swapchain.size.height = _size[1];
     swapchain.vulkan = this;
 
     VkColorSpaceKHR color_space{};
@@ -640,6 +640,19 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
     CHECKCALL(vkAllocateMemory, device, &allocate_info, nullptr, &texture.memory);
     CHECKCALL(vkBindImageMemory, device, texture.image, texture.memory, 0);
     return texture;
+}
+
+VkFramebuffer Swapchain::AcquireNext(VkSemaphore _signal)
+{
+    CHECKCALL(vulkan->fp.AcquireNextImageKHR,
+              vulkan->device,
+              handle,
+              UINT64_MAX,
+              _signal,
+              VK_NULL_HANDLE,
+              &index);
+
+    return framebuffers[index];
 }
 
 void Swapchain::Release()

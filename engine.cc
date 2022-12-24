@@ -20,8 +20,8 @@ struct context_t
 
     std::unique_ptr<vktk::Context> vulkan;
     vktk::Swapchain swapchain;
-    VkPipeline graphics_pipeline;
 
+    VkPipeline graphics_pipeline;
     VkPipelineLayout pipeline_layout;
     vktk::Texture font;
     vktk::Buffer staging;
@@ -63,8 +63,8 @@ struct MovingGlyph
 static bool UpdateSwapchain(context_t* _context, uint32_t const _size[2])
 {
     if (_context->swapchain.handle != VK_NULL_HANDLE
-        && (_context->swapchain.size[0] != _size[0]
-            || _context->swapchain.size[1] != _size[1]))
+        && (_context->swapchain.size.width != _size[0]
+            || _context->swapchain.size.height != _size[1]))
         _context->swapchain.Release();
 
     bool result = false;
@@ -355,24 +355,10 @@ static void LoadMainPipeline(context_t* _context)
     vkDestroyShaderModule(_context->vulkan->device, fmodule, nullptr);
 }
 
-static void TestDraw(context_t* _context, uint32_t const _size[2])
+static void TestDraw(context_t* _context,
+                     vktk::Swapchain const& _swapchain,
+                     VkSemaphore _acquire_semaphore)
 {
-    VkSemaphoreCreateInfo semaphore_info{};
-    semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    semaphore_info.pNext = nullptr;
-    semaphore_info.flags = 0u;
-    VkSemaphore acquire_semaphore{};
-    vkCreateSemaphore(_context->vulkan->device, &semaphore_info, nullptr, &acquire_semaphore);
-
-    uint32_t swapchainIndex = 0u;
-    CHECKCALL(_context->vulkan->fp.AcquireNextImageKHR,
-              _context->vulkan->device,
-              _context->swapchain.handle,
-              UINT64_MAX,
-              acquire_semaphore,
-              VK_NULL_HANDLE,
-              &swapchainIndex);
-
     VkImageViewCreateInfo image_view_create{};
     image_view_create.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     image_view_create.pNext = nullptr;
@@ -412,11 +398,12 @@ static void TestDraw(context_t* _context, uint32_t const _size[2])
 
     VkViewport viewport{};
     viewport.x = 0.f; viewport.y = 0.f;
-    viewport.width = (float)_size[0]; viewport.height = (float)_size[1];
+    viewport.width = (float)_swapchain.size.width;
+    viewport.height = (float)_swapchain.size.height;
     viewport.minDepth = 0.f; viewport.maxDepth = 1.f;
     vkCmdSetViewport(command_buffer, 0, 1, &viewport);
 
-    VkRect2D scissor{ VkOffset2D{ 0, 0 }, VkExtent2D{ _size[0], _size[1] } };
+    VkRect2D scissor{ VkOffset2D{ 0, 0 }, _swapchain.size };
     vkCmdSetScissor(command_buffer, 0, 1, &scissor);
 
     VkClearValue clear_value{};
@@ -427,11 +414,11 @@ static void TestDraw(context_t* _context, uint32_t const _size[2])
     VkRenderPassBeginInfo rp_begin_info{};
     rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rp_begin_info.pNext = nullptr;
-    rp_begin_info.renderPass = _context->swapchain.render_pass;
-    rp_begin_info.framebuffer = _context->swapchain.framebuffers[swapchainIndex];
+    rp_begin_info.renderPass = _swapchain.render_pass;
+    rp_begin_info.framebuffer = _swapchain.framebuffers[_swapchain.index];
     rp_begin_info.renderArea = VkRect2D{
         VkOffset2D{ 0, 0 },
-        VkExtent2D{ _context->swapchain.size[0], _context->swapchain.size[1] }
+        _swapchain.size
     };
     rp_begin_info.clearValueCount = 1;
     rp_begin_info.pClearValues = &clear_value;
@@ -478,7 +465,7 @@ static void TestDraw(context_t* _context, uint32_t const _size[2])
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit_info.pNext = nullptr;
     submit_info.waitSemaphoreCount = 1u;
-    submit_info.pWaitSemaphores = &acquire_semaphore;
+    submit_info.pWaitSemaphores = &_acquire_semaphore;
     submit_info.pWaitDstStageMask = &wait_dst_stage;
     submit_info.commandBufferCount = 1u;
     submit_info.pCommandBuffers = &command_buffer.handle;
@@ -492,8 +479,8 @@ static void TestDraw(context_t* _context, uint32_t const _size[2])
     present_info.waitSemaphoreCount = 0u;
     present_info.pWaitSemaphores = nullptr;
     present_info.swapchainCount = 1;
-    present_info.pSwapchains = &_context->swapchain.handle;
-    present_info.pImageIndices = &swapchainIndex;
+    present_info.pSwapchains = &_swapchain.handle;
+    present_info.pImageIndices = &_swapchain.index;
     present_info.pResults = nullptr;
     CHECKCALL(_context->vulkan->fp.QueuePresentKHR,
               _context->vulkan->present_queue, &present_info);
@@ -501,7 +488,6 @@ static void TestDraw(context_t* _context, uint32_t const _size[2])
     vkQueueWaitIdle(_context->vulkan->present_queue);
 
     vkDestroyImageView(_context->vulkan->device, image_view, nullptr);
-    vkDestroySemaphore(_context->vulkan->device, acquire_semaphore, nullptr);
 }
 
 // geometry
@@ -614,6 +600,22 @@ extern "C" {
             vkDestroyPipeline(_context->vulkan->device, _context->graphics_pipeline, nullptr);
             LoadMainPipeline(_context);
         }
-        TestDraw(_context, _window->size);
+
+        VkFramebuffer current_framebuffer{};
+        VkSemaphore acquire_semaphore{};
+        {
+            VkSemaphoreCreateInfo semaphore_info{};
+            semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+            semaphore_info.pNext = nullptr;
+            semaphore_info.flags = 0u;
+            vkCreateSemaphore(_context->vulkan->device, &semaphore_info, nullptr, &acquire_semaphore);
+
+            current_framebuffer = _context->swapchain.AcquireNext(acquire_semaphore);
+        }
+
+        TestDraw(_context, _context->swapchain, acquire_semaphore);
+
+        vkQueueWaitIdle(_context->vulkan->present_queue);
+        vkDestroySemaphore(_context->vulkan->device, acquire_semaphore, nullptr);
     }
 }
