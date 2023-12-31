@@ -59,6 +59,7 @@ void ConstantResources(void* _pstate,
 
     numtk::vec3f* vertices = (numtk::vec3f*)staging_area;
     numtk::vec3u* triangles = (numtk::vec3u*)(vertices+12);
+
     {
         static const auto spherical_to_cartesian = [](numtk::vec3f const& v){
             // v = { lat, long, elevation }
@@ -114,6 +115,26 @@ void ConstantResources(void* _pstate,
         triangles[18] = { 4, 3, 2 };
         triangles[19] = { 2, 1, 10 };
     }
+
+    vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->copy_queue);
+    command_buffer.Begin();
+    command_buffer.BufferCopy(_state->vertex_buffer, 0,
+                              staging_buffer, 0, sizeof(numtk::vec3f)*12);
+    command_buffer.BufferCopy(_state->index_buffer, 0,
+                              staging_buffer, sizeof(numtk::vec3f)*12, sizeof(numtk::vec3u)*20);
+    command_buffer.End();
+
+    VkSubmitInfo submit_info{};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.pNext = nullptr;
+    submit_info.waitSemaphoreCount = 0u;
+    submit_info.pWaitSemaphores = nullptr;
+    submit_info.pWaitDstStageMask = nullptr;
+    submit_info.commandBufferCount = 1u;
+    submit_info.pCommandBuffers = &command_buffer.handle;
+    submit_info.signalSemaphoreCount = 0u;
+    submit_info.pSignalSemaphores = nullptr;
+    vkQueueSubmit(_vulkan->copy_queue, 1, &submit_info, VK_NULL_HANDLE);
 }
 
 void RenderResources(void* _pstate,

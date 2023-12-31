@@ -188,7 +188,7 @@ void ConstantResources(void* _pstate,
     CHECKCALL(vkCreateImageView, _vulkan->device,
               &image_view_create, nullptr, &_state->font_view);
 
-    vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer();
+    vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
     command_buffer.Begin();
 
     VkImageMemoryBarrier image_memory_barrier{};
@@ -409,7 +409,7 @@ void Draw(void* _pstate,
     desc_write.pTexelBufferView = nullptr;
     vkUpdateDescriptorSets(_vulkan->device, 1u, &desc_write, 0u, nullptr);
 
-    vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer();
+    vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
     command_buffer.Begin();
 
     VkViewport viewport{};

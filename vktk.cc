@@ -130,35 +130,63 @@ Context::Context(uint64_t _hinstance, uint64_t _hwindow)
         vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &queueFamilyCount,
                                                  queue_properties.data());
 
-        std::uint32_t queueIndex = ~0u;
+        std::uint32_t present_queue_index = ~0u;
+        std::uint32_t copy_queue_index = ~0u;
         for (std::uint32_t index = 0u; index < queue_properties.size(); ++index)
         {
             VkBool32 canPresent = VK_FALSE;
             fp.GetPhysicalDeviceSurfaceSupportKHR(physical_device, index, surface,
                                                   &canPresent);
-            if (queue_properties[index].queueFlags & VK_QUEUE_GRAPHICS_BIT &&
-                canPresent == VK_TRUE)
+            if (present_queue_index == ~0u
+                && queue_properties[index].queueFlags & VK_QUEUE_GRAPHICS_BIT
+                && canPresent == VK_TRUE)
+                present_queue_index = index;
+
+            if (queue_properties[index].queueFlags &
+                (VK_QUEUE_COMPUTE_BIT | VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_TRANSFER_BIT))
             {
-                queueIndex = index;
-                break;
+                if (copy_queue_index == ~0u)
+                    copy_queue_index = index;
+
+                else if (
+                    (queue_properties[index].queueFlags
+                        & VK_QUEUE_TRANSFER_BIT)
+                    && !(queue_properties[index].queueFlags
+                         & (VK_QUEUE_COMPUTE_BIT | VK_QUEUE_GRAPHICS_BIT))
+                    && (queue_properties[copy_queue_index].queueFlags
+                        & (VK_QUEUE_COMPUTE_BIT | VK_QUEUE_GRAPHICS_BIT)))
+                    copy_queue_index = index;
             }
         }
 
         static float const kQueuePriority = 0.f;
-        VkDeviceQueueCreateInfo queue_info{};
-        queue_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        queue_info.pNext = nullptr;
-        queue_info.flags = 0;
-        queue_info.queueFamilyIndex = queueIndex;
-        queue_info.queueCount = 1;
-        queue_info.pQueuePriorities = &kQueuePriority;
+        VkDeviceQueueCreateInfo queue_info[2];
+        {
+            VkDeviceQueueCreateInfo& present_queue_info = queue_info[0];
+            present_queue_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+            present_queue_info.pNext = nullptr;
+            present_queue_info.flags = 0;
+            present_queue_info.queueFamilyIndex = present_queue_index;
+            present_queue_info.queueCount = 1;
+            present_queue_info.pQueuePriorities = &kQueuePriority;
+        }
+
+        {
+            VkDeviceQueueCreateInfo& copy_queue_info = queue_info[1];
+            copy_queue_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+            copy_queue_info.pNext = nullptr;
+            copy_queue_info.flags = 0;
+            copy_queue_info.queueFamilyIndex = copy_queue_index;
+            copy_queue_info.queueCount = 1;
+            copy_queue_info.pQueuePriorities = &kQueuePriority;
+        }
 
         VkDeviceCreateInfo device_info{};
         device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
         device_info.pNext = nullptr;
         device_info.flags = 0;
-        device_info.queueCreateInfoCount = 1;
-        device_info.pQueueCreateInfos = &queue_info;
+        device_info.queueCreateInfoCount = 2;
+        device_info.pQueueCreateInfos = queue_info;
         device_info.enabledLayerCount = 0;
         device_info.ppEnabledLayerNames = nullptr;
         device_info.enabledExtensionCount = kDeviceExtCount;
@@ -167,14 +195,29 @@ Context::Context(uint64_t _hinstance, uint64_t _hwindow)
 
         CHECKCALL(vkCreateDevice, physical_device, &device_info, nullptr, &device);
 
-        VkCommandPoolCreateInfo command_pool_info{};
-        command_pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-        command_pool_info.pNext = nullptr;
-        command_pool_info.flags = 0u;
-        command_pool_info.queueFamilyIndex = queueIndex;
-        CHECKCALL(vkCreateCommandPool, device, &command_pool_info, nullptr, &command_pool);
+        {
+            VkCommandPoolCreateInfo command_pool_info{};
+            command_pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+            command_pool_info.pNext = nullptr;
+            command_pool_info.flags = 0u;
+            command_pool_info.queueFamilyIndex = present_queue_index;
+            CHECKCALL(vkCreateCommandPool,
+                      device, &command_pool_info, nullptr, &present_queue.command_pool);
 
-        vkGetDeviceQueue(device, queueIndex, 0, &present_queue);
+            vkGetDeviceQueue(device, present_queue_index, 0, &present_queue.queue);
+        }
+
+        {
+            VkCommandPoolCreateInfo command_pool_info{};
+            command_pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+            command_pool_info.pNext = nullptr;
+            command_pool_info.flags = 0u;
+            command_pool_info.queueFamilyIndex = copy_queue_index;
+            CHECKCALL(vkCreateCommandPool,
+                      device, &command_pool_info, nullptr, &copy_queue.command_pool);
+
+            vkGetDeviceQueue(device, copy_queue_index, 0, &copy_queue.queue);
+        }
     }
 
     #define DEVICE device
@@ -190,7 +233,8 @@ Context::~Context()
     vkDestroySurfaceKHR(instance, surface, nullptr);
 #endif
 
-    vkDestroyCommandPool(device, command_pool, nullptr);
+    vkDestroyCommandPool(device, present_queue.command_pool, nullptr);
+    vkDestroyCommandPool(device, copy_queue.command_pool, nullptr);
 
     vkDestroyDevice(device, nullptr);
     vkDestroyInstance(instance, nullptr);
@@ -251,17 +295,27 @@ void CommandBuffer::Begin()
     vkBeginCommandBuffer(handle, &cmd_begin_info);
 }
 
+void CommandBuffer::BufferCopy(VkBuffer _dst, uint64_t _dst_offset,
+                               VkBuffer _src, uint64_t _src_offset, uint64_t _size)
+{
+    VkBufferCopy buffer_copy = {};
+    buffer_copy.srcOffset = _src_offset;
+    buffer_copy.dstOffset = _dst_offset;
+    buffer_copy.size = _size;
+    vkCmdCopyBuffer(handle, _src, _dst, 1, &buffer_copy);
+}
+
 void CommandBuffer::End()
 {
     vkEndCommandBuffer(handle);
 }
 
-CommandBuffer Context::CreateCommandBuffer()
+CommandBuffer Context::CreateCommandBuffer(Queue const& queue)
 {
     VkCommandBufferAllocateInfo command_buffer_info{};
     command_buffer_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     command_buffer_info.pNext = nullptr;
-    command_buffer_info.commandPool = command_pool;
+    command_buffer_info.commandPool = queue.command_pool;
     command_buffer_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     command_buffer_info.commandBufferCount = 1;
 

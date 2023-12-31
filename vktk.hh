@@ -71,6 +71,8 @@ struct Swapchain {
 struct Buffer {
     VkBuffer buffer;
     VkDeviceMemory memory;
+
+    operator VkBuffer() { return buffer; }
 };
 
 struct Texture {
@@ -78,11 +80,19 @@ struct Texture {
     VkDeviceMemory memory;
 };
 
-struct CommandBuffer{
+struct CommandBuffer {
     VkCommandBuffer handle;
     operator VkCommandBuffer() { return handle; }
     void Begin();
+    void BufferCopy(VkBuffer _dst, uint64_t _dst_offset,
+                    VkBuffer _src, uint64_t _src_offset, uint64_t _size);
     void End();
+};
+
+struct Queue {
+    VkQueue queue;
+    operator VkQueue() { return queue; }
+    VkCommandPool command_pool;
 };
 
 struct Context
@@ -95,7 +105,7 @@ struct Context
                                       char const* _code,
                                       size_t _codeSize);
 
-    CommandBuffer CreateCommandBuffer();
+    CommandBuffer CreateCommandBuffer(Queue const& queue);
 
     struct RenderPassAttachment {
         VkFormat format;
@@ -148,8 +158,8 @@ struct Context
 
     VkSurfaceKHR surface = {};
     VkDevice device = {};
-    VkQueue present_queue = {};
-    VkCommandPool command_pool = {};
+    Queue present_queue = {};
+    Queue copy_queue = {};
 };
 
 } // namespace vktk
