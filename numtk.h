@@ -15,65 +15,77 @@
 
 namespace numtk {
 
-struct vec2f : public std::array<float, 2>
+template <typename type>
+struct vec2 : public std::array<type, 2>
 {
-    float& x() { return this->operator[](0); }
-    float& y() { return this->operator[](1); }
+    type& x() { return this->operator[](0); }
+    type& y() { return this->operator[](1); }
 
-    float const& x() const { return static_cast<float const&>(const_cast<vec2f*>(this)->x()); }
-    float const& y() const { return static_cast<float const&>(const_cast<vec2f*>(this)->y()); }
+    type const& x() const { return static_cast<type const&>(const_cast<vec2*>(this)->x()); }
+    type const& y() const { return static_cast<type const&>(const_cast<vec2*>(this)->y()); }
 
-    vec2f operator+(vec2f const& o) const { return { x()+o.x(), y()+o.y() }; }
-    vec2f operator-(vec2f const& o) const { return { x()-o.x(), y()-o.y() }; }
-    vec2f operator*(vec2f const& o) const { return { x()*o.x(), y()*o.y() }; }
-    vec2f operator*(float s) const { return { x()*s, y()*s }; }
-    vec2f operator/(vec2f const& o) const { return { x()/o.x(), y()/o.y() }; }
-    vec2f operator/(float s) const { return { x()/s, y()/s }; }
+    vec2 operator+(vec2 const& o) const { return { x()+o.x(), y()+o.y() }; }
+    vec2 operator-(vec2 const& o) const { return { x()-o.x(), y()-o.y() }; }
+    vec2 operator*(vec2 const& o) const { return { x()*o.x(), y()*o.y() }; }
+    vec2 operator*(type s) const { return { x()*s, y()*s }; }
+    vec2 operator/(vec2 const& o) const { return { x()/o.x(), y()/o.y() }; }
+    vec2 operator/(type s) const { return { x()/s, y()/s }; }
 };
 
-struct vec3f : public std::array<float, 3>
+template <typename type>
+struct vec3 : public std::array<type, 3>
 {
-    float& x() { return this->operator[](0); }
-    float& y() { return this->operator[](1); }
-    float& z() { return this->operator[](2); }
+    type& x() { return this->operator[](0); }
+    type& y() { return this->operator[](1); }
+    type& z() { return this->operator[](2); }
 
-    float const& x() const { return static_cast<float const&>(const_cast<vec3f*>(this)->x()); }
-    float const& y() const { return static_cast<float const&>(const_cast<vec3f*>(this)->y()); }
-    float const& z() const { return static_cast<float const&>(const_cast<vec3f*>(this)->z()); }
+    type const& x() const { return static_cast<type const&>(const_cast<vec3*>(this)->x()); }
+    type const& y() const { return static_cast<type const&>(const_cast<vec3*>(this)->y()); }
+    type const& z() const { return static_cast<type const&>(const_cast<vec3*>(this)->z()); }
 
-    vec3f operator+(vec3f const& o) const { return { x()+o.x(), y()+o.y(), z()+o.z() }; }
-    vec3f operator-(vec3f const& o) const { return { x()-o.x(), y()-o.y(), z()-o.z() }; }
-    vec3f operator*(vec3f const& o) const { return { x()*o.x(), y()*o.y(), z()*o.z() }; }
-    vec3f operator*(float s) const { return { x()*s, y()*s, z()*s }; }
-    vec3f operator/(vec3f const& o) const { return { x()/o.x(), y()/o.y(), z()/o.z() }; }
-    vec3f operator/(float s) const { return { x()/s, y()/s, z()/s }; }
+    vec3 operator+(vec3 const& o) const { return { x()+o.x(), y()+o.y(), z()+o.z() }; }
+    vec3 operator-(vec3 const& o) const { return { x()-o.x(), y()-o.y(), z()-o.z() }; }
+    vec3 operator*(vec3 const& o) const { return { x()*o.x(), y()*o.y(), z()*o.z() }; }
+    vec3 operator*(type s) const { return { x()*s, y()*s, z()*s }; }
+    vec3 operator/(vec3 const& o) const { return { x()/o.x(), y()/o.y(), z()/o.z() }; }
+    vec3 operator/(type s) const { return { x()/s, y()/s, z()/s }; }
 };
 
-struct vec4f : public std::array<float, 4>
+template <typename type>
+struct vec4 : public std::array<type, 4>
 {
-    float& x() { return this->operator[](0); }
-    float& y() { return this->operator[](1); }
-    float& z() { return this->operator[](2); }
-    float& w() { return this->operator[](3); }
+    type& x() { return this->operator[](0); }
+    type& y() { return this->operator[](1); }
+    type& z() { return this->operator[](2); }
+    type& w() { return this->operator[](3); }
 
-    float const& x() const { return static_cast<float const&>(const_cast<vec4f*>(this)->x()); }
-    float const& y() const { return static_cast<float const&>(const_cast<vec4f*>(this)->y()); }
-    float const& z() const { return static_cast<float const&>(const_cast<vec4f*>(this)->z()); }
-    float const& w() const { return static_cast<float const&>(const_cast<vec4f*>(this)->w()); }
+    type const& x() const { return static_cast<type const&>(const_cast<vec4*>(this)->x()); }
+    type const& y() const { return static_cast<type const&>(const_cast<vec4*>(this)->y()); }
+    type const& z() const { return static_cast<type const&>(const_cast<vec4*>(this)->z()); }
+    type const& w() const { return static_cast<type const&>(const_cast<vec4*>(this)->w()); }
 
-    vec4f operator+(vec4f const& o) const { return { x()+o.x(), y()+o.y(), z()+o.z(), w()+o.w() }; }
-    vec4f operator-(vec4f const& o) const { return { x()-o.x(), y()-o.y(), z()-o.z(), w()-o.w() }; }
-    vec4f operator*(vec4f const& o) const { return { x()*o.x(), y()*o.y(), z()*o.z(), w()*o.w() }; }
-    vec4f operator*(float s) const { return { x()*s, y()*s, z()*s, w()*s }; }
-    vec4f operator/(vec4f const& o) const { return { x()/o.x(), y()/o.y(), z()/o.z(), w()/o.w() }; }
-    vec4f operator/(float s) const { return { x()/s, y()/s, z()/s, w()/s }; }
+    vec4 operator+(vec4 const& o) const { return { x()+o.x(), y()+o.y(), z()+o.z(), w()+o.w() }; }
+    vec4 operator-(vec4 const& o) const { return { x()-o.x(), y()-o.y(), z()-o.z(), w()-o.w() }; }
+    vec4 operator*(vec4 const& o) const { return { x()*o.x(), y()*o.y(), z()*o.z(), w()*o.w() }; }
+    vec4 operator*(type s) const { return { x()*s, y()*s, z()*s, w()*s }; }
+    vec4 operator/(vec4 const& o) const { return { x()/o.x(), y()/o.y(), z()/o.z(), w()/o.w() }; }
+    vec4 operator/(type s) const { return { x()/s, y()/s, z()/s, w()/s }; }
 };
+
+using vec2f = vec2<float>;
+using vec3f = vec3<float>;
+using vec4f = vec4<float>;
+using vec2u = vec2<uint32_t>;
+using vec3u = vec3<uint32_t>;
 
 } // namespace numtk
 
-inline numtk::vec2f operator*(float s, numtk::vec2f const& v) { return v*s; }
-inline numtk::vec3f operator*(float s, numtk::vec3f const& v) { return v*s; }
-inline numtk::vec4f operator*(float s, numtk::vec4f const& v) { return v*s; }
+template <typename type>
+inline numtk::vec2<type> operator*(type s, numtk::vec2<type> const& v) { return v*s; }
+template <typename type>
+inline numtk::vec3<type> operator*(type s, numtk::vec3<type> const& v) { return v*s; }
+template <typename type>
+inline numtk::vec4<type> operator*(type s, numtk::vec4<type> const& v) { return v*s; }
 
 namespace numtk {
 

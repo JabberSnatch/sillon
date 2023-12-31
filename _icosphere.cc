@@ -57,6 +57,8 @@ void ConstantResources(void* _pstate,
     CHECKCALL(vkMapMemory, _vulkan->device, staging_buffer.memory, 0, VK_WHOLE_SIZE, 0,
               &staging_area);
 
+    numtk::vec3f* vertices = (numtk::vec3f*)staging_area;
+    numtk::vec3u* triangles = (numtk::vec3u*)(vertices+12);
     {
         static const auto spherical_to_cartesian = [](numtk::vec3f const& v){
             // v = { lat, long, elevation }
@@ -70,7 +72,6 @@ void ConstantResources(void* _pstate,
             };
         };
 
-        numtk::vec3f* vertices = (numtk::vec3f*)staging_area;
         static constexpr float kPoleLat = 90.f*numtk::kDegrees;
         static constexpr float kCommonLat = 26.57f*numtk::kDegrees;
         static constexpr float kLongIncrement = 36.f*numtk::kDegrees;
@@ -86,6 +87,32 @@ void ConstantResources(void* _pstate,
         vertices[9] = spherical_to_cartesian({ kCommonLat, kLongIncrement*8.f, 1.f });
         vertices[10] = spherical_to_cartesian({ -kCommonLat, kLongIncrement*9.f, 1.f });
         vertices[11] = spherical_to_cartesian({ -kPoleLat, 0.f, 1.f });
+    }
+
+    {
+        triangles[0] = { 0, 1, 3 };
+        triangles[1] = { 0, 3, 5 };
+        triangles[2] = { 0, 5, 7 };
+        triangles[3] = { 0, 7, 9 };
+        triangles[4] = { 0, 9, 1 };
+
+        triangles[5] = { 11, 10, 8 };
+        triangles[6] = { 11, 8, 6 };
+        triangles[7] = { 11, 6, 4 };
+        triangles[8] = { 11, 4, 2 };
+        triangles[9] = { 11, 2, 10 };
+
+        triangles[10] = { 1, 2, 3 };
+        triangles[11] = { 3, 4, 5 };
+        triangles[12] = { 5, 6, 7 };
+        triangles[13] = { 7, 8, 9 };
+        triangles[14] = { 9, 10, 1 };
+
+        triangles[15] = { 10, 9, 8 };
+        triangles[16] = { 8, 7, 6 };
+        triangles[17] = { 6, 5, 4 };
+        triangles[18] = { 4, 3, 2 };
+        triangles[19] = { 2, 1, 10 };
     }
 }
 
