@@ -1,8 +1,8 @@
-#include "_icosphere.h"
+#include "_icosphere.hh"
 
 #include "loader/iotk.hpp"
-#include "numtk.h"
-#include "vktk.hpp"
+#include "numtk.hh"
+#include "vktk.hh"
 
 #include <iostream>
 

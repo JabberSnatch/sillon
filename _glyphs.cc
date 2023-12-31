@@ -1,6 +1,6 @@
-#include "_glyphs.h"
+#include "_glyphs.hh"
 
-#include "vktk.hpp"
+#include "vktk.hh"
 #include "loader/iotk.hpp"
 
 #include <iostream>

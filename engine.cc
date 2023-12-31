@@ -1,9 +1,9 @@
-#include "vktk.hpp"
+#include "vktk.hh"
 #include "loader/iotk.hpp"
 #include "loader/bstk.hpp"
 
-#include "_glyphs.h"
-#include "_icosphere.h"
+#include "_glyphs.hh"
+#include "_icosphere.hh"
 
 #include <cstdio>
 #include <cstdint>

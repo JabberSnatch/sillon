@@ -10,8 +10,8 @@
 
 #include <vulkan/vulkan.h>
 
-#include "vktk.hpp"
-#include "numtk.h"
+#include "vktk.hh"
+#include "numtk.hh"
 
 #include <shaderc/shaderc.hpp>
 

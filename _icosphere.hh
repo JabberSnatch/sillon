@@ -1,9 +1,9 @@
 #pragma once
 
-#include "vktk.hpp"
+#include "vktk.hh"
 #include "loader/iotk.hpp"
 
-namespace Glyphs
+namespace Icosphere
 {
 
 struct Interface
