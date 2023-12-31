@@ -12,7 +12,7 @@ add_library(vktk STATIC vktk.cc)
 target_link_libraries(vktk PRIVATE Vulkan::Vulkan Vulkan::shaderc_combined)
 set_property(TARGET vktk PROPERTY CXX_STANDARD 20)
 
-add_library(sillon MODULE engine.cc _glyphs.cc)
+add_library(sillon MODULE engine.cc _glyphs.cc _icosphere.cc)
 target_link_libraries(sillon PRIVATE vktk loader_interface)
 set_property(TARGET sillon PROPERTY CXX_STANDARD 20)
 

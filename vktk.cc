@@ -11,6 +11,7 @@
 #include <vulkan/vulkan.h>
 
 #include "vktk.hpp"
+#include "numtk.h"
 
 #include <shaderc/shaderc.hpp>
 
@@ -333,6 +334,19 @@ VkPipeline Context::CreatePipeline(VkPipelineLayout _layout,
                                    VkRenderPass _renderPass,
                                    std::vector<PipelineStage> const& _stages)
 {
+    return CreatePipeline(_layout,
+                          _renderPass,
+                          _stages,
+                          VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP,
+                          {});
+}
+
+VkPipeline Context::CreatePipeline(VkPipelineLayout _layout,
+                                   VkRenderPass _renderPass,
+                                   std::vector<PipelineStage> const& _stages,
+                                   VkPrimitiveTopology _topology,
+                                   std::vector<VertexInput> const& _input)
+{
     std::vector<VkPipelineShaderStageCreateInfo> shader_stages{};
     shader_stages.reserve(_stages.size());
 
@@ -373,11 +387,38 @@ VkPipeline Context::CreatePipeline(VkPipelineLayout _layout,
     vertexInputState.vertexAttributeDescriptionCount = 0u;
     vertexInputState.pVertexAttributeDescriptions = nullptr;
 
+    std::vector<VkVertexInputBindingDescription> inputBindings = {};
+    std::vector<VkVertexInputAttributeDescription> inputAttributes = {};
+    for (VertexInput const& input : _input)
+    {
+        VkVertexInputBindingDescription binding = {};
+        binding.binding = input.binding;
+        binding.stride = input.stride;
+        binding.inputRate = input.rate;
+
+        VkVertexInputAttributeDescription attribute = {};
+        attribute.location = input.location;
+        attribute.binding = input.binding;
+        attribute.format = input.format;
+        attribute.offset = input.offset;
+
+        inputBindings.push_back(binding);
+        inputAttributes.push_back(attribute);
+    }
+
+    if (!_input.empty())
+    {
+        vertexInputState.vertexBindingDescriptionCount = (uint32_t)_input.size();
+        vertexInputState.pVertexBindingDescriptions = inputBindings.data();
+        vertexInputState.vertexAttributeDescriptionCount = (uint32_t)_input.size();
+        vertexInputState.pVertexAttributeDescriptions = inputAttributes.data();
+    }
+
     VkPipelineInputAssemblyStateCreateInfo inputAssemblyState{};
     inputAssemblyState.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     inputAssemblyState.pNext = nullptr;
     inputAssemblyState.flags = 0u;
-    inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+    inputAssemblyState.topology = _topology;
     inputAssemblyState.primitiveRestartEnable = VK_FALSE;
 
     VkDynamicState states[2] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
@@ -572,6 +613,15 @@ Swapchain Context::CreateSwapchain(uint32_t const _size[2])
 
 Buffer Context::CreateBuffer(uint32_t _size, VkBufferUsageFlags _usage)
 {
+    return CreateBuffer(_size, _usage,
+                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+}
+
+Buffer Context::CreateBuffer(uint32_t _size,
+                             VkBufferUsageFlags _usage,
+                             VkMemoryPropertyFlags _memory_flags)
+{
     VkBufferCreateInfo create_info{};
     create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     create_info.pNext = nullptr;
@@ -585,11 +635,8 @@ Buffer Context::CreateBuffer(uint32_t _size, VkBufferUsageFlags _usage)
     VkMemoryAllocateInfo allocate_info{};
     allocate_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     allocate_info.pNext = nullptr;
-    allocate_info.allocationSize = _size;
-    allocate_info.memoryTypeIndex =
-        SelectMemoryType(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
-                         | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                         _size);
+    allocate_info.allocationSize = (VkDeviceSize)_size;
+    allocate_info.memoryTypeIndex = SelectMemoryType(_memory_flags, _size);
 
     Buffer buffer{};
     if (allocate_info.memoryTypeIndex == ~0u)
@@ -681,6 +728,18 @@ uint32_t Context::SelectMemoryType(VkMemoryPropertyFlags _flags, uint32_t _requi
         }
     }
     return ~0u;
+}
+
+VkDeviceMemory Context::MemAlloc(VkMemoryPropertyFlags _flags, uint32_t _size)
+{
+    VkMemoryAllocateInfo allocate_info{};
+    allocate_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocate_info.pNext = nullptr;
+    allocate_info.allocationSize = _size;
+    allocate_info.memoryTypeIndex = SelectMemoryType(_flags, _size);
+    VkDeviceMemory device_memory = {};
+    CHECKCALL(vkAllocateMemory, device, &allocate_info, nullptr, &device_memory);
+    return device_memory;
 }
 
 char const* VkResultToStr(VkResult _vkResult)

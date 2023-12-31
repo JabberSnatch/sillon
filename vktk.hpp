@@ -112,9 +112,28 @@ struct Context
                               VkRenderPass _renderPass,
                               std::vector<PipelineStage> const& _stages);
 
+    struct VertexInput {
+        uint32_t location;
+        uint32_t binding;
+        VkVertexInputRate rate;
+        VkFormat format;
+        uint32_t offset;
+        uint32_t stride;
+    };
+    VkPipeline CreatePipeline(VkPipelineLayout _layout,
+                              VkRenderPass _renderPass,
+                              std::vector<PipelineStage> const& _stages,
+                              VkPrimitiveTopology _topology,
+                              std::vector<VertexInput> const& _input);
+
     Swapchain CreateSwapchain(uint32_t const _size[2]);
 
-    Buffer CreateBuffer(uint32_t _size, VkBufferUsageFlags _usage);
+    Buffer CreateBuffer(uint32_t _size,
+                        VkBufferUsageFlags _usage);
+    Buffer CreateBuffer(uint32_t _size,
+                        VkBufferUsageFlags _usage,
+                        VkMemoryPropertyFlags _memory_flags);
+
     Texture CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
                           VkImageType _type, VkFormat _format, VkImageUsageFlags _usage);
 
@@ -125,6 +144,7 @@ struct Context
     VkPhysicalDeviceMemoryProperties memory_properties = {};
 
     uint32_t SelectMemoryType(VkMemoryPropertyFlags _flags, uint32_t _required_size);
+    VkDeviceMemory MemAlloc(VkMemoryPropertyFlags _flags, uint32_t _size);
 
     VkSurfaceKHR surface = {};
     VkDevice device = {};
