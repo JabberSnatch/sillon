@@ -93,7 +93,7 @@ extern "C" {
         context->plugin.Draw = context->glyphs_plugin->Draw;
         context->plugin.Shutdown = context->glyphs_plugin->Shutdown;
         context->plugin.state = context->glyphs_plugin->state;
-#endif
+#else
 
         context->plugin.ConstantResources = context->icosphere_plugin->ConstantResources;
         context->plugin.RenderResources = context->icosphere_plugin->RenderResources;
@@ -101,6 +101,7 @@ extern "C" {
         context->plugin.Draw = context->icosphere_plugin->Draw;
         context->plugin.Shutdown = context->icosphere_plugin->Shutdown;
         context->plugin.state = context->icosphere_plugin->state;
+#endif
 
         if (context->plugin.ConstantResources)
             context->plugin.ConstantResources(context->plugin.state,

@@ -35,7 +35,8 @@ static std::uint32_t const kInstanceExtCount =
     sizeof(kInstanceExtensions) / sizeof(kInstanceExtensions[0]);
 
 static char const* kDeviceExtensions[] = {
-    "VK_KHR_swapchain"
+    "VK_KHR_swapchain",
+    "VK_EXT_scalar_block_layout"
 };
 static std::uint32_t const kDeviceExtCount =
     sizeof(kDeviceExtensions) / sizeof(kDeviceExtensions[0]);

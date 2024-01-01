@@ -10,10 +10,15 @@ namespace {
 
 struct state_t
 {
+    VkDescriptorSetLayout descset_layout;
     VkPipelineLayout pipeline_layout;
+    VkPipeline graphics_pipeline;
     vktk::Buffer index_buffer;
     vktk::Buffer vertex_buffer;
-    void* dummy;
+    vktk::Buffer staging_buffer;
+
+    VkDescriptorPool descriptor_pool;
+    VkDescriptorSet descriptor_set;
 };
 
 void ConstantResources(void* _pstate,
@@ -21,23 +26,60 @@ void ConstantResources(void* _pstate,
 {
     state_t* _state = (state_t*)_pstate;
 
-    VkPushConstantRange push_constants{};
-    push_constants.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    push_constants.offset = 0;
-    push_constants.size = sizeof(numtk::Mat4_t);
+    VkDescriptorPoolSize descpool_sizes[1] = {
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
+    };
+
+    VkDescriptorPoolCreateInfo descpool_create = {};
+    descpool_create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    descpool_create.pNext = nullptr;
+    descpool_create.flags = 0u;
+    descpool_create.maxSets = 1u;
+    descpool_create.poolSizeCount = sizeof(descpool_sizes) / sizeof(descpool_sizes[0]);
+    descpool_create.pPoolSizes = descpool_sizes;
+    CHECKCALL(vkCreateDescriptorPool, _vulkan->device,
+              &descpool_create, nullptr, &_state->descriptor_pool);
+
+    VkDescriptorSetLayoutBinding bindings[1];
+    {
+        VkDescriptorSetLayoutBinding& binding = bindings[0];
+        binding.binding = 0;
+        binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        binding.descriptorCount = 1;
+        binding.stageFlags = VK_SHADER_STAGE_ALL;
+        binding.pImmutableSamplers = nullptr;
+    }
+
+    VkDescriptorSetLayoutCreateInfo descset_create = {};
+    descset_create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    descset_create.pNext = nullptr;
+    descset_create.flags = 0;
+    descset_create.bindingCount = 1;
+    descset_create.pBindings = bindings;
+    CHECKCALL(vkCreateDescriptorSetLayout, _vulkan->device, &descset_create, nullptr,
+              &_state->descset_layout);
+
+    VkDescriptorSetAllocateInfo descset_allocate{};
+    descset_allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    descset_allocate.pNext= nullptr;
+    descset_allocate.descriptorPool = _state->descriptor_pool;
+    descset_allocate.descriptorSetCount = 1u;
+    descset_allocate.pSetLayouts = &_state->descset_layout;
+    CHECKCALL(vkAllocateDescriptorSets, _vulkan->device,
+              &descset_allocate, &_state->descriptor_set);
 
     VkPipelineLayoutCreateInfo pipeline_create{};
     pipeline_create.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipeline_create.pNext = nullptr;
     pipeline_create.flags = 0u;
-    pipeline_create.setLayoutCount = 0u;
-    pipeline_create.pSetLayouts = nullptr;
-    pipeline_create.pushConstantRangeCount = 1u;
-    pipeline_create.pPushConstantRanges = &push_constants;
+    pipeline_create.setLayoutCount = 1;
+    pipeline_create.pSetLayouts = &_state->descset_layout;
+    pipeline_create.pushConstantRangeCount = 0;
+    pipeline_create.pPushConstantRanges = nullptr;
     CHECKCALL(vkCreatePipelineLayout, _vulkan->device, &pipeline_create, nullptr,
               &_state->pipeline_layout);
 
-    vktk::Buffer staging_buffer = _vulkan->CreateBuffer(
+    _state->staging_buffer = _vulkan->CreateBuffer(
         16 * 1024 * 1024,
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
@@ -54,8 +96,9 @@ void ConstantResources(void* _pstate,
         | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
 
     void* staging_area = nullptr;
-    CHECKCALL(vkMapMemory, _vulkan->device, staging_buffer.memory, 0, VK_WHOLE_SIZE, 0,
-              &staging_area);
+    CHECKCALL(vkMapMemory,
+              _vulkan->device, _state->staging_buffer.memory,
+              0, VK_WHOLE_SIZE, 0, &staging_area);
 
     numtk::vec3f* vertices = (numtk::vec3f*)staging_area;
     numtk::vec3u* triangles = (numtk::vec3u*)(vertices+12);
@@ -119,9 +162,11 @@ void ConstantResources(void* _pstate,
     vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->copy_queue);
     command_buffer.Begin();
     command_buffer.BufferCopy(_state->vertex_buffer, 0,
-                              staging_buffer, 0, sizeof(numtk::vec3f)*12);
+                              _state->staging_buffer, 0,
+                              sizeof(numtk::vec3f)*12);
     command_buffer.BufferCopy(_state->index_buffer, 0,
-                              staging_buffer, sizeof(numtk::vec3f)*12, sizeof(numtk::vec3u)*20);
+                              _state->staging_buffer, sizeof(numtk::vec3f)*12,
+                              sizeof(numtk::vec3u)*20);
     command_buffer.End();
 
     VkSubmitInfo submit_info{};
@@ -141,6 +186,56 @@ void RenderResources(void* _pstate,
                      vktk::Context* _vulkan,
                      vktk::Swapchain const& _swapchain)
 {
+    state_t* _state = (state_t*)_pstate;
+
+    static char const vshader[] = R"_(
+    #version 450
+    layout(location = 0) in vec3 iVS_position;
+    layout(std140, set = 0, binding = 0) uniform MatrixBlock {
+        mat4 mvp;
+    };
+    void main() {
+        gl_Position = mvp * vec4(iVS_position, 1.0);
+    }
+    )_";
+    static uint32_t const vsize = sizeof(vshader) - 1u;
+
+    static char const fshader[] = R"_(
+    #version 450
+    layout(location = 0) out vec4 oFS_color;
+    void main() {
+        oFS_color = vec4(1.0, 0.0, 1.0, 1.0);
+    }
+    )_";
+    static uint32_t const fsize = sizeof(fshader) - 1u;
+
+    VkShaderModule vmodule =
+        _vulkan->CompileShader_GLSL(VK_SHADER_STAGE_VERTEX_BIT,
+                                    "vshader",
+                                    vshader,
+                                    vsize);
+
+    VkShaderModule fmodule =
+        _vulkan->CompileShader_GLSL(VK_SHADER_STAGE_FRAGMENT_BIT,
+                                    "fshader",
+                                    fshader,
+                                    fsize);
+
+    _state->graphics_pipeline = _vulkan->CreatePipeline(
+        _state->pipeline_layout,
+        _swapchain.render_pass,
+        {
+            { vmodule, VK_SHADER_STAGE_VERTEX_BIT },
+            { fmodule, VK_SHADER_STAGE_FRAGMENT_BIT },
+        },
+        VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+        {
+            { 0, 0, VK_VERTEX_INPUT_RATE_VERTEX, VK_FORMAT_R32G32B32_SFLOAT, 0, sizeof(float)*3 }
+        }
+    );
+
+    vkDestroyShaderModule(_vulkan->device, vmodule, nullptr);
+    vkDestroyShaderModule(_vulkan->device, fmodule, nullptr);
 }
 
 void Update(void* _pstate,
@@ -155,6 +250,141 @@ void Draw(void* _pstate,
           vktk::Swapchain const& _swapchain,
           VkSemaphore _acquire_semaphore)
 {
+    state_t* _state = (state_t*)_pstate;
+
+    {
+        vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
+        command_buffer.Begin();
+
+        VkImageMemoryBarrier image_barrier = {};
+        image_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        image_barrier.pNext = nullptr;
+        image_barrier.srcAccessMask = 0;
+        image_barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        image_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        image_barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        image_barrier.srcQueueFamilyIndex = 0;
+        image_barrier.dstQueueFamilyIndex = 0;
+        image_barrier.image = _swapchain.images[_swapchain.index];
+        image_barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+
+        vkCmdPipelineBarrier(
+            command_buffer,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            0,
+            0, nullptr,
+            0, nullptr,
+            1, &image_barrier);
+
+        command_buffer.End();
+
+        VkPipelineStageFlags wait_dst_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        VkSubmitInfo submit_info{};
+        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit_info.pNext = nullptr;
+        submit_info.waitSemaphoreCount = 1u;
+        submit_info.pWaitSemaphores = &_acquire_semaphore;
+        submit_info.pWaitDstStageMask = &wait_dst_stage;
+        submit_info.commandBufferCount = 1u;
+        submit_info.pCommandBuffers = &command_buffer.handle;
+        submit_info.signalSemaphoreCount = 0u;
+        submit_info.pSignalSemaphores = nullptr;
+        vkQueueSubmit(_vulkan->present_queue, 1, &submit_info, VK_NULL_HANDLE);
+    }
+
+    {
+        vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
+        command_buffer.Begin();
+
+        VkViewport viewport{};
+        viewport.x = 0.f; viewport.y = 0.f;
+        viewport.width = (float)_swapchain.size.width;
+        viewport.height = (float)_swapchain.size.height;
+        viewport.minDepth = 0.f; viewport.maxDepth = 1.f;
+        vkCmdSetViewport(command_buffer, 0, 1, &viewport);
+
+        VkRect2D scissor{ VkOffset2D{ 0, 0 }, _swapchain.size };
+        vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+
+        VkClearValue clear_value{};
+        clear_value.color.float32[0] = 0.f; clear_value.color.float32[1] = 1.f;
+        clear_value.color.float32[2] = 1.f; clear_value.color.float32[3] = 0.f;
+        clear_value.depthStencil.depth = 0.f;
+        clear_value.depthStencil.stencil = 0;
+        VkRenderPassBeginInfo rp_begin_info{};
+        rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        rp_begin_info.pNext = nullptr;
+        rp_begin_info.renderPass = _swapchain.render_pass;
+        rp_begin_info.framebuffer = _swapchain.framebuffers[_swapchain.index];
+        rp_begin_info.renderArea = VkRect2D{
+            VkOffset2D{ 0, 0 },
+            _swapchain.size
+        };
+        rp_begin_info.clearValueCount = 1;
+        rp_begin_info.pClearValues = &clear_value;
+
+        vkCmdBeginRenderPass(command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+
+        vkCmdBindIndexBuffer(command_buffer, _state->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+        static VkDeviceSize const offset = 0;
+        vkCmdBindVertexBuffers(command_buffer, 0, 1, &_state->vertex_buffer.buffer, &offset);
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->graphics_pipeline);
+
+        vkCmdBindDescriptorSets(command_buffer,
+                                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                _state->pipeline_layout, 0u,
+                                1u, &_state->descriptor_set,
+                                0u, nullptr);
+
+        vkCmdDrawIndexed(command_buffer, 20*3, 1, 0, 0, 0);
+
+        vkCmdEndRenderPass(command_buffer);
+
+        command_buffer.End();
+    }
+
+    {
+        vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
+        command_buffer.Begin();
+
+        VkImageMemoryBarrier image_barrier = {};
+        image_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        image_barrier.pNext = nullptr;
+        image_barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        image_barrier.dstAccessMask = 0;
+        image_barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        image_barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        image_barrier.srcQueueFamilyIndex = 0;
+        image_barrier.dstQueueFamilyIndex = 0;
+        image_barrier.image = _swapchain.images[_swapchain.index];
+        image_barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+
+        vkCmdPipelineBarrier(
+            command_buffer,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+            0,
+            0, nullptr,
+            0, nullptr,
+            1, &image_barrier);
+
+        command_buffer.End();
+
+        VkPipelineStageFlags wait_dst_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        VkSubmitInfo submit_info{};
+        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit_info.pNext = nullptr;
+        submit_info.waitSemaphoreCount = 0u;
+        submit_info.pWaitSemaphores = nullptr;//&_acquire_semaphore;
+        submit_info.pWaitDstStageMask = nullptr;//&wait_dst_stage;
+        submit_info.commandBufferCount = 1u;
+        submit_info.pCommandBuffers = &command_buffer.handle;
+        submit_info.signalSemaphoreCount = 0u;
+        submit_info.pSignalSemaphores = nullptr;
+        vkQueueSubmit(_vulkan->present_queue, 1, &submit_info, VK_NULL_HANDLE);
+    }
+
     VkPresentInfoKHR present_info{};
     present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     present_info.pNext = nullptr;
@@ -164,8 +394,7 @@ void Draw(void* _pstate,
     present_info.pSwapchains = &_swapchain.handle;
     present_info.pImageIndices = &_swapchain.index;
     present_info.pResults = nullptr;
-    CHECKCALL(_vulkan->fp.QueuePresentKHR,
-              _vulkan->present_queue, &present_info);
+    CHECKCALL(_vulkan->fp.QueuePresentKHR, _vulkan->present_queue, &present_info);
 }
 
 void Shutdown(void* _pstate, vktk::Context* _vulkan)
