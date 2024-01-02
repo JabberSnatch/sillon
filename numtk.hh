@@ -111,7 +111,7 @@ struct mat4 : public std::array<scalar, 16>
             data[0], data[4], data[8], data[12],
             data[1], data[5], data[9], data[13],
             data[2], data[6], data[10], data[14],
-            data[3], data[7], data[14], data[15],
+            data[3], data[7], data[11], data[15],
         };
     }
 
@@ -135,6 +135,15 @@ struct mat4 : public std::array<scalar, 16>
             0, (1/how)*inv_tan_half_alpha, 0, 0,
             0, 0, (-(f+n))*inv_fmn, -1,
             0, 0, -2*f*n*inv_fmn, 0
+        };
+    }
+
+    static mat4 Orthographic(scalar w, scalar h, scalar f, scalar n) {
+        return {
+            2/w, 0, 0, 0,
+            0, 2/h, 0, 0,
+            0, 0, -2/(f-n), 0,
+            0, 0, -(f+n)/(f-n), 1
         };
     }
 
