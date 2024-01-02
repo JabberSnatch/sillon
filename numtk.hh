@@ -72,11 +72,22 @@ struct vec4 : public std::array<type, 4>
     vec4 operator/(type s) const { return { x()/s, y()/s, z()/s, w()/s }; }
 };
 
+template <typename type>
+struct mat4 : public std::array<type, 16>
+{
+    vec4<type>& col(uint32_t index) { return *(vec4<type>*)&(this->operator[](index * 4)); }
+
+    vec4<type> const& col(uint32_t index) const {
+        return static_cast<vec4<type> const&>(const_cast<mat4*>(this)->col(index));
+    }
+};
+
 using vec2f = vec2<float>;
 using vec3f = vec3<float>;
 using vec4f = vec4<float>;
 using vec2u = vec2<uint32_t>;
 using vec3u = vec3<uint32_t>;
+using mat4f = mat4<float>;
 
 } // namespace numtk
 
@@ -88,9 +99,6 @@ template <typename type>
 inline numtk::vec4<type> operator*(type s, numtk::vec4<type> const& v) { return v*s; }
 
 namespace numtk {
-
-struct mat3f {};
-struct mat4f {};
 
 using Vec2i_t = std::array<int, 2>;
 using Vec3i64_t = std::array<std::int64_t, 3>;

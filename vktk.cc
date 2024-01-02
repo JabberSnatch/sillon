@@ -206,6 +206,7 @@ Context::Context(uint64_t _hinstance, uint64_t _hwindow)
                       device, &command_pool_info, nullptr, &present_queue.command_pool);
 
             vkGetDeviceQueue(device, present_queue_index, 0, &present_queue.queue);
+            present_queue.family_index = present_queue_index;
         }
 
         {
@@ -218,6 +219,7 @@ Context::Context(uint64_t _hinstance, uint64_t _hwindow)
                       device, &command_pool_info, nullptr, &copy_queue.command_pool);
 
             vkGetDeviceQueue(device, copy_queue_index, 0, &copy_queue.queue);
+            copy_queue.family_index = copy_queue_index;
         }
     }
 

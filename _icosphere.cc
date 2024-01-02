@@ -15,6 +15,7 @@ struct state_t
     VkPipeline graphics_pipeline;
     vktk::Buffer index_buffer;
     vktk::Buffer vertex_buffer;
+    vktk::Buffer matrix_buffer;
     vktk::Buffer staging_buffer;
 
     VkDescriptorPool descriptor_pool;
@@ -95,6 +96,11 @@ void ConstantResources(void* _pstate,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT
         | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
 
+    _state->matrix_buffer = _vulkan->CreateBuffer(
+        16 * sizeof(float),
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT
+        | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+
     void* staging_area = nullptr;
     CHECKCALL(vkMapMemory,
               _vulkan->device, _state->staging_buffer.memory,
@@ -102,6 +108,12 @@ void ConstantResources(void* _pstate,
 
     numtk::vec3f* vertices = (numtk::vec3f*)staging_area;
     numtk::vec3u* triangles = (numtk::vec3u*)(vertices+12);
+    numtk::mat4f* matrices = (numtk::mat4f*)(triangles+20);
+
+    {
+        matrices[0] = numtk::mat4f{
+        };
+    }
 
     {
         static const auto spherical_to_cartesian = [](numtk::vec3f const& v){
@@ -159,27 +171,136 @@ void ConstantResources(void* _pstate,
         triangles[19] = { 2, 1, 10 };
     }
 
-    vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->copy_queue);
-    command_buffer.Begin();
-    command_buffer.BufferCopy(_state->vertex_buffer, 0,
-                              _state->staging_buffer, 0,
-                              sizeof(numtk::vec3f)*12);
-    command_buffer.BufferCopy(_state->index_buffer, 0,
-                              _state->staging_buffer, sizeof(numtk::vec3f)*12,
-                              sizeof(numtk::vec3u)*20);
-    command_buffer.End();
+    vktk::CommandBuffer copy_commands = _vulkan->CreateCommandBuffer(_vulkan->copy_queue);
+    vktk::CommandBuffer present_commands = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
+    VkSemaphore queue_transfer_semaphore = {};
+    {
+        VkSemaphoreCreateInfo create_info = {};
+        create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        create_info.pNext = nullptr;
+        create_info.flags = 0;
+        CHECKCALL(vkCreateSemaphore,
+                  _vulkan->device, &create_info, nullptr, &queue_transfer_semaphore);
+    }
 
-    VkSubmitInfo submit_info{};
-    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit_info.pNext = nullptr;
-    submit_info.waitSemaphoreCount = 0u;
-    submit_info.pWaitSemaphores = nullptr;
-    submit_info.pWaitDstStageMask = nullptr;
-    submit_info.commandBufferCount = 1u;
-    submit_info.pCommandBuffers = &command_buffer.handle;
-    submit_info.signalSemaphoreCount = 0u;
-    submit_info.pSignalSemaphores = nullptr;
-    vkQueueSubmit(_vulkan->copy_queue, 1, &submit_info, VK_NULL_HANDLE);
+    copy_commands.Begin();
+    present_commands.Begin();
+
+    {
+        VkBufferMemoryBarrier base_barrier = {};
+        base_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        base_barrier.pNext = nullptr;
+        base_barrier.srcAccessMask = VK_ACCESS_NONE;
+        base_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        base_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        base_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        base_barrier.buffer = VK_NULL_HANDLE;
+        base_barrier.offset = 0;
+        base_barrier.size = VK_WHOLE_SIZE;
+
+        VkBufferMemoryBarrier buffer_barriers[3];
+        buffer_barriers[0] = base_barrier;
+        buffer_barriers[0].buffer = _state->vertex_buffer;
+        buffer_barriers[1] = base_barrier;
+        buffer_barriers[1].buffer = _state->index_buffer;
+        buffer_barriers[2] = base_barrier;
+        buffer_barriers[2].buffer = _state->matrix_buffer;
+
+        vkCmdPipelineBarrier(
+            copy_commands,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0,
+            0, nullptr,
+            3, buffer_barriers,
+            0, nullptr);
+    }
+
+    uint64_t offset = 0;
+    copy_commands.BufferCopy(_state->vertex_buffer, 0,
+                             _state->staging_buffer, offset,
+                             sizeof(numtk::vec3f)*12);
+    offset += sizeof(numtk::vec3f)*12;
+    copy_commands.BufferCopy(_state->index_buffer, 0,
+                             _state->staging_buffer, offset,
+                             sizeof(numtk::vec3u)*20);
+    offset += sizeof(numtk::vec3u)*20;
+    copy_commands.BufferCopy(_state->matrix_buffer, 0,
+                             _state->staging_buffer, offset,
+                             sizeof(numtk::mat4f));
+
+    {
+        VkBufferMemoryBarrier base_barrier = {};
+        base_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        base_barrier.pNext = nullptr;
+        base_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        base_barrier.dstAccessMask = VK_ACCESS_NONE;
+        base_barrier.srcQueueFamilyIndex = _vulkan->copy_queue.family_index;
+        base_barrier.dstQueueFamilyIndex = _vulkan->present_queue.family_index;
+        base_barrier.buffer = VK_NULL_HANDLE;
+        base_barrier.offset = 0;
+        base_barrier.size = VK_WHOLE_SIZE;
+
+        VkBufferMemoryBarrier buffer_barriers[3];
+        buffer_barriers[0] = base_barrier;
+        buffer_barriers[0].buffer = _state->vertex_buffer;
+        buffer_barriers[0].dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+        buffer_barriers[1] = base_barrier;
+        buffer_barriers[1].buffer = _state->index_buffer;
+        buffer_barriers[1].dstAccessMask = VK_ACCESS_INDEX_READ_BIT;
+        buffer_barriers[2] = base_barrier;
+        buffer_barriers[2].buffer = _state->matrix_buffer;
+        buffer_barriers[2].dstAccessMask = VK_ACCESS_UNIFORM_READ_BIT;
+
+        vkCmdPipelineBarrier(
+            copy_commands,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+            0,
+            0, nullptr,
+            3, buffer_barriers,
+            0, nullptr);
+
+        vkCmdPipelineBarrier(
+            present_commands,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+            0,
+            0, nullptr,
+            3, buffer_barriers,
+            0, nullptr);
+    }
+
+    copy_commands.End();
+    present_commands.End();
+
+    {
+        VkSubmitInfo submit_info{};
+        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit_info.pNext = nullptr;
+        submit_info.waitSemaphoreCount = 0u;
+        submit_info.pWaitSemaphores = nullptr;
+        submit_info.pWaitDstStageMask = nullptr;
+        submit_info.commandBufferCount = 1u;
+        submit_info.pCommandBuffers = &copy_commands.handle;
+        submit_info.signalSemaphoreCount = 1u;
+        submit_info.pSignalSemaphores = &queue_transfer_semaphore;
+        vkQueueSubmit(_vulkan->copy_queue, 1, &submit_info, VK_NULL_HANDLE);
+    }
+
+    {
+        VkSubmitInfo submit_info{};
+        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit_info.pNext = nullptr;
+        submit_info.waitSemaphoreCount = 1u;
+        submit_info.pWaitSemaphores = &queue_transfer_semaphore;
+        submit_info.pWaitDstStageMask = nullptr;
+        submit_info.commandBufferCount = 1u;
+        submit_info.pCommandBuffers = &present_commands.handle;
+        submit_info.signalSemaphoreCount = 0u;
+        submit_info.pSignalSemaphores = nullptr;
+        vkQueueSubmit(_vulkan->present_queue, 1, &submit_info, VK_NULL_HANDLE);
+    }
 }
 
 void RenderResources(void* _pstate,
@@ -236,6 +357,27 @@ void RenderResources(void* _pstate,
 
     vkDestroyShaderModule(_vulkan->device, vmodule, nullptr);
     vkDestroyShaderModule(_vulkan->device, fmodule, nullptr);
+
+    {
+        VkDescriptorBufferInfo buffer_info = {};
+        buffer_info.buffer = _state->matrix_buffer;
+        buffer_info.offset = 0;
+        buffer_info.range = VK_WHOLE_SIZE;
+
+        VkWriteDescriptorSet descriptor_write = {};
+        descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptor_write.pNext = nullptr;
+        descriptor_write.dstSet = _state->descriptor_set;
+        descriptor_write.dstBinding = 0;
+        descriptor_write.dstArrayElement = 0;
+        descriptor_write.descriptorCount = 1;
+        descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        descriptor_write.pImageInfo = nullptr;
+        descriptor_write.pBufferInfo = &buffer_info;
+        descriptor_write.pTexelBufferView = nullptr;
+
+        vkUpdateDescriptorSets(_vulkan->device, 1, &descriptor_write, 0, nullptr);
+    }
 }
 
 void Update(void* _pstate,

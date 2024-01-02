@@ -90,6 +90,7 @@ struct CommandBuffer {
 };
 
 struct Queue {
+    uint32_t family_index;
     VkQueue queue;
     operator VkQueue() { return queue; }
     VkCommandPool command_pool;
