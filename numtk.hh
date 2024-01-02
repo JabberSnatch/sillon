@@ -15,70 +15,191 @@
 
 namespace numtk {
 
-template <typename type>
-struct vec2 : public std::array<type, 2>
+template <typename scalar>
+struct vec2 : public std::array<scalar, 2>
 {
-    type& x() { return this->operator[](0); }
-    type& y() { return this->operator[](1); }
+    scalar& x() { return this->operator[](0); }
+    scalar& y() { return this->operator[](1); }
 
-    type const& x() const { return static_cast<type const&>(const_cast<vec2*>(this)->x()); }
-    type const& y() const { return static_cast<type const&>(const_cast<vec2*>(this)->y()); }
+    scalar const& x() const { return static_cast<scalar const&>(const_cast<vec2*>(this)->x()); }
+    scalar const& y() const { return static_cast<scalar const&>(const_cast<vec2*>(this)->y()); }
 
     vec2 operator+(vec2 const& o) const { return { x()+o.x(), y()+o.y() }; }
     vec2 operator-(vec2 const& o) const { return { x()-o.x(), y()-o.y() }; }
     vec2 operator*(vec2 const& o) const { return { x()*o.x(), y()*o.y() }; }
-    vec2 operator*(type s) const { return { x()*s, y()*s }; }
+    vec2 operator*(scalar s) const { return { x()*s, y()*s }; }
     vec2 operator/(vec2 const& o) const { return { x()/o.x(), y()/o.y() }; }
-    vec2 operator/(type s) const { return { x()/s, y()/s }; }
+    vec2 operator/(scalar s) const { return { x()/s, y()/s }; }
+
+    scalar dot(vec2 const& o) const { return x()*o.x() + y()*o.y(); }
+    float sqrnorm() const { return dot(*this); }
+    float norm() const { return std::sqrt(sqrnorm()); }
+    vec2 normalise() const { return *this * norm(); }
 };
 
-template <typename type>
-struct vec3 : public std::array<type, 3>
+template <typename scalar>
+struct vec3 : public std::array<scalar, 3>
 {
-    type& x() { return this->operator[](0); }
-    type& y() { return this->operator[](1); }
-    type& z() { return this->operator[](2); }
+    scalar& x() { return this->operator[](0); }
+    scalar& y() { return this->operator[](1); }
+    scalar& z() { return this->operator[](2); }
 
-    type const& x() const { return static_cast<type const&>(const_cast<vec3*>(this)->x()); }
-    type const& y() const { return static_cast<type const&>(const_cast<vec3*>(this)->y()); }
-    type const& z() const { return static_cast<type const&>(const_cast<vec3*>(this)->z()); }
+    scalar const& x() const { return static_cast<scalar const&>(const_cast<vec3*>(this)->x()); }
+    scalar const& y() const { return static_cast<scalar const&>(const_cast<vec3*>(this)->y()); }
+    scalar const& z() const { return static_cast<scalar const&>(const_cast<vec3*>(this)->z()); }
 
     vec3 operator+(vec3 const& o) const { return { x()+o.x(), y()+o.y(), z()+o.z() }; }
     vec3 operator-(vec3 const& o) const { return { x()-o.x(), y()-o.y(), z()-o.z() }; }
     vec3 operator*(vec3 const& o) const { return { x()*o.x(), y()*o.y(), z()*o.z() }; }
-    vec3 operator*(type s) const { return { x()*s, y()*s, z()*s }; }
+    vec3 operator*(scalar s) const { return { x()*s, y()*s, z()*s }; }
     vec3 operator/(vec3 const& o) const { return { x()/o.x(), y()/o.y(), z()/o.z() }; }
-    vec3 operator/(type s) const { return { x()/s, y()/s, z()/s }; }
+    vec3 operator/(scalar s) const { return { x()/s, y()/s, z()/s }; }
+
+    scalar dot(vec3 const& o) const { return x()*o.x() + y()*o.y() + z()*o.z(); }
+    float sqrnorm() const { return dot(*this); }
+    float norm() const { return std::sqrt(sqrnorm()); }
+    vec3 normalise() const { return *this * norm(); }
+
+    vec3 cross(vec3 const& o) const {
+        std::array<scalar, 3> const& data = *(std::array<scalar, 3> const*)this;
+        return vec3{
+            data[1]*o[2] - data[2]*o[1],
+            data[2]*o[0] - data[0]*o[2],
+            data[0]*o[1] - data[1]*o[0],
+        };
+    }
 };
 
-template <typename type>
-struct vec4 : public std::array<type, 4>
+template <typename scalar>
+struct vec4 : public std::array<scalar, 4>
 {
-    type& x() { return this->operator[](0); }
-    type& y() { return this->operator[](1); }
-    type& z() { return this->operator[](2); }
-    type& w() { return this->operator[](3); }
+    scalar& x() { return this->operator[](0); }
+    scalar& y() { return this->operator[](1); }
+    scalar& z() { return this->operator[](2); }
+    scalar& w() { return this->operator[](3); }
 
-    type const& x() const { return static_cast<type const&>(const_cast<vec4*>(this)->x()); }
-    type const& y() const { return static_cast<type const&>(const_cast<vec4*>(this)->y()); }
-    type const& z() const { return static_cast<type const&>(const_cast<vec4*>(this)->z()); }
-    type const& w() const { return static_cast<type const&>(const_cast<vec4*>(this)->w()); }
+    scalar const& x() const { return static_cast<scalar const&>(const_cast<vec4*>(this)->x()); }
+    scalar const& y() const { return static_cast<scalar const&>(const_cast<vec4*>(this)->y()); }
+    scalar const& z() const { return static_cast<scalar const&>(const_cast<vec4*>(this)->z()); }
+    scalar const& w() const { return static_cast<scalar const&>(const_cast<vec4*>(this)->w()); }
 
     vec4 operator+(vec4 const& o) const { return { x()+o.x(), y()+o.y(), z()+o.z(), w()+o.w() }; }
     vec4 operator-(vec4 const& o) const { return { x()-o.x(), y()-o.y(), z()-o.z(), w()-o.w() }; }
     vec4 operator*(vec4 const& o) const { return { x()*o.x(), y()*o.y(), z()*o.z(), w()*o.w() }; }
-    vec4 operator*(type s) const { return { x()*s, y()*s, z()*s, w()*s }; }
+    vec4 operator*(scalar s) const { return { x()*s, y()*s, z()*s, w()*s }; }
     vec4 operator/(vec4 const& o) const { return { x()/o.x(), y()/o.y(), z()/o.z(), w()/o.w() }; }
-    vec4 operator/(type s) const { return { x()/s, y()/s, z()/s, w()/s }; }
+    vec4 operator/(scalar s) const { return { x()/s, y()/s, z()/s, w()/s }; }
+
+    scalar dot(vec4 const& o) const { return x()*o.x() + y()*o.y() + z()*o.z() + w()*o.w(); }
+    float sqrnorm() const { return dot(*this); }
+    float norm() const { return std::sqrt(sqrnorm()); }
+    vec4 normalise() const { return *this * norm(); }
 };
 
-template <typename type>
-struct mat4 : public std::array<type, 16>
+template <typename scalar>
+struct mat4 : public std::array<scalar, 16>
 {
-    vec4<type>& col(uint32_t index) { return *(vec4<type>*)&(this->operator[](index * 4)); }
+    vec4<scalar>& col(uint32_t index) { return *(vec4<scalar>*)&(this->operator[](index * 4)); }
 
-    vec4<type> const& col(uint32_t index) const {
-        return static_cast<vec4<type> const&>(const_cast<mat4*>(this)->col(index));
+    vec4<scalar> const& col(uint32_t index) const {
+        return static_cast<vec4<scalar> const&>(const_cast<mat4*>(this)->col(index));
+    }
+
+    mat4 transpose() const {
+        std::array<scalar, 16> const& data = *(std::array<scalar, 16> const*)this;
+        return {
+            data[0], data[4], data[8], data[12],
+            data[1], data[5], data[9], data[13],
+            data[2], data[6], data[10], data[14],
+            data[3], data[7], data[14], data[15],
+        };
+    }
+
+    mat4 operator*(mat4 const& o) const {
+        mat4 const lt = transpose();
+        #define ColumnDot(l, r) lt.col(l).dot(o.col(r))
+        return {
+            ColumnDot(0, 0), ColumnDot(1, 0), ColumnDot(2, 0), ColumnDot(3, 0),
+            ColumnDot(0, 1), ColumnDot(1, 1), ColumnDot(2, 1), ColumnDot(3, 1),
+            ColumnDot(0, 2), ColumnDot(1, 2), ColumnDot(2, 2), ColumnDot(3, 2),
+            ColumnDot(0, 3), ColumnDot(1, 3), ColumnDot(2, 3), ColumnDot(3, 3),
+        };
+        #undef ColumnDot
+    }
+
+    static mat4 Perspective(scalar n, scalar f, scalar alpha, scalar how) {
+        scalar const inv_tan_half_alpha = 1 / std::tan(alpha / 2);
+        scalar const inv_fmn = 1 / (f-n);
+        return {
+            inv_tan_half_alpha, 0, 0, 0,
+            0, (1/how)*inv_tan_half_alpha, 0, 0,
+            0, 0, (-(f+n))*inv_fmn, -1,
+            0, 0, -2*f*n*inv_fmn, 0
+        };
+    }
+
+    static mat4 View(vec3<scalar> const& _f, vec3<scalar> const& _u, vec3<scalar> const& _p) {
+        using vec3s = vec3<scalar>;
+        vec3s const l = _u.cross(_f).normalise();
+        vec3s const p = _p * -1;
+        vec3s const t{ p.dot(l), p.dot(_u), p.dot(_f) };
+        return {
+            l[0], _u[0], _f[0], 0,
+            l[1], _u[1], _f[1], 0,
+            l[2], _u[2], _f[2], 0,
+            t[0], t[1], t[2], 1
+        };
+    }
+
+    static mat4 InvPerspective(scalar n, scalar f, scalar alpha, scalar how) {
+        scalar const tan_half_alpha = std::tan(alpha / 2);
+        return {
+            tan_half_alpha, 0, 0, 0,
+            0, how * tan_half_alpha, 0, 0,
+            0, 0, 0, (f-n)/(-2*f*n),
+            0, 0, -1, (f+n)/(2*f*n)
+        };
+    }
+
+    static mat4 InvView(vec3<scalar> const& _f, vec3<scalar> const& _u, vec3<scalar> const& _p) {
+        using vec3s = vec3<scalar>;
+        vec3s const l = _u.cross(_f).normalise();
+        return {
+            l[0], l[1], l[2], 0,
+            _u[0], _u[1], _u[2], 0,
+            _f[0], _f[1], _f[2], 0,
+            _p[0], _p[1], _p[2], 1
+        };
+    }
+};
+
+template <typename scalar>
+struct quat : public std::array<scalar, 4>
+{
+    static quat AngleAxis(scalar _angle, numtk::vec3<scalar> const& _axis)
+    {
+        scalar const half_angle = _angle / 2;
+        scalar const sin_ha = std::sin(half_angle);
+        return quat{
+            std::cos(half_angle),
+            _axis[0] * sin_ha,
+            _axis[1] * sin_ha,
+            _axis[2] * sin_ha
+        };
+    }
+
+    quat operator+(quat const& o) {
+        return (vec4<scalar> const&)o + *(vec4<scalar> const*)this;
+    }
+
+    quat operator*(quat const& o) {
+        std::array<scalar, 4> const& data = *(std::array<scalar, 4> const*)this;
+        return {
+            data[0]*o[0] - data[1]*o[1] - data[2]*o[2] - data[3]*o[3],
+            data[0]*o[1] + data[1]*o[0] + data[2]*o[3] - data[3]*o[2],
+            data[0]*o[2] - data[1]*o[3] + data[2]*o[0] + data[3]*o[1],
+            data[0]*o[3] + data[1]*o[2] - data[2]*o[1] + data[3]*o[0]
+        };
     }
 };
 
@@ -88,15 +209,16 @@ using vec4f = vec4<float>;
 using vec2u = vec2<uint32_t>;
 using vec3u = vec3<uint32_t>;
 using mat4f = mat4<float>;
+using quatf = quat<float>;
 
 } // namespace numtk
 
-template <typename type>
-inline numtk::vec2<type> operator*(type s, numtk::vec2<type> const& v) { return v*s; }
-template <typename type>
-inline numtk::vec3<type> operator*(type s, numtk::vec3<type> const& v) { return v*s; }
-template <typename type>
-inline numtk::vec4<type> operator*(type s, numtk::vec4<type> const& v) { return v*s; }
+template <typename scalar>
+inline numtk::vec2<scalar> operator*(scalar s, numtk::vec2<scalar> const& v) { return v*s; }
+template <typename scalar>
+inline numtk::vec3<scalar> operator*(scalar s, numtk::vec3<scalar> const& v) { return v*s; }
+template <typename scalar>
+inline numtk::vec4<scalar> operator*(scalar s, numtk::vec4<scalar> const& v) { return v*s; }
 
 namespace numtk {
 
