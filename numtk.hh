@@ -128,8 +128,8 @@ struct mat4 : public std::array<scalar, 16>
     }
 
     static mat4 Perspective(scalar n, scalar f, scalar alpha, scalar how) {
-        scalar const inv_tan_half_alpha = 1 / std::tan(alpha / 2);
-        scalar const inv_fmn = 1 / (f-n);
+        scalar const inv_tan_half_alpha = scalar(1) / std::tan(alpha / scalar(2));
+        scalar const inv_fmn = scalar(1) / (f-n);
         return {
             inv_tan_half_alpha, 0, 0, 0,
             0, (1/how)*inv_tan_half_alpha, 0, 0,
@@ -150,8 +150,7 @@ struct mat4 : public std::array<scalar, 16>
     static mat4 View(vec3<scalar> const& _f, vec3<scalar> const& _u, vec3<scalar> const& _p) {
         using vec3s = vec3<scalar>;
         vec3s const l = _u.cross(_f).normalise();
-        vec3s const p = _p * -1;
-        vec3s const t{ p.dot(l), p.dot(_u), p.dot(_f) };
+        vec3s const t{ _p.dot(l), _p.dot(_u), _p.dot(_f) };
         return {
             l[0], _u[0], _f[0], 0,
             l[1], _u[1], _f[1], 0,
@@ -173,11 +172,12 @@ struct mat4 : public std::array<scalar, 16>
     static mat4 InvView(vec3<scalar> const& _f, vec3<scalar> const& _u, vec3<scalar> const& _p) {
         using vec3s = vec3<scalar>;
         vec3s const l = _u.cross(_f).normalise();
+        vec3s const p = _p * -1;
         return {
             l[0], l[1], l[2], 0,
             _u[0], _u[1], _u[2], 0,
             _f[0], _f[1], _f[2], 0,
-            _p[0], _p[1], _p[2], 1
+            p[0], p[1], p[2], 1
         };
     }
 };

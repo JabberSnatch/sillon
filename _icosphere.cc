@@ -112,8 +112,8 @@ void ConstantResources(void* _pstate,
 
     {
         matrices[0] =
-            numtk::mat4f::View({ 0.f, 0.f, 1.f }, { 0.f, 1.f, 0.f }, { 0.f, 0.f, -3.f })
-            * numtk::mat4f::Perspective(0.1f, 100.f, 90.f, 1.f);
+            numtk::mat4f::Perspective(0.1f, 100.f, 90.f*numtk::kDegrees, 1.f)
+            * numtk::mat4f::View({ 0.f, 0.f, 1.f }, { 0.f, 1.f, 0.f }, { 0.f, 0.f, -3.f });
     }
 
     {
@@ -317,8 +317,7 @@ void RenderResources(void* _pstate,
         mat4 mvp;
     };
     void main() {
-        vec4 position = mvp * vec4(iVS_position, 1.0);
-        gl_Position = position / position.w;
+        gl_Position = mvp * vec4(iVS_position, 1.0);
     }
     )_";
     static uint32_t const vsize = sizeof(vshader) - 1u;
