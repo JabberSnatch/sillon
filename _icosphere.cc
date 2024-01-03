@@ -91,8 +91,13 @@ void ConstantResources(void* _pstate,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT
         | VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
 
+    struct VertexData {
+        numtk::vec3f position;
+        numtk::vec3f normal;
+    };
+
     _state->vertex_buffer = _vulkan->CreateBuffer(
-        12 * sizeof(float) * 3,
+        12 * sizeof(VertexData),
         VK_BUFFER_USAGE_TRANSFER_DST_BIT
         | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
 
@@ -106,14 +111,14 @@ void ConstantResources(void* _pstate,
               _vulkan->device, _state->staging_buffer.memory,
               0, VK_WHOLE_SIZE, 0, &staging_area);
 
-    numtk::vec3f* vertices = (numtk::vec3f*)staging_area;
+    VertexData* vertices = (VertexData*)staging_area;
     numtk::vec3u* triangles = (numtk::vec3u*)(vertices+12);
     numtk::mat4f* matrices = (numtk::mat4f*)(triangles+20);
 
     {
         matrices[0] =
             numtk::mat4f::Perspective(0.1f, 100.f, 90.f*numtk::kDegrees, 1.f)
-            * numtk::mat4f::View({ 0.f, 0.f, 1.f }, { 0.f, 1.f, 0.f }, { 0.f, 0.f, -3.f });
+            * numtk::mat4f::View({ 0.f, 0.f, 1.f }, { 0.f, 1.f, 0.f }, { 0.f, 0.f, -1.7f });
     }
 
     {
@@ -132,18 +137,31 @@ void ConstantResources(void* _pstate,
         static constexpr float kPoleLat = 90.f*numtk::kDegrees;
         static constexpr float kCommonLat = 26.57f*numtk::kDegrees;
         static constexpr float kLongIncrement = 36.f*numtk::kDegrees;
-        vertices[0] = spherical_to_cartesian({ kPoleLat, 0.f, 1.f });
-        vertices[1] = spherical_to_cartesian({ kCommonLat, kLongIncrement*0.f, 1.f });
-        vertices[2] = spherical_to_cartesian({ -kCommonLat, kLongIncrement*1.f, 1.f });
-        vertices[3] = spherical_to_cartesian({ kCommonLat, kLongIncrement*2.f, 1.f });
-        vertices[4] = spherical_to_cartesian({ -kCommonLat, kLongIncrement*3.f, 1.f });
-        vertices[5] = spherical_to_cartesian({ kCommonLat, kLongIncrement*4.f, 1.f });
-        vertices[6] = spherical_to_cartesian({ -kCommonLat, kLongIncrement*5.f, 1.f });
-        vertices[7] = spherical_to_cartesian({ kCommonLat, kLongIncrement*6.f, 1.f });
-        vertices[8] = spherical_to_cartesian({ -kCommonLat, kLongIncrement*7.f, 1.f });
-        vertices[9] = spherical_to_cartesian({ kCommonLat, kLongIncrement*8.f, 1.f });
-        vertices[10] = spherical_to_cartesian({ -kCommonLat, kLongIncrement*9.f, 1.f });
-        vertices[11] = spherical_to_cartesian({ -kPoleLat, 0.f, 1.f });
+        vertices[0].position = spherical_to_cartesian({ kPoleLat, 0.f, 1.f });
+        vertices[1].position = spherical_to_cartesian({ kCommonLat, kLongIncrement*0.f, 1.f });
+        vertices[2].position = spherical_to_cartesian({ -kCommonLat, kLongIncrement*1.f, 1.f });
+        vertices[3].position = spherical_to_cartesian({ kCommonLat, kLongIncrement*2.f, 1.f });
+        vertices[4].position = spherical_to_cartesian({ -kCommonLat, kLongIncrement*3.f, 1.f });
+        vertices[5].position = spherical_to_cartesian({ kCommonLat, kLongIncrement*4.f, 1.f });
+        vertices[6].position = spherical_to_cartesian({ -kCommonLat, kLongIncrement*5.f, 1.f });
+        vertices[7].position = spherical_to_cartesian({ kCommonLat, kLongIncrement*6.f, 1.f });
+        vertices[8].position = spherical_to_cartesian({ -kCommonLat, kLongIncrement*7.f, 1.f });
+        vertices[9].position = spherical_to_cartesian({ kCommonLat, kLongIncrement*8.f, 1.f });
+        vertices[10].position = spherical_to_cartesian({ -kCommonLat, kLongIncrement*9.f, 1.f });
+        vertices[11].position = spherical_to_cartesian({ -kPoleLat, 0.f, 1.f });
+
+        vertices[0].normal = vertices[0].position.normalise();
+        vertices[1].normal = vertices[1].position.normalise();
+        vertices[2].normal = vertices[2].position.normalise();
+        vertices[3].normal = vertices[3].position.normalise();
+        vertices[4].normal = vertices[4].position.normalise();
+        vertices[5].normal = vertices[5].position.normalise();
+        vertices[6].normal = vertices[6].position.normalise();
+        vertices[7].normal = vertices[7].position.normalise();
+        vertices[8].normal = vertices[8].position.normalise();
+        vertices[9].normal = vertices[9].position.normalise();
+        vertices[10].normal = vertices[10].position.normalise();
+        vertices[11].normal = vertices[11].position.normalise();
     }
 
     {
@@ -220,8 +238,8 @@ void ConstantResources(void* _pstate,
     uint64_t offset = 0;
     copy_commands.BufferCopy(_state->vertex_buffer, 0,
                              _state->staging_buffer, offset,
-                             sizeof(numtk::vec3f)*12);
-    offset += sizeof(numtk::vec3f)*12;
+                             sizeof(VertexData)*12);
+    offset += sizeof(VertexData)*12;
     copy_commands.BufferCopy(_state->index_buffer, 0,
                              _state->staging_buffer, offset,
                              sizeof(numtk::vec3u)*20);
@@ -313,20 +331,24 @@ void RenderResources(void* _pstate,
     static char const vshader[] = R"_(
     #version 450
     layout(location = 0) in vec3 iVS_position;
+    layout(location = 1) in vec3 iVS_normal;
+    layout(location = 0) out vec3 oVS_normal;
     layout(std140, set = 0, binding = 0) uniform MatrixBlock {
-        mat4 mvp;
+        mat4 view_projection;
     };
     void main() {
-        gl_Position = mvp * vec4(iVS_position, 1.0);
+        gl_Position = view_projection * vec4(iVS_position, 1.0);
+        oVS_normal = iVS_normal;
     }
     )_";
     static uint32_t const vsize = sizeof(vshader) - 1u;
 
     static char const fshader[] = R"_(
     #version 450
+    layout(location = 0) in vec3 iFS_normal;
     layout(location = 0) out vec4 oFS_color;
     void main() {
-        oFS_color = vec4(1.0, 0.0, 1.0, 1.0);
+        oFS_color = vec4(normalize(iFS_normal) * 0.5 + 0.5, 1.0);
     }
     )_";
     static uint32_t const fsize = sizeof(fshader) - 1u;
@@ -352,7 +374,10 @@ void RenderResources(void* _pstate,
         },
         VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
         {
-            { 0, 0, VK_VERTEX_INPUT_RATE_VERTEX, VK_FORMAT_R32G32B32_SFLOAT, 0, sizeof(float)*3 }
+            { 0, 0, VK_VERTEX_INPUT_RATE_VERTEX, VK_FORMAT_R32G32B32_SFLOAT,
+              0, sizeof(float)*6 },
+            { 1, 1, VK_VERTEX_INPUT_RATE_VERTEX, VK_FORMAT_R32G32B32_SFLOAT,
+              sizeof(float)*3, sizeof(float)*6 },
         }
     );
 
@@ -470,8 +495,10 @@ void Draw(void* _pstate,
         vkCmdBeginRenderPass(command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
         vkCmdBindIndexBuffer(command_buffer, _state->index_buffer, 0, VK_INDEX_TYPE_UINT32);
-        static VkDeviceSize const offset = 0;
+        VkDeviceSize offset = 0;
         vkCmdBindVertexBuffers(command_buffer, 0, 1, &_state->vertex_buffer.buffer, &offset);
+        offset = sizeof(numtk::vec3f);
+        vkCmdBindVertexBuffers(command_buffer, 1, 1, &_state->vertex_buffer.buffer, &offset);
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->graphics_pipeline);
 
         vkCmdBindDescriptorSets(command_buffer,
