@@ -17,6 +17,7 @@ struct state_t
     vktk::Buffer vertex_buffer;
     vktk::Buffer matrix_buffer;
     vktk::Buffer staging_buffer;
+    void* staging_area;
 
     VkDescriptorPool descriptor_pool;
     VkDescriptorSet descriptor_set;
@@ -106,15 +107,15 @@ void ConstantResources(void* _pstate,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT
         | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
 
-    void* staging_area = nullptr;
+    _state->staging_area = nullptr;
     CHECKCALL(vkMapMemory,
               _vulkan->device, _state->staging_buffer.memory,
-              0, VK_WHOLE_SIZE, 0, &staging_area);
+              0, VK_WHOLE_SIZE, 0, &_state->staging_area);
 
-    VertexData* vertices = (VertexData*)staging_area;
+    VertexData* vertices = (VertexData*)_state->staging_area;
     numtk::vec3u* triangles = (numtk::vec3u*)(vertices+12);
-    numtk::mat4f* matrices = (numtk::mat4f*)(triangles+20);
 
+    numtk::mat4f* matrices = (numtk::mat4f*)(triangles+20);
     {
         matrices[0] =
             numtk::mat4f::Perspective(0.1f, 100.f, 90.f*numtk::kDegrees, 1.f)
@@ -205,35 +206,13 @@ void ConstantResources(void* _pstate,
     copy_commands.Begin();
     present_commands.Begin();
 
-    {
-        VkBufferMemoryBarrier base_barrier = {};
-        base_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-        base_barrier.pNext = nullptr;
-        base_barrier.srcAccessMask = VK_ACCESS_NONE;
-        base_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        base_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        base_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        base_barrier.buffer = VK_NULL_HANDLE;
-        base_barrier.offset = 0;
-        base_barrier.size = VK_WHOLE_SIZE;
-
-        VkBufferMemoryBarrier buffer_barriers[3];
-        buffer_barriers[0] = base_barrier;
-        buffer_barriers[0].buffer = _state->vertex_buffer;
-        buffer_barriers[1] = base_barrier;
-        buffer_barriers[1].buffer = _state->index_buffer;
-        buffer_barriers[2] = base_barrier;
-        buffer_barriers[2].buffer = _state->matrix_buffer;
-
-        vkCmdPipelineBarrier(
-            copy_commands,
-            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            0,
-            0, nullptr,
-            3, buffer_barriers,
-            0, nullptr);
-    }
+    copy_commands.BufferTransitions(
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        { { _state->vertex_buffer, VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT },
+          { _state->index_buffer, VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT },
+          { _state->matrix_buffer, VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT },
+        });
 
     uint64_t offset = 0;
     copy_commands.BufferCopy(_state->vertex_buffer, 0,
@@ -248,6 +227,7 @@ void ConstantResources(void* _pstate,
                              _state->staging_buffer, offset,
                              sizeof(numtk::mat4f));
 
+#if 0
     {
         VkBufferMemoryBarrier base_barrier = {};
         base_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
@@ -289,6 +269,7 @@ void ConstantResources(void* _pstate,
             3, buffer_barriers,
             0, nullptr);
     }
+#endif
 
     copy_commands.End();
     present_commands.End();

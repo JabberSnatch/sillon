@@ -308,6 +308,32 @@ void CommandBuffer::BufferCopy(VkBuffer _dst, uint64_t _dst_offset,
     vkCmdCopyBuffer(handle, _src, _dst, 1, &buffer_copy);
 }
 
+void CommandBuffer::BufferTransitions(VkPipelineStageFlags _src_stage,
+                                      VkPipelineStageFlags _dst_stage,
+                                      std::vector<BufferTransition> const& _transitions)
+{
+    std::vector<VkBufferMemoryBarrier> buffer_barriers(_transitions.size());
+    for (std::size_t index = 0; index < _transitions.size(); ++index)
+    {
+        BufferTransition const& transition = _transitions[index];
+        VkBufferMemoryBarrier& barrier = buffer_barriers[index];
+
+        barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        barrier.pNext = nullptr;
+        barrier.srcAccessMask = transition.src_access;
+        barrier.dstAccessMask = transition.dst_access;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.buffer = transition.buffer;
+        barrier.offset = 0;
+        barrier.size = VK_WHOLE_SIZE;
+    }
+
+    vkCmdPipelineBarrier(handle, _src_stage, _dst_stage, 0, 0, nullptr,
+                         buffer_barriers.size(), buffer_barriers.data(),
+                         0, nullptr);
+}
+
 void CommandBuffer::End()
 {
     vkEndCommandBuffer(handle);
@@ -322,7 +348,7 @@ CommandBuffer Context::CreateCommandBuffer(Queue const& queue)
     command_buffer_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     command_buffer_info.commandBufferCount = 1;
 
-    CommandBuffer command_buffer{};
+    CommandBuffer command_buffer{ queue, VK_NULL_HANDLE };
     CHECKCALL(vkAllocateCommandBuffers, device, &command_buffer_info, &command_buffer.handle);
 
     return command_buffer;
