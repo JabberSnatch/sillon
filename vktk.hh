@@ -80,13 +80,18 @@ struct Texture {
     VkDeviceMemory memory;
 };
 
-struct CommandBuffer {
-    VkCommandBuffer handle;
-    operator VkCommandBuffer() { return handle; }
-    void Begin();
-    void BufferCopy(VkBuffer _dst, uint64_t _dst_offset,
-                    VkBuffer _src, uint64_t _src_offset, uint64_t _size);
-    void End();
+struct BufferTransition {
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VkAccessFlags src_access = VK_ACCESS_NONE;
+    VkAccessFlags dst_access = VK_ACCESS_NONE;
+};
+
+struct ImageTransition {
+    VkImage image = VK_NULL_HANDLE;
+    VkAccessFlags src_access = VK_ACCESS_NONE;
+    VkAccessFlags dst_access = VK_ACCESS_NONE;
+    VkImageLayout old_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkImageLayout new_layout = VK_IMAGE_LAYOUT_UNDEFINED;
 };
 
 struct Queue {
@@ -94,6 +99,31 @@ struct Queue {
     VkQueue queue;
     operator VkQueue() { return queue; }
     VkCommandPool command_pool;
+};
+
+struct CommandBuffer {
+    Queue const& queue;
+    VkCommandBuffer handle;
+    operator VkCommandBuffer() { return handle; }
+    void Begin();
+
+    void BufferCopy(VkBuffer _dst, uint64_t _dst_offset,
+                    VkBuffer _src, uint64_t _src_offset, uint64_t _size);
+
+    void BufferTransitions(VkPipelineStageFlags _src_stage,
+                           VkPipelineStageFlags _dst_stage,
+                           std::vector<BufferTransition> const& _transitions);
+
+    void BufferTransitions(CommandBuffer const& _dst,
+                           VkPipelineStageFlags _src_stage,
+                           VkPipelineStageFlags _dst_stage,
+                           std::vector<BufferTransition> const& _transitions);
+
+    void ImageTransitions(VkPipelineStageFlags _src_stage,
+                          VkPipelineStageFlags _dst_stage,
+                          std::vector<ImageTransition> const& _transitions);
+
+    void End();
 };
 
 struct Context
@@ -147,6 +177,7 @@ struct Context
 
     Texture CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
                           VkImageType _type, VkFormat _format, VkImageUsageFlags _usage);
+
 
     FPTable fp = {};
 
