@@ -92,6 +92,7 @@ struct ImageTransition {
     VkAccessFlags dst_access = VK_ACCESS_NONE;
     VkImageLayout old_layout = VK_IMAGE_LAYOUT_UNDEFINED;
     VkImageLayout new_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkImageAspectFlags aspect_flags = VK_IMAGE_ASPECT_NONE;
 };
 
 struct Queue {

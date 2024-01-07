@@ -384,26 +384,18 @@ void Draw(void* _pstate,
         vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
         command_buffer.Begin();
 
-        VkImageMemoryBarrier image_barrier = {};
-        image_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        image_barrier.pNext = nullptr;
-        image_barrier.srcAccessMask = 0;
-        image_barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-        image_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        image_barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        image_barrier.srcQueueFamilyIndex = 0;
-        image_barrier.dstQueueFamilyIndex = 0;
-        image_barrier.image = _swapchain.images[_swapchain.index];
-        image_barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-
-        vkCmdPipelineBarrier(
-            command_buffer,
+        command_buffer.ImageTransitions(
             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            0,
-            0, nullptr,
-            0, nullptr,
-            1, &image_barrier);
+            {
+                { _swapchain.images[_swapchain.index],
+                  VK_ACCESS_NONE,
+                  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                  VK_IMAGE_LAYOUT_UNDEFINED,
+                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                  VK_IMAGE_ASPECT_COLOR_BIT
+                }
+            });
 
         command_buffer.End();
 
@@ -478,8 +470,8 @@ void Draw(void* _pstate,
         submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submit_info.pNext = nullptr;
         submit_info.waitSemaphoreCount = 0u;
-        submit_info.pWaitSemaphores = nullptr;//&_acquire_semaphore;
-        submit_info.pWaitDstStageMask = nullptr;//&wait_dst_stage;
+        submit_info.pWaitSemaphores = nullptr;
+        submit_info.pWaitDstStageMask = nullptr;
         submit_info.commandBufferCount = 1u;
         submit_info.pCommandBuffers = &command_buffer.handle;
         submit_info.signalSemaphoreCount = 0u;
@@ -491,26 +483,18 @@ void Draw(void* _pstate,
         vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
         command_buffer.Begin();
 
-        VkImageMemoryBarrier image_barrier = {};
-        image_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        image_barrier.pNext = nullptr;
-        image_barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-        image_barrier.dstAccessMask = 0;
-        image_barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        image_barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        image_barrier.srcQueueFamilyIndex = 0;
-        image_barrier.dstQueueFamilyIndex = 0;
-        image_barrier.image = _swapchain.images[_swapchain.index];
-        image_barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-
-        vkCmdPipelineBarrier(
-            command_buffer,
+        command_buffer.ImageTransitions(
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-            0,
-            0, nullptr,
-            0, nullptr,
-            1, &image_barrier);
+            {
+                { _swapchain.images[_swapchain.index],
+                  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+                  VK_ACCESS_NONE,
+                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                  VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                  VK_IMAGE_ASPECT_COLOR_BIT
+                }
+            });
 
         command_buffer.End();
 
@@ -519,8 +503,8 @@ void Draw(void* _pstate,
         submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submit_info.pNext = nullptr;
         submit_info.waitSemaphoreCount = 0u;
-        submit_info.pWaitSemaphores = nullptr;//&_acquire_semaphore;
-        submit_info.pWaitDstStageMask = nullptr;//&wait_dst_stage;
+        submit_info.pWaitSemaphores = nullptr;
+        submit_info.pWaitDstStageMask = nullptr;
         submit_info.commandBufferCount = 1u;
         submit_info.pCommandBuffers = &command_buffer.handle;
         submit_info.signalSemaphoreCount = 0u;

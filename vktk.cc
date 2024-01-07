@@ -370,6 +370,31 @@ void CommandBuffer::ImageTransitions(VkPipelineStageFlags _src_stage,
                                      VkPipelineStageFlags _dst_stage,
                                      std::vector<ImageTransition> const& _transitions)
 {
+    std::vector<VkImageMemoryBarrier> barriers(_transitions.size());
+    for (std::size_t index = 0; index < _transitions.size(); ++index)
+    {
+        ImageTransition const& transition = _transitions[index];
+        VkImageMemoryBarrier& barrier = barriers[index];
+
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.pNext = nullptr;
+        barrier.srcAccessMask = transition.src_access;
+        barrier.dstAccessMask = transition.dst_access;
+        barrier.oldLayout = transition.old_layout;
+        barrier.newLayout = transition.new_layout;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = transition.image;
+        barrier.subresourceRange = {
+            transition.aspect_flags,
+            0, VK_REMAINING_MIP_LEVELS,
+            0, VK_REMAINING_ARRAY_LAYERS
+        };
+    }
+
+    vkCmdPipelineBarrier(handle, _src_stage, _dst_stage,
+                         0, 0, nullptr, 0, nullptr,
+                         barriers.size(), barriers.data());
 }
 
 void CommandBuffer::End()
