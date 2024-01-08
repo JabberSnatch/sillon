@@ -262,24 +262,29 @@ void ConstantResources(void* _pstate,
         submit_info.pWaitDstStageMask = nullptr;
         submit_info.commandBufferCount = 1u;
         submit_info.pCommandBuffers = &copy_commands.handle;
-        submit_info.signalSemaphoreCount = 1u;
-        submit_info.pSignalSemaphores = &queue_transfer_semaphore;
+        submit_info.signalSemaphoreCount = 0u;
+        submit_info.pSignalSemaphores = nullptr;//&queue_transfer_semaphore;
         vkQueueSubmit(_vulkan->copy_queue, 1, &submit_info, VK_NULL_HANDLE);
     }
 
     {
+        VkPipelineStageFlags dst_stage_mask =
+            VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+
         VkSubmitInfo submit_info{};
         submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submit_info.pNext = nullptr;
-        submit_info.waitSemaphoreCount = 1u;
-        submit_info.pWaitSemaphores = &queue_transfer_semaphore;
-        submit_info.pWaitDstStageMask = nullptr;
+        submit_info.waitSemaphoreCount = 0u;//1u;
+        submit_info.pWaitSemaphores = nullptr;//&queue_transfer_semaphore;
+        submit_info.pWaitDstStageMask = nullptr;//&dst_stage_mask;
         submit_info.commandBufferCount = 1u;
         submit_info.pCommandBuffers = &present_commands.handle;
         submit_info.signalSemaphoreCount = 0u;
         submit_info.pSignalSemaphores = nullptr;
         vkQueueSubmit(_vulkan->present_queue, 1, &submit_info, VK_NULL_HANDLE);
     }
+
+    vkDestroySemaphore(_vulkan->device, queue_transfer_semaphore, nullptr);
 }
 
 void RenderResources(void* _pstate,
@@ -380,37 +385,14 @@ void Draw(void* _pstate,
 {
     state_t* _state = (state_t*)_pstate;
 
+    VkSemaphore render_semaphore = {};
     {
-        vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
-        command_buffer.Begin();
-
-        command_buffer.ImageTransitions(
-            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            {
-                { _swapchain.images[_swapchain.index],
-                  VK_ACCESS_NONE,
-                  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-                  VK_IMAGE_LAYOUT_UNDEFINED,
-                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                  VK_IMAGE_ASPECT_COLOR_BIT
-                }
-            });
-
-        command_buffer.End();
-
-        VkPipelineStageFlags wait_dst_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        VkSubmitInfo submit_info{};
-        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submit_info.pNext = nullptr;
-        submit_info.waitSemaphoreCount = 1u;
-        submit_info.pWaitSemaphores = &_acquire_semaphore;
-        submit_info.pWaitDstStageMask = &wait_dst_stage;
-        submit_info.commandBufferCount = 1u;
-        submit_info.pCommandBuffers = &command_buffer.handle;
-        submit_info.signalSemaphoreCount = 0u;
-        submit_info.pSignalSemaphores = nullptr;
-        vkQueueSubmit(_vulkan->present_queue, 1, &submit_info, VK_NULL_HANDLE);
+        VkSemaphoreCreateInfo create_info = {};
+        create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        create_info.pNext = nullptr;
+        create_info.flags = 0;
+        CHECKCALL(vkCreateSemaphore,
+                  _vulkan->device, &create_info, nullptr, &render_semaphore);
     }
 
     {
@@ -469,54 +451,21 @@ void Draw(void* _pstate,
         VkSubmitInfo submit_info{};
         submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submit_info.pNext = nullptr;
-        submit_info.waitSemaphoreCount = 0u;
-        submit_info.pWaitSemaphores = nullptr;
-        submit_info.pWaitDstStageMask = nullptr;
+        submit_info.waitSemaphoreCount = 1u;
+        submit_info.pWaitSemaphores = &_acquire_semaphore;
+        submit_info.pWaitDstStageMask = &wait_dst_stage;
         submit_info.commandBufferCount = 1u;
         submit_info.pCommandBuffers = &command_buffer.handle;
-        submit_info.signalSemaphoreCount = 0u;
-        submit_info.pSignalSemaphores = nullptr;
-        vkQueueSubmit(_vulkan->present_queue, 1, &submit_info, VK_NULL_HANDLE);
-    }
-
-    {
-        vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
-        command_buffer.Begin();
-
-        command_buffer.ImageTransitions(
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-            {
-                { _swapchain.images[_swapchain.index],
-                  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-                  VK_ACCESS_NONE,
-                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                  VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                  VK_IMAGE_ASPECT_COLOR_BIT
-                }
-            });
-
-        command_buffer.End();
-
-        VkPipelineStageFlags wait_dst_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        VkSubmitInfo submit_info{};
-        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submit_info.pNext = nullptr;
-        submit_info.waitSemaphoreCount = 0u;
-        submit_info.pWaitSemaphores = nullptr;
-        submit_info.pWaitDstStageMask = nullptr;
-        submit_info.commandBufferCount = 1u;
-        submit_info.pCommandBuffers = &command_buffer.handle;
-        submit_info.signalSemaphoreCount = 0u;
-        submit_info.pSignalSemaphores = nullptr;
+        submit_info.signalSemaphoreCount = 1u;
+        submit_info.pSignalSemaphores = &render_semaphore;
         vkQueueSubmit(_vulkan->present_queue, 1, &submit_info, VK_NULL_HANDLE);
     }
 
     VkPresentInfoKHR present_info{};
     present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     present_info.pNext = nullptr;
-    present_info.waitSemaphoreCount = 0u;
-    present_info.pWaitSemaphores = nullptr;
+    present_info.waitSemaphoreCount = 1u;
+    present_info.pWaitSemaphores = &render_semaphore;
     present_info.swapchainCount = 1;
     present_info.pSwapchains = &_swapchain.handle;
     present_info.pImageIndices = &_swapchain.index;

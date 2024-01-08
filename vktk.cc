@@ -339,30 +339,36 @@ void CommandBuffer::BufferTransitions(CommandBuffer const& _dst,
                                       VkPipelineStageFlags _dst_stage,
                                       std::vector<BufferTransition> const& _transitions)
 {
-    std::vector<VkBufferMemoryBarrier> barriers(_transitions.size());
+    std::vector<VkBufferMemoryBarrier> src_barriers(_transitions.size());
+    std::vector<VkBufferMemoryBarrier> dst_barriers(_transitions.size());
     for (std::size_t index = 0; index < _transitions.size(); ++index)
     {
         BufferTransition const& transition = _transitions[index];
-        VkBufferMemoryBarrier& barrier = barriers[index];
+        VkBufferMemoryBarrier& src_barrier = src_barriers[index];
+        VkBufferMemoryBarrier& dst_barrier = dst_barriers[index];
 
-        barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-        barrier.pNext = nullptr;
-        barrier.srcAccessMask = transition.src_access;
-        barrier.dstAccessMask = transition.dst_access;
-        barrier.srcQueueFamilyIndex = queue.family_index;
-        barrier.dstQueueFamilyIndex = _dst.queue.family_index;
-        barrier.buffer = transition.buffer;
-        barrier.offset = 0;
-        barrier.size = VK_WHOLE_SIZE;
+        src_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        src_barrier.pNext = nullptr;
+        src_barrier.srcAccessMask = transition.src_access;
+        src_barrier.dstAccessMask = VK_ACCESS_NONE;
+        src_barrier.srcQueueFamilyIndex = queue.family_index;
+        src_barrier.dstQueueFamilyIndex = _dst.queue.family_index;
+        src_barrier.buffer = transition.buffer;
+        src_barrier.offset = 0;
+        src_barrier.size = VK_WHOLE_SIZE;
+
+        dst_barrier = src_barrier;
+        dst_barrier.srcAccessMask = VK_ACCESS_NONE;
+        dst_barrier.dstAccessMask = transition.dst_access;
     }
 
     vkCmdPipelineBarrier(handle, _src_stage, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
                          0, 0, nullptr,
-                         barriers.size(), barriers.data(),
+                         src_barriers.size(), src_barriers.data(),
                          0, nullptr);
     vkCmdPipelineBarrier(_dst.handle, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, _dst_stage,
                          0, 0, nullptr,
-                         barriers.size(), barriers.data(),
+                         dst_barriers.size(), dst_barriers.data(),
                          0, nullptr);
 }
 
@@ -459,6 +465,29 @@ VkRenderPass Context::CreateRenderPass(std::vector<RenderPassAttachment> const& 
     renderSubpass.preserveAttachmentCount = 0u;
     renderSubpass.pPreserveAttachments = nullptr;
 
+    VkSubpassDependency dependencies[2];
+    {
+        VkSubpassDependency& dependency = dependencies[0];
+        dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+        dependency.dstSubpass = 0;
+        dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.srcAccessMask = VK_ACCESS_NONE_KHR;
+        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        dependency.dependencyFlags = 0;
+    }
+
+    {
+        VkSubpassDependency& dependency = dependencies[1];
+        dependency.srcSubpass = 0;
+        dependency.dstSubpass = VK_SUBPASS_EXTERNAL;
+        dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        dependency.dstAccessMask = VK_ACCESS_NONE_KHR;
+        dependency.dependencyFlags = 0;
+    }
+
     VkRenderPassCreateInfo renderPass{};
     renderPass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
     renderPass.pNext = nullptr;
@@ -468,7 +497,7 @@ VkRenderPass Context::CreateRenderPass(std::vector<RenderPassAttachment> const& 
     renderPass.subpassCount = 1u;
     renderPass.pSubpasses = &renderSubpass;
     renderPass.dependencyCount = 0u;
-    renderPass.pDependencies = nullptr;
+    renderPass.pDependencies = dependencies;
 
     VkRenderPass render_pass{};
     CHECKCALL(vkCreateRenderPass, device, &renderPass, nullptr, &render_pass);
