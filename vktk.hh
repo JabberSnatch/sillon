@@ -175,6 +175,7 @@ struct Context
     Buffer CreateBuffer(uint32_t _size,
                         VkBufferUsageFlags _usage,
                         VkMemoryPropertyFlags _memory_flags);
+    void DestroyBuffer(Buffer& _buffer);
 
     Texture CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
                           VkImageType _type, VkFormat _format, VkImageUsageFlags _usage);

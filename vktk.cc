@@ -823,6 +823,12 @@ Buffer Context::CreateBuffer(uint32_t _size,
     return buffer;
 }
 
+void Context::DestroyBuffer(Buffer& _buffer)
+{
+    vkFreeMemory(device, _buffer.memory, nullptr);
+    vkDestroyBuffer(device, _buffer, nullptr);
+}
+
 Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
                                VkImageType _type, VkFormat _format, VkImageUsageFlags _usage)
 {

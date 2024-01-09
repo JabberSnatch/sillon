@@ -17,12 +17,13 @@ struct state_t
 {
     VkDescriptorSetLayout descset_layout;
     VkPipelineLayout pipeline_layout;
-    VkPipeline graphics_pipeline;
+    VkPipeline graphics_pipeline = VK_NULL_HANDLE;
     vktk::Buffer index_buffer;
     vktk::Buffer vertex_buffer;
     vktk::Buffer matrix_buffer;
     vktk::Buffer staging_buffer;
     void* staging_area;
+    VkFence upload_fence;
 
     std::vector<RenderSemaphore> render_semaphores;
 
@@ -34,6 +35,15 @@ void ConstantResources(void* _pstate,
                        vktk::Context* _vulkan)
 {
     state_t* _state = (state_t*)_pstate;
+
+    {
+        VkFenceCreateInfo fence_info = {};
+        fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fence_info.pNext = nullptr;
+        fence_info.flags = 0;
+        CHECKCALL(vkCreateFence,
+                  _vulkan->device, &fence_info, nullptr, &_state->upload_fence);
+    }
 
     VkDescriptorPoolSize descpool_sizes[1] = {
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
@@ -200,15 +210,6 @@ void ConstantResources(void* _pstate,
 
     vktk::CommandBuffer copy_commands = _vulkan->CreateCommandBuffer(_vulkan->copy_queue);
     vktk::CommandBuffer present_commands = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
-    VkSemaphore queue_transfer_semaphore = {};
-    {
-        VkSemaphoreCreateInfo create_info = {};
-        create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-        create_info.pNext = nullptr;
-        create_info.flags = 0;
-        CHECKCALL(vkCreateSemaphore,
-                  _vulkan->device, &create_info, nullptr, &queue_transfer_semaphore);
-    }
 
     copy_commands.Begin();
     present_commands.Begin();
@@ -270,8 +271,8 @@ void ConstantResources(void* _pstate,
         submit_info.commandBufferCount = 1u;
         submit_info.pCommandBuffers = &copy_commands.handle;
         submit_info.signalSemaphoreCount = 0u;
-        submit_info.pSignalSemaphores = nullptr;//&queue_transfer_semaphore;
-        vkQueueSubmit(_vulkan->copy_queue, 1, &submit_info, VK_NULL_HANDLE);
+        submit_info.pSignalSemaphores = nullptr;
+        vkQueueSubmit(_vulkan->copy_queue, 1, &submit_info, _state->upload_fence);
     }
 
     {
@@ -281,17 +282,15 @@ void ConstantResources(void* _pstate,
         VkSubmitInfo submit_info{};
         submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submit_info.pNext = nullptr;
-        submit_info.waitSemaphoreCount = 0u;//1u;
-        submit_info.pWaitSemaphores = nullptr;//&queue_transfer_semaphore;
-        submit_info.pWaitDstStageMask = nullptr;//&dst_stage_mask;
+        submit_info.waitSemaphoreCount = 0u;
+        submit_info.pWaitSemaphores = nullptr;
+        submit_info.pWaitDstStageMask = nullptr;
         submit_info.commandBufferCount = 1u;
         submit_info.pCommandBuffers = &present_commands.handle;
         submit_info.signalSemaphoreCount = 0u;
         submit_info.pSignalSemaphores = nullptr;
         vkQueueSubmit(_vulkan->present_queue, 1, &submit_info, VK_NULL_HANDLE);
     }
-
-    vkDestroySemaphore(_vulkan->device, queue_transfer_semaphore, nullptr);
 }
 
 void RenderResources(void* _pstate,
@@ -336,6 +335,9 @@ void RenderResources(void* _pstate,
                                     "fshader",
                                     fshader,
                                     fsize);
+
+    if (_state->graphics_pipeline != VK_NULL_HANDLE)
+        vkDestroyPipeline(_vulkan->device, _state->graphics_pipeline, nullptr);
 
     _state->graphics_pipeline = _vulkan->CreatePipeline(
         _state->pipeline_layout,
@@ -502,6 +504,27 @@ void Draw(void* _pstate,
 
 void Shutdown(void* _pstate, vktk::Context* _vulkan)
 {
+    state_t* _state = (state_t*)_pstate;
+
+    CHECKCALL(vkWaitForFences, _vulkan->device, 1, &_state->upload_fence, VK_TRUE, ~0ull);
+    vkDestroyFence(_vulkan->device, _state->upload_fence, nullptr);
+
+    for (RenderSemaphore render_semaphore : _state->render_semaphores)
+    {
+        CHECKCALL(vkWaitForFences, _vulkan->device, 1, &render_semaphore.fence, VK_TRUE, ~0ull);
+        vkDestroySemaphore(_vulkan->device, render_semaphore.handle, nullptr);
+        vkDestroyFence(_vulkan->device, render_semaphore.fence, nullptr);
+    }
+
+    vkUnmapMemory(_vulkan->device, _state->staging_buffer.memory);
+    _vulkan->DestroyBuffer(_state->index_buffer);
+    _vulkan->DestroyBuffer(_state->vertex_buffer);
+    _vulkan->DestroyBuffer(_state->matrix_buffer);
+    _vulkan->DestroyBuffer(_state->staging_buffer);
+    vkDestroyPipeline(_vulkan->device, _state->graphics_pipeline, nullptr);
+    vkDestroyPipelineLayout(_vulkan->device, _state->pipeline_layout, nullptr);
+    vkDestroyDescriptorSetLayout(_vulkan->device, _state->descset_layout, nullptr);
+    vkDestroyDescriptorPool(_vulkan->device, _state->descriptor_pool, nullptr);
 }
 
 
