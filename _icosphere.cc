@@ -8,6 +8,11 @@
 
 namespace {
 
+struct RenderSemaphore {
+    VkSemaphore handle;
+    VkFence fence;
+};
+
 struct state_t
 {
     VkDescriptorSetLayout descset_layout;
@@ -18,6 +23,8 @@ struct state_t
     vktk::Buffer matrix_buffer;
     vktk::Buffer staging_buffer;
     void* staging_area;
+
+    std::vector<RenderSemaphore> render_semaphores;
 
     VkDescriptorPool descriptor_pool;
     VkDescriptorSet descriptor_set;
@@ -385,14 +392,32 @@ void Draw(void* _pstate,
 {
     state_t* _state = (state_t*)_pstate;
 
-    VkSemaphore render_semaphore = {};
+    std::vector<std::size_t> signaled_fences = {};
+    for (std::size_t index = 0; index < _state->render_semaphores.size(); ++index)
+        if (vkGetFenceStatus(_vulkan->device, _state->render_semaphores[index].fence) == VK_SUCCESS)
+            signaled_fences.push_back(index);
+    for (std::size_t index : signaled_fences)
     {
-        VkSemaphoreCreateInfo create_info = {};
-        create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-        create_info.pNext = nullptr;
-        create_info.flags = 0;
+        vkDestroyFence(_vulkan->device, _state->render_semaphores[index].fence, nullptr);
+        vkDestroySemaphore(_vulkan->device, _state->render_semaphores[index].handle, nullptr);
+        _state->render_semaphores.erase(_state->render_semaphores.begin() + index);
+    }
+
+    RenderSemaphore render_semaphore = {};
+    {
+        VkSemaphoreCreateInfo semaphore_info = {};
+        semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        semaphore_info.pNext = nullptr;
+        semaphore_info.flags = 0;
         CHECKCALL(vkCreateSemaphore,
-                  _vulkan->device, &create_info, nullptr, &render_semaphore);
+                  _vulkan->device, &semaphore_info, nullptr, &render_semaphore.handle);
+
+        VkFenceCreateInfo fence_info = {};
+        fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fence_info.pNext = nullptr;
+        fence_info.flags = 0;
+        CHECKCALL(vkCreateFence,
+                  _vulkan->device, &fence_info, nullptr, &render_semaphore.fence);
     }
 
     {
@@ -457,20 +482,22 @@ void Draw(void* _pstate,
         submit_info.commandBufferCount = 1u;
         submit_info.pCommandBuffers = &command_buffer.handle;
         submit_info.signalSemaphoreCount = 1u;
-        submit_info.pSignalSemaphores = &render_semaphore;
-        vkQueueSubmit(_vulkan->present_queue, 1, &submit_info, VK_NULL_HANDLE);
+        submit_info.pSignalSemaphores = &render_semaphore.handle;
+        vkQueueSubmit(_vulkan->present_queue, 1, &submit_info, render_semaphore.fence);
     }
 
     VkPresentInfoKHR present_info{};
     present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     present_info.pNext = nullptr;
     present_info.waitSemaphoreCount = 1u;
-    present_info.pWaitSemaphores = &render_semaphore;
+    present_info.pWaitSemaphores = &render_semaphore.handle;
     present_info.swapchainCount = 1;
     present_info.pSwapchains = &_swapchain.handle;
     present_info.pImageIndices = &_swapchain.index;
     present_info.pResults = nullptr;
     CHECKCALL(_vulkan->fp.QueuePresentKHR, _vulkan->present_queue, &present_info);
+
+    _state->render_semaphores.push_back(render_semaphore);
 }
 
 void Shutdown(void* _pstate, vktk::Context* _vulkan)
