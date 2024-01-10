@@ -23,27 +23,21 @@ struct state_t
     vktk::Buffer matrix_buffer;
     vktk::Buffer staging_buffer;
     void* staging_area;
-    VkFence upload_fence;
 
+    VkSemaphore copy_semaphore;
+    VkSemaphore upload_semaphore = VK_NULL_HANDLE;
     std::vector<RenderSemaphore> render_semaphores;
 
     VkDescriptorPool descriptor_pool;
     VkDescriptorSet descriptor_set;
+
+    std::vector<VkSemaphore> dead_semaphores;
 };
 
 void ConstantResources(void* _pstate,
                        vktk::Context* _vulkan)
 {
     state_t* _state = (state_t*)_pstate;
-
-    {
-        VkFenceCreateInfo fence_info = {};
-        fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        fence_info.pNext = nullptr;
-        fence_info.flags = 0;
-        CHECKCALL(vkCreateFence,
-                  _vulkan->device, &fence_info, nullptr, &_state->upload_fence);
-    }
 
     VkDescriptorPoolSize descpool_sizes[1] = {
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 },
@@ -262,6 +256,17 @@ void ConstantResources(void* _pstate,
     present_commands.End();
 
     {
+        VkSemaphoreCreateInfo semaphore_info = {};
+        semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        semaphore_info.pNext = nullptr;
+        semaphore_info.flags = 0;
+        CHECKCALL(vkCreateSemaphore,
+                  _vulkan->device, &semaphore_info, nullptr, &_state->copy_semaphore);
+        CHECKCALL(vkCreateSemaphore,
+                  _vulkan->device, &semaphore_info, nullptr, &_state->upload_semaphore);
+    }
+
+    {
         VkSubmitInfo submit_info{};
         submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submit_info.pNext = nullptr;
@@ -270,9 +275,9 @@ void ConstantResources(void* _pstate,
         submit_info.pWaitDstStageMask = nullptr;
         submit_info.commandBufferCount = 1u;
         submit_info.pCommandBuffers = &copy_commands.handle;
-        submit_info.signalSemaphoreCount = 0u;
-        submit_info.pSignalSemaphores = nullptr;
-        vkQueueSubmit(_vulkan->copy_queue, 1, &submit_info, _state->upload_fence);
+        submit_info.signalSemaphoreCount = 1u;
+        submit_info.pSignalSemaphores = &_state->copy_semaphore;
+        vkQueueSubmit(_vulkan->copy_queue, 1, &submit_info, VK_NULL_HANDLE);
     }
 
     {
@@ -282,13 +287,13 @@ void ConstantResources(void* _pstate,
         VkSubmitInfo submit_info{};
         submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submit_info.pNext = nullptr;
-        submit_info.waitSemaphoreCount = 0u;
-        submit_info.pWaitSemaphores = nullptr;
-        submit_info.pWaitDstStageMask = nullptr;
+        submit_info.waitSemaphoreCount = 1u;
+        submit_info.pWaitSemaphores = &_state->copy_semaphore;
+        submit_info.pWaitDstStageMask = &dst_stage_mask;
         submit_info.commandBufferCount = 1u;
         submit_info.pCommandBuffers = &present_commands.handle;
-        submit_info.signalSemaphoreCount = 0u;
-        submit_info.pSignalSemaphores = nullptr;
+        submit_info.signalSemaphoreCount = 1u;
+        submit_info.pSignalSemaphores = &_state->upload_semaphore;
         vkQueueSubmit(_vulkan->present_queue, 1, &submit_info, VK_NULL_HANDLE);
     }
 }
@@ -474,18 +479,32 @@ void Draw(void* _pstate,
 
         command_buffer.End();
 
-        VkPipelineStageFlags wait_dst_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        VkSemaphore wait_semaphores[2] = {
+            _acquire_semaphore,
+            _state->upload_semaphore
+        };
+
+        VkPipelineStageFlags wait_dst_stages[2] = {
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+        };
+
         VkSubmitInfo submit_info{};
         submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submit_info.pNext = nullptr;
-        submit_info.waitSemaphoreCount = 1u;
-        submit_info.pWaitSemaphores = &_acquire_semaphore;
-        submit_info.pWaitDstStageMask = &wait_dst_stage;
+        submit_info.waitSemaphoreCount =
+            (_state->upload_semaphore == VK_NULL_HANDLE)
+            ? 1u : 2u;
+        submit_info.pWaitSemaphores = wait_semaphores;
+        submit_info.pWaitDstStageMask = wait_dst_stages;
         submit_info.commandBufferCount = 1u;
         submit_info.pCommandBuffers = &command_buffer.handle;
         submit_info.signalSemaphoreCount = 1u;
         submit_info.pSignalSemaphores = &render_semaphore.handle;
         vkQueueSubmit(_vulkan->present_queue, 1, &submit_info, render_semaphore.fence);
+
+        _state->dead_semaphores.push_back(_state->upload_semaphore);
+        _state->upload_semaphore = VK_NULL_HANDLE;
     }
 
     VkPresentInfoKHR present_info{};
@@ -506,8 +525,12 @@ void Shutdown(void* _pstate, vktk::Context* _vulkan)
 {
     state_t* _state = (state_t*)_pstate;
 
-    CHECKCALL(vkWaitForFences, _vulkan->device, 1, &_state->upload_fence, VK_TRUE, ~0ull);
-    vkDestroyFence(_vulkan->device, _state->upload_fence, nullptr);
+    vkDestroySemaphore(_vulkan->device, _state->copy_semaphore, nullptr);
+    if (_state->upload_semaphore != VK_NULL_HANDLE)
+        vkDestroySemaphore(_vulkan->device, _state->upload_semaphore, nullptr);
+
+    for (VkSemaphore semaphore : _state->dead_semaphores)
+        vkDestroySemaphore(_vulkan->device, semaphore, nullptr);
 
     for (RenderSemaphore render_semaphore : _state->render_semaphores)
     {
