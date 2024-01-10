@@ -13,8 +13,15 @@ struct RenderSemaphore {
     VkFence fence;
 };
 
+struct VertexData {
+    numtk::vec3f position;
+    numtk::vec3f normal;
+};
+
 struct state_t
 {
+    float time = 0.f;
+
     VkDescriptorSetLayout descset_layout;
     VkPipelineLayout pipeline_layout;
     VkPipeline graphics_pipeline = VK_NULL_HANDLE;
@@ -102,11 +109,6 @@ void ConstantResources(void* _pstate,
         20 * sizeof(uint32_t) * 3,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT
         | VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
-
-    struct VertexData {
-        numtk::vec3f position;
-        numtk::vec3f normal;
-    };
 
     _state->vertex_buffer = _vulkan->CreateBuffer(
         12 * sizeof(VertexData),
@@ -324,7 +326,9 @@ void RenderResources(void* _pstate,
     layout(location = 0) in vec3 iFS_normal;
     layout(location = 0) out vec4 oFS_color;
     void main() {
-        oFS_color = vec4(normalize(iFS_normal) * 0.5 + 0.5, 1.0);
+        vec3 base_color = normalize(iFS_normal) * 0.5 + 0.5;
+        base_color = base_color * clamp(0.4 + dot(normalize(iFS_normal), normalize(vec3(0.0, 1.0, -1.0))), 0.0, 1.0);
+        oFS_color = vec4(base_color, 1.0);
     }
     )_";
     static uint32_t const fsize = sizeof(fshader) - 1u;
@@ -390,6 +394,9 @@ void Update(void* _pstate,
             iotk::input_t const* _input,
             iotk::input_t const* _lastInput)
 {
+    state_t* _state = (state_t*)_pstate;
+
+    _state->time += _input->time_delta;
 }
 
 void Draw(void* _pstate,
@@ -425,6 +432,89 @@ void Draw(void* _pstate,
         fence_info.flags = 0;
         CHECKCALL(vkCreateFence,
                   _vulkan->device, &fence_info, nullptr, &render_semaphore.fence);
+    }
+
+    {
+        numtk::vec3f forward = { std::sin(_state->time), 0.f, std::cos(_state->time) };
+        numtk::vec3f position = 2.f*numtk::vec3f{ -std::sin(_state->time), 0.f, -std::cos(_state->time) };
+
+        uint64_t offset = sizeof(VertexData)*12 + sizeof(numtk::vec3u)*20 + sizeof(numtk::mat4f);
+        numtk::mat4f* projection = (numtk::mat4f*)((uint8_t*)(_state->staging_area)+offset);
+        float how = (float)_swapchain.size.height / (float)_swapchain.size.width;
+        *projection =
+            numtk::mat4f::Perspective(0.1f, 100.f, 90.f*numtk::kDegrees, how)
+            * numtk::mat4f::View(forward, { 0.f, 1.f, 0.f }, position);
+
+        vktk::CommandBuffer copy_commands = _vulkan->CreateCommandBuffer(_vulkan->copy_queue);
+        vktk::CommandBuffer present_commands = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
+
+        copy_commands.Begin();
+        present_commands.Begin();
+
+        present_commands.BufferTransitions(
+            copy_commands,
+            VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            {
+                { _state->matrix_buffer, VK_ACCESS_UNIFORM_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT }
+            });
+
+        copy_commands.BufferCopy(_state->matrix_buffer, 0,
+                                 _state->staging_buffer, offset,
+                                 sizeof(numtk::mat4f));
+
+        copy_commands.BufferTransitions(
+            present_commands,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+            {
+                { _state->matrix_buffer, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_UNIFORM_READ_BIT }
+            });
+
+        copy_commands.End();
+        present_commands.End();
+
+        {
+            VkSemaphoreCreateInfo semaphore_info = {};
+            semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+            semaphore_info.pNext = nullptr;
+            semaphore_info.flags = 0;
+            CHECKCALL(vkCreateSemaphore,
+                      _vulkan->device, &semaphore_info, nullptr, &_state->copy_semaphore);
+            CHECKCALL(vkCreateSemaphore,
+                      _vulkan->device, &semaphore_info, nullptr, &_state->upload_semaphore);
+        }
+
+        {
+            VkSubmitInfo submit_info{};
+            submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            submit_info.pNext = nullptr;
+            submit_info.waitSemaphoreCount = 0u;
+            submit_info.pWaitSemaphores = nullptr;
+            submit_info.pWaitDstStageMask = nullptr;
+            submit_info.commandBufferCount = 1u;
+            submit_info.pCommandBuffers = &copy_commands.handle;
+            submit_info.signalSemaphoreCount = 1u;
+            submit_info.pSignalSemaphores = &_state->copy_semaphore;
+            vkQueueSubmit(_vulkan->copy_queue, 1, &submit_info, VK_NULL_HANDLE);
+        }
+
+        {
+            VkPipelineStageFlags dst_stage_mask =
+                VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+
+            VkSubmitInfo submit_info{};
+            submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            submit_info.pNext = nullptr;
+            submit_info.waitSemaphoreCount = 1u;
+            submit_info.pWaitSemaphores = &_state->copy_semaphore;
+            submit_info.pWaitDstStageMask = &dst_stage_mask;
+            submit_info.commandBufferCount = 1u;
+            submit_info.pCommandBuffers = &present_commands.handle;
+            submit_info.signalSemaphoreCount = 1u;
+            submit_info.pSignalSemaphores = &_state->upload_semaphore;
+            vkQueueSubmit(_vulkan->present_queue, 1, &submit_info, VK_NULL_HANDLE);
+        }
     }
 
     {
