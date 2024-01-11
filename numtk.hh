@@ -129,12 +129,32 @@ struct mat4 : public std::array<scalar, 16>
 
     static mat4 Perspective(scalar n, scalar f, scalar alpha, scalar how) {
         scalar const inv_tan_half_alpha = scalar(1) / std::tan(alpha / scalar(2));
-        scalar const inv_fmn = scalar(1) / (f-n);
         return {
             inv_tan_half_alpha, 0, 0, 0,
             0, (1/how)*inv_tan_half_alpha, 0, 0,
-            0, 0, (-(f+n))*inv_fmn, -1,
-            0, 0, -2*f*n*inv_fmn, 0
+            0, 0, (-(f+n))/(f-n), -1,
+            0, 0, -2*f*n/(f-n), 0
+        };
+    }
+
+    static mat4 Perspective_VulkanNDC(scalar n, scalar f, scalar alpha, scalar how) {
+        scalar const tan_half_alpha = std::tan(alpha / scalar(2));
+        scalar const depth = f-n;
+        scalar const scale = f*n;
+        return {
+            scalar(1)/tan_half_alpha, 0, 0, 0,
+            0, -scalar(1)/(how*tan_half_alpha), 0, 0,
+            0, 0, -((f+n)/(scalar(2)*depth)) - scalar(1)/scalar(2), -1,
+            0, 0, -scale / depth, 0
+        };
+    }
+
+    static mat4 VulkanNDC() {
+        return {
+            1, 0, 0, 0,
+            0, -1, 0, 0,
+            0, 0, scalar(1)/scalar(2), 0,
+            0, 0, scalar(1)/scalar(2), 1
         };
     }
 

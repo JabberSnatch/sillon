@@ -326,8 +326,8 @@ void RenderResources(void* _pstate,
     layout(location = 0) in vec3 iFS_normal;
     layout(location = 0) out vec4 oFS_color;
     void main() {
-        vec3 base_color = normalize(iFS_normal) * 0.5 + 0.5;
-        base_color = base_color * clamp(0.4 + dot(normalize(iFS_normal), normalize(vec3(0.0, 1.0, -1.0))), 0.0, 1.0);
+        vec3 base_color = normalize(iFS_normal);// * 0.5 + 0.5;
+        base_color = base_color;// * clamp(0.4 + dot(normalize(iFS_normal), normalize(vec3(0.0, 1.0, -1.0))), 0.0, 1.0);
         oFS_color = vec4(base_color, 1.0);
     }
     )_";
@@ -442,7 +442,7 @@ void Draw(void* _pstate,
         numtk::mat4f* projection = (numtk::mat4f*)((uint8_t*)(_state->staging_area)+offset);
         float how = (float)_swapchain.size.height / (float)_swapchain.size.width;
         *projection =
-            numtk::mat4f::Perspective(0.1f, 100.f, 90.f*numtk::kDegrees, how)
+            numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how)
             * numtk::mat4f::View(forward, { 0.f, 1.f, 0.f }, position);
 
         vktk::CommandBuffer copy_commands = _vulkan->CreateCommandBuffer(_vulkan->copy_queue);
@@ -553,7 +553,6 @@ void Draw(void* _pstate,
         vkCmdBindIndexBuffer(command_buffer, _state->index_buffer, 0, VK_INDEX_TYPE_UINT32);
         VkDeviceSize offset = 0;
         vkCmdBindVertexBuffers(command_buffer, 0, 1, &_state->vertex_buffer.buffer, &offset);
-        offset = sizeof(numtk::vec3f);
         vkCmdBindVertexBuffers(command_buffer, 1, 1, &_state->vertex_buffer.buffer, &offset);
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->graphics_pipeline);
 
