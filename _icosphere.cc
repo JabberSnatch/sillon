@@ -129,11 +129,7 @@ void ConstantResources(void* _pstate,
     numtk::vec3u* triangles = (numtk::vec3u*)(vertices+12);
 
     numtk::mat4f* matrices = (numtk::mat4f*)(triangles+20);
-    {
-        matrices[0] =
-            numtk::mat4f::Perspective(0.1f, 100.f, 90.f*numtk::kDegrees, 1.f)
-            * numtk::mat4f::View({ 0.f, 0.f, 1.f }, { 0.f, 1.f, 0.f }, { 0.f, 0.f, -1.7f });
-    }
+    matrices[0] = numtk::mat4f::Constant(0.f);
 
     {
         static const auto spherical_to_cartesian = [](numtk::vec3f const& v){
@@ -313,9 +309,10 @@ void RenderResources(void* _pstate,
     layout(location = 0) out vec3 oVS_normal;
     layout(std140, set = 0, binding = 0) uniform MatrixBlock {
         mat4 view_projection;
+        mat4 model;
     };
     void main() {
-        gl_Position = view_projection * vec4(iVS_position, 1.0);
+        gl_Position = view_projection * model * vec4(iVS_position, 1.0);
         oVS_normal = iVS_normal;
     }
     )_";
@@ -325,9 +322,14 @@ void RenderResources(void* _pstate,
     #version 450
     layout(location = 0) in vec3 iFS_normal;
     layout(location = 0) out vec4 oFS_color;
+    layout(std140, set = 0, binding = 0) uniform MatrixBlock {
+        mat4 view_projection;
+        mat4 model;
+    };
     void main() {
-        vec3 base_color = normalize(iFS_normal);// * 0.5 + 0.5;
-        base_color = base_color;// * clamp(0.4 + dot(normalize(iFS_normal), normalize(vec3(0.0, 1.0, -1.0))), 0.0, 1.0);
+        vec3 base_color = normalize(iFS_normal) * 0.5 + 0.5;
+        base_color = base_color * clamp(1.2 +
+            dot(normalize(mat3(model) * iFS_normal), normalize(vec3(-2.0, 1.0, 1.0))), 0.0, 1.0);
         oFS_color = vec4(base_color, 1.0);
     }
     )_";
@@ -440,10 +442,15 @@ void Draw(void* _pstate,
 
         uint64_t offset = sizeof(VertexData)*12 + sizeof(numtk::vec3u)*20 + sizeof(numtk::mat4f);
         numtk::mat4f* projection = (numtk::mat4f*)((uint8_t*)(_state->staging_area)+offset);
+        numtk::mat4f* model = projection+1;
         float how = (float)_swapchain.size.height / (float)_swapchain.size.width;
+
         *projection =
             numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how)
-            * numtk::mat4f::View(forward, { 0.f, 1.f, 0.f }, position);
+            * numtk::mat4f::View({ 0.f, 0.f, 1.f }, { 0.f, 1.f, 0.f }, { 0.f, 0.f, -2.f });
+
+        *model =
+            numtk::mat4f::View(forward, { 0.f, 1.f, 0.f }, { 0.f, 0.f, 0.f });
 
         vktk::CommandBuffer copy_commands = _vulkan->CreateCommandBuffer(_vulkan->copy_queue);
         vktk::CommandBuffer present_commands = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
@@ -461,7 +468,7 @@ void Draw(void* _pstate,
 
         copy_commands.BufferCopy(_state->matrix_buffer, 0,
                                  _state->staging_buffer, offset,
-                                 sizeof(numtk::mat4f));
+                                 sizeof(numtk::mat4f) * 2.f);
 
         copy_commands.BufferTransitions(
             present_commands,

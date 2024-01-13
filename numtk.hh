@@ -127,34 +127,24 @@ struct mat4 : public std::array<scalar, 16>
         #undef ColumnDot
     }
 
-    static mat4 Perspective(scalar n, scalar f, scalar alpha, scalar how) {
-        scalar const inv_tan_half_alpha = scalar(1) / std::tan(alpha / scalar(2));
+    static mat4 Constant(scalar c) {
         return {
-            inv_tan_half_alpha, 0, 0, 0,
-            0, (1/how)*inv_tan_half_alpha, 0, 0,
-            0, 0, (-(f+n))/(f-n), -1,
-            0, 0, -2*f*n/(f-n), 0
+            c, c, c, c,
+            c, c, c, c,
+            c, c, c, c,
+            c, c, c, c,
         };
     }
 
+    // Rotate everything so Y is down, and X is right.
+    // Maps Z to [0, 1]
     static mat4 Perspective_VulkanNDC(scalar n, scalar f, scalar alpha, scalar how) {
         scalar const tan_half_alpha = std::tan(alpha / scalar(2));
-        scalar const depth = f-n;
-        scalar const scale = f*n;
         return {
-            scalar(1)/tan_half_alpha, 0, 0, 0,
+            -scalar(1)/tan_half_alpha, 0, 0, 0,
             0, -scalar(1)/(how*tan_half_alpha), 0, 0,
-            0, 0, -((f+n)/(scalar(2)*depth)) - scalar(1)/scalar(2), -1,
-            0, 0, -scale / depth, 0
-        };
-    }
-
-    static mat4 VulkanNDC() {
-        return {
-            1, 0, 0, 0,
-            0, -1, 0, 0,
-            0, 0, scalar(1)/scalar(2), 0,
-            0, 0, scalar(1)/scalar(2), 1
+            0, 0, f/(f-n), 1,
+            0, 0, -(f*n)/(f-n), 0
         };
     }
 
@@ -167,6 +157,7 @@ struct mat4 : public std::array<scalar, 16>
         };
     }
 
+    // Forward is in the direction the camera is looking down
     static mat4 View(vec3<scalar> const& _f, vec3<scalar> const& _u, vec3<scalar> const& _p) {
         using vec3s = vec3<scalar>;
         vec3s const l = _u.cross(_f).normalise();
@@ -175,29 +166,18 @@ struct mat4 : public std::array<scalar, 16>
             l[0], _u[0], _f[0], 0,
             l[1], _u[1], _f[1], 0,
             l[2], _u[2], _f[2], 0,
-            t[0], t[1], t[2], 1
-        };
-    }
-
-    static mat4 InvPerspective(scalar n, scalar f, scalar alpha, scalar how) {
-        scalar const tan_half_alpha = std::tan(alpha / 2);
-        return {
-            tan_half_alpha, 0, 0, 0,
-            0, how * tan_half_alpha, 0, 0,
-            0, 0, 0, (f-n)/(-2*f*n),
-            0, 0, -1, (f+n)/(2*f*n)
+            -t[0], -t[1], -t[2], 1
         };
     }
 
     static mat4 InvView(vec3<scalar> const& _f, vec3<scalar> const& _u, vec3<scalar> const& _p) {
         using vec3s = vec3<scalar>;
         vec3s const l = _u.cross(_f).normalise();
-        vec3s const p = _p * -1;
         return {
             l[0], l[1], l[2], 0,
             _u[0], _u[1], _u[2], 0,
             _f[0], _f[1], _f[2], 0,
-            p[0], p[1], p[2], 1
+            _p[0], _p[1], _p[2], 1
         };
     }
 };

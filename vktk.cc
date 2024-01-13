@@ -546,7 +546,7 @@ VkPipeline Context::CreatePipeline(VkPipelineLayout _layout,
     rasterizationState.rasterizerDiscardEnable = VK_FALSE;
     rasterizationState.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
-    rasterizationState.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    rasterizationState.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizationState.depthBiasEnable = VK_FALSE;
     rasterizationState.depthBiasConstantFactor = 0.f;
     rasterizationState.depthBiasClamp = 0.f;
