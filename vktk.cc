@@ -408,6 +408,41 @@ void CommandBuffer::End()
     vkEndCommandBuffer(handle);
 }
 
+Allocation Allocator::Alloc(VkMemoryPropertyFlags _memory_flags,
+                            uint32_t _size)
+{
+    uint32_t memory_type = SelectMemoryType(_memory_flags, _size);
+
+    auto value_iterator = std::lower_bound(
+        heaps.begin(), heaps.end(), memory_type,
+        [](ChunkStorage const& _lhs, uint32_t _rhs) {
+            return _lhs.memory_type < _rhs;
+        });
+    if (value_iterator == heaps.end()
+        || value_iterator->memory_type != memory_type)
+        value_iterator = heaps.insert(value_iterator, ChunkStorage{ memory_type, {}, {} });
+
+    ChunkStorage& storage = *value_iterator;
+    if (storage.chunks.empty())
+        AllocateChunk(storage);
+
+    return Allocation{};
+}
+
+void Allocator::AllocateChunk(ChunkStorage& _storage)
+{
+    VkMemoryAllocateInfo allocate_info{};
+    allocate_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocate_info.pNext = nullptr;
+    allocate_info.allocationSize = kChunkSize;
+    allocate_info.memoryTypeIndex = _storage.memory_type;
+    VkDeviceMemory device_memory = {};
+    CHECKCALL(vkAllocateMemory, device, &allocate_info, nullptr, &device_memory);
+
+    _storage.free_list.push_back(_storage.chunks.size() * (kChunkSize/kBlockSize));
+    _storage.chunks.push_back(device_memory);
+}
+
 CommandBuffer Context::CreateCommandBuffer(Queue const& queue)
 {
     VkCommandBufferAllocateInfo command_buffer_info{};

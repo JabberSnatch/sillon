@@ -127,6 +127,34 @@ struct CommandBuffer {
     void End();
 };
 
+struct Allocation
+{
+    uint32_t memory_type;
+    VkDeviceMemory memory;
+    VkDeviceSize offset;
+    VkDeviceSize size;
+};
+
+struct Allocator
+{
+    static constexpr VkDeviceSize kChunkSize = 128 * 1024 * 1024;
+    static constexpr VkDeviceSize kBlockSize = 128;
+
+    struct ChunkStorage
+    {
+        uint32_t memory_type;
+        std::vector<VkDeviceMemory> chunks; // 128 MB
+        std::vector<uint64_t> free_list;
+    };
+    VkDevice device;
+    std::vector<ChunkStorage> heaps;
+
+    Allocation Alloc(VkMemoryPropertyFlags _memory_flags,
+                     uint32_t _size);
+
+    void AllocateChunk(ChunkStorage& _storage);
+};
+
 struct Context
 {
     Context(uint64_t _hinstance, uint64_t _hwindow);
