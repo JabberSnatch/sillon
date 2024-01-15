@@ -426,7 +426,49 @@ Allocation Allocator::Alloc(VkMemoryPropertyFlags _memory_flags,
     if (storage.chunks.empty())
         AllocateChunk(storage);
 
-    return Allocation{};
+    std::size_t range_index = ~0ull;
+    for (std::size_t index = 0; index < storage.free_list.size(); ++index)
+    {
+        BlockRange& range = storage.free_list[index];
+        if ((range.second - range.first)*kBlockSize > _size)
+        {
+            range_index = index;
+            break;
+        }
+    }
+
+    if (range_index == ~0ull)
+    {
+        range_index = storage.free_list.size();
+        AllocateChunk(storage);
+    }
+
+    BlockRange& range = storage.free_list[range_index];
+    std::size_t chunk_index = range.first / kChunkBlockCount;
+    VkDeviceMemory chunk = storage.chunks[chunk_index];
+
+    VkDeviceSize offset = (range.first % kChunkBlockCount) * kBlockSize;
+    uint64_t block_count = ((_size / kBlockSize) + (_size % kBlockSize != 0) ? 1 : 0);
+    range.first = range.first + block_count;
+    if (range.first == range.second)
+        storage.free_list.erase(storage.free_list.begin() + range_index);
+
+    return Allocation{ memory_type, chunk, offset, _size };
+}
+
+uint32_t Allocator::SelectMemoryType(VkMemoryPropertyFlags _flags, uint32_t _required_size)
+{
+    for (uint32_t index = 0u; index < memory_properties.memoryTypeCount; ++index)
+    {
+        VkMemoryType const& memory_type = memory_properties.memoryTypes[index];
+        VkMemoryHeap const& memory_heap = memory_properties.memoryHeaps[memory_type.heapIndex];
+        if ((memory_type.propertyFlags & _flags) == _flags
+            && memory_heap.size >= _required_size)
+        {
+            return index;
+        }
+    }
+    return ~0u;
 }
 
 void Allocator::AllocateChunk(ChunkStorage& _storage)
@@ -439,7 +481,10 @@ void Allocator::AllocateChunk(ChunkStorage& _storage)
     VkDeviceMemory device_memory = {};
     CHECKCALL(vkAllocateMemory, device, &allocate_info, nullptr, &device_memory);
 
-    _storage.free_list.push_back(_storage.chunks.size() * (kChunkSize/kBlockSize));
+    _storage.free_list.push_back({
+        _storage.chunks.size() * kChunkBlockCount,
+        (_storage.chunks.size()+1) * kChunkBlockCount
+    });
     _storage.chunks.push_back(device_memory);
 }
 

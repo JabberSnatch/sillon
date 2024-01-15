@@ -139,19 +139,24 @@ struct Allocator
 {
     static constexpr VkDeviceSize kChunkSize = 128 * 1024 * 1024;
     static constexpr VkDeviceSize kBlockSize = 128;
+    static constexpr VkDeviceSize kChunkBlockCount = kChunkSize/kBlockSize;
+
+    using BlockRange = std::pair<uint64_t, uint64_t>;
 
     struct ChunkStorage
     {
         uint32_t memory_type;
         std::vector<VkDeviceMemory> chunks; // 128 MB
-        std::vector<uint64_t> free_list;
+        std::vector<BlockRange> free_list;
     };
     VkDevice device;
+    VkPhysicalDeviceMemoryProperties memory_properties;
     std::vector<ChunkStorage> heaps;
 
     Allocation Alloc(VkMemoryPropertyFlags _memory_flags,
                      uint32_t _size);
 
+    uint32_t SelectMemoryType(VkMemoryPropertyFlags _flags, uint32_t _required_size);
     void AllocateChunk(ChunkStorage& _storage);
 };
 
