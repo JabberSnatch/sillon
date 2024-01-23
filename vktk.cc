@@ -223,6 +223,9 @@ Context::Context(uint64_t _hinstance, uint64_t _hwindow)
         }
     }
 
+    allocator.device = device;
+    allocator.memory_properties = memory_properties;
+
     #define DEVICE device
     #define TABLE fp
     kRequiredDeviceProcs(GetDeviceProcAddress_XMacro)
@@ -307,6 +310,18 @@ void CommandBuffer::BufferCopy(VkBuffer _dst, uint64_t _dst_offset,
     buffer_copy.size = _size;
     vkCmdCopyBuffer(handle, _src, _dst, 1, &buffer_copy);
 }
+
+#if 0
+void CommandBuffer::BufferCopy(Buffer const& _dst, uint64_t _dst_offset,
+                               Buffer const& _src, uint64_t _src_offset, uint64_t _size)
+{
+    VkBufferCopy buffer_copy = {};
+    buffer_copy.srcOffset = _src.alloc.offset + _src_offset;
+    buffer_copy.dstOffset = _dst.alloc.offset + _dst_offset;
+    buffer_copy.size = _size;
+    vkCmdCopyBuffer(handle, _src.buffer, _dst.buffer, 1, &buffer_copy);
+}
+#endif
 
 void CommandBuffer::BufferTransitions(VkPipelineStageFlags _src_stage,
                                       VkPipelineStageFlags _dst_stage,
@@ -887,6 +902,7 @@ Buffer Context::CreateBuffer(uint32_t _size,
     create_info.queueFamilyIndexCount = 0;
     create_info.pQueueFamilyIndices = nullptr;
 
+#if 0
     VkMemoryAllocateInfo allocate_info{};
     allocate_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     allocate_info.pNext = nullptr;
@@ -900,12 +916,21 @@ Buffer Context::CreateBuffer(uint32_t _size,
     CHECKCALL(vkCreateBuffer, device, &create_info, nullptr, &buffer.buffer);
     CHECKCALL(vkAllocateMemory, device, &allocate_info, nullptr, &buffer.memory);
     CHECKCALL(vkBindBufferMemory, device, buffer.buffer, buffer.memory, 0);
+#endif
+
+    Buffer buffer = {};
+    buffer.alloc = allocator.Alloc(_memory_flags, _size);
+    CHECKCALL(vkCreateBuffer, device, &create_info, nullptr, &buffer.buffer);
+    CHECKCALL(vkBindBufferMemory, device, buffer.buffer, buffer.alloc.memory, buffer.alloc.offset);
+
     return buffer;
 }
 
 void Context::DestroyBuffer(Buffer& _buffer)
 {
+#if 0
     vkFreeMemory(device, _buffer.memory, nullptr);
+#endif
     vkDestroyBuffer(device, _buffer, nullptr);
 }
 

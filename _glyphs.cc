@@ -152,7 +152,7 @@ void ConstantResources(void* _pstate,
 
     void* mappedData = nullptr;
     CHECKCALL(vkMapMemory, _vulkan->device,
-              _state->staging.memory, 0u, VK_WHOLE_SIZE, 0u, &mappedData);
+              _state->staging.alloc.memory, 0u, VK_WHOLE_SIZE, 0u, &mappedData);
 
     uint8_t* imageBuffer = (uint8_t*)mappedData;
     for (uint32_t y = 0; y < abs(bmp.height); ++y)
@@ -165,7 +165,7 @@ void ConstantResources(void* _pstate,
         }
     }
 
-    vkUnmapMemory(_vulkan->device, _state->staging.memory);
+    vkUnmapMemory(_vulkan->device, _state->staging.alloc.memory);
 
     _state->font = _vulkan->CreateTexture(
         abs(bmp.width), abs(bmp.height), 1,
@@ -517,7 +517,7 @@ void Shutdown(void* _pstate,
     vkFreeMemory(_vulkan->device, _state->font.memory, nullptr);
     vkDestroyImageView(_vulkan->device, _state->font_view, nullptr);
     vkDestroyBuffer(_vulkan->device, _state->staging.buffer, nullptr);
-    vkFreeMemory(_vulkan->device, _state->staging.memory, nullptr);
+    //vkFreeMemory(_vulkan->device, _state->staging.alloc.memory, nullptr);
 
     vkDestroySampler(_vulkan->device, _state->sampler, nullptr);
     vkFreeDescriptorSets(_vulkan->device, _state->descriptor_pool, 1, &_state->descriptor_set);

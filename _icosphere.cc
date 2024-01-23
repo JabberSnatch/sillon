@@ -122,8 +122,9 @@ void ConstantResources(void* _pstate,
 
     _state->staging_area = nullptr;
     CHECKCALL(vkMapMemory,
-              _vulkan->device, _state->staging_buffer.memory,
-              0, VK_WHOLE_SIZE, 0, &_state->staging_area);
+              _vulkan->device, _state->staging_buffer.alloc.memory,
+              _state->staging_buffer.alloc.offset, _state->staging_buffer.alloc.size,
+              0, &_state->staging_area);
 
     VertexData* vertices = (VertexData*)_state->staging_area;
     numtk::vec3u* triangles = (numtk::vec3u*)(vertices+12);
@@ -635,7 +636,7 @@ void Shutdown(void* _pstate, vktk::Context* _vulkan)
         vkDestroyFence(_vulkan->device, render_semaphore.fence, nullptr);
     }
 
-    vkUnmapMemory(_vulkan->device, _state->staging_buffer.memory);
+    vkUnmapMemory(_vulkan->device, _state->staging_buffer.alloc.memory);
     _vulkan->DestroyBuffer(_state->index_buffer);
     _vulkan->DestroyBuffer(_state->vertex_buffer);
     _vulkan->DestroyBuffer(_state->matrix_buffer);

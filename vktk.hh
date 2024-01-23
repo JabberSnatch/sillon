@@ -51,6 +51,39 @@ struct FPTable
 
 struct Context;
 
+struct Allocation
+{
+    uint32_t memory_type;
+    VkDeviceMemory memory;
+    VkDeviceSize offset;
+    VkDeviceSize size;
+};
+
+struct Allocator
+{
+    static constexpr VkDeviceSize kChunkSize = 128 * 1024 * 1024;
+    static constexpr VkDeviceSize kBlockSize = 128;
+    static constexpr VkDeviceSize kChunkBlockCount = kChunkSize/kBlockSize;
+
+    using BlockRange = std::pair<uint64_t, uint64_t>;
+
+    struct ChunkStorage
+    {
+        uint32_t memory_type;
+        std::vector<VkDeviceMemory> chunks; // 128 MB
+        std::vector<BlockRange> free_list;
+    };
+    VkDevice device;
+    VkPhysicalDeviceMemoryProperties memory_properties;
+    std::vector<ChunkStorage> heaps = {};
+
+    Allocation Alloc(VkMemoryPropertyFlags _memory_flags,
+                     uint32_t _size);
+
+    uint32_t SelectMemoryType(VkMemoryPropertyFlags _flags, uint32_t _required_size);
+    void AllocateChunk(ChunkStorage& _storage);
+};
+
 struct Swapchain {
     VkExtent2D size = { 0, 0 };
     Context const* vulkan;
@@ -70,7 +103,8 @@ struct Swapchain {
 
 struct Buffer {
     VkBuffer buffer;
-    VkDeviceMemory memory;
+    Allocation alloc;
+    //VkDeviceMemory memory;
 
     operator VkBuffer() { return buffer; }
 };
@@ -111,6 +145,11 @@ struct CommandBuffer {
     void BufferCopy(VkBuffer _dst, uint64_t _dst_offset,
                     VkBuffer _src, uint64_t _src_offset, uint64_t _size);
 
+#if 0
+    void BufferCopy(Buffer const& _dst, uint64_t _dst_offset,
+                    Buffer const& _src, uint64_t _src_offset, uint64_t _size);
+#endif
+
     void BufferTransitions(VkPipelineStageFlags _src_stage,
                            VkPipelineStageFlags _dst_stage,
                            std::vector<BufferTransition> const& _transitions);
@@ -125,39 +164,6 @@ struct CommandBuffer {
                           std::vector<ImageTransition> const& _transitions);
 
     void End();
-};
-
-struct Allocation
-{
-    uint32_t memory_type;
-    VkDeviceMemory memory;
-    VkDeviceSize offset;
-    VkDeviceSize size;
-};
-
-struct Allocator
-{
-    static constexpr VkDeviceSize kChunkSize = 128 * 1024 * 1024;
-    static constexpr VkDeviceSize kBlockSize = 128;
-    static constexpr VkDeviceSize kChunkBlockCount = kChunkSize/kBlockSize;
-
-    using BlockRange = std::pair<uint64_t, uint64_t>;
-
-    struct ChunkStorage
-    {
-        uint32_t memory_type;
-        std::vector<VkDeviceMemory> chunks; // 128 MB
-        std::vector<BlockRange> free_list;
-    };
-    VkDevice device;
-    VkPhysicalDeviceMemoryProperties memory_properties;
-    std::vector<ChunkStorage> heaps;
-
-    Allocation Alloc(VkMemoryPropertyFlags _memory_flags,
-                     uint32_t _size);
-
-    uint32_t SelectMemoryType(VkMemoryPropertyFlags _flags, uint32_t _required_size);
-    void AllocateChunk(ChunkStorage& _storage);
 };
 
 struct Context
@@ -227,6 +233,8 @@ struct Context
     VkDevice device = {};
     Queue present_queue = {};
     Queue copy_queue = {};
+
+    Allocator allocator = {};
 };
 
 } // namespace vktk
