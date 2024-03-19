@@ -463,7 +463,7 @@ Allocation Allocator::Alloc(VkMemoryPropertyFlags _memory_flags,
     VkDeviceMemory chunk = storage.chunks[chunk_index];
 
     VkDeviceSize offset = (range.first % kChunkBlockCount) * kBlockSize;
-    uint64_t block_count = ((_size / kBlockSize) + (_size % kBlockSize != 0) ? 1 : 0);
+    uint64_t block_count = (_size / kBlockSize) + ((_size % kBlockSize != 0) ? 1 : 0);
     range.first = range.first + block_count;
     if (range.first == range.second)
         storage.free_list.erase(storage.free_list.begin() + range_index);
