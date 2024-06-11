@@ -61,9 +61,9 @@ struct Allocation
 
 struct Allocator
 {
-    static constexpr VkDeviceSize kChunkSize = 128 * 1024 * 1024;
     static constexpr VkDeviceSize kBlockSize = 128;
-    static constexpr VkDeviceSize kChunkBlockCount = kChunkSize/kBlockSize;
+    static constexpr VkDeviceSize kChunkBlockCount = 1024 * 1024;
+    static constexpr VkDeviceSize kChunkSize = kBlockSize * kChunkBlockCount;
 
     using BlockRange = std::pair<uint64_t, uint64_t>;
 
@@ -79,6 +79,9 @@ struct Allocator
 
     Allocation Alloc(VkMemoryPropertyFlags _memory_flags,
                      uint32_t _size);
+    Allocation Alloc(VkMemoryPropertyFlags _memory_flags,
+                     uint32_t _size,
+                     VkDeviceSize _alignment);
 
     uint32_t SelectMemoryType(VkMemoryPropertyFlags _flags, uint32_t _required_size);
     void AllocateChunk(ChunkStorage& _storage);

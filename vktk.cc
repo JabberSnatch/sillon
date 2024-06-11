@@ -471,6 +471,21 @@ Allocation Allocator::Alloc(VkMemoryPropertyFlags _memory_flags,
     return Allocation{ memory_type, chunk, offset, _size };
 }
 
+Allocation Allocator::Alloc(VkMemoryPropertyFlags _memory_flags,
+                            uint32_t _size,
+                            VkDeviceSize _alignment)
+{
+    VkDeviceSize padding = 0;
+    if (_alignment > kBlockSize)
+        padding = _alignment-1;
+    else
+        return Alloc(_memory_flags, _size);
+
+    Allocation alloc = Alloc(_memory_flags, (_size + padding));
+    alloc.offset += _alignment - (alloc.offset & padding);
+    return alloc;
+}
+
 uint32_t Allocator::SelectMemoryType(VkMemoryPropertyFlags _flags, uint32_t _required_size)
 {
     for (uint32_t index = 0u; index < memory_properties.memoryTypeCount; ++index)
@@ -919,8 +934,12 @@ Buffer Context::CreateBuffer(uint32_t _size,
 #endif
 
     Buffer buffer = {};
-    buffer.alloc = allocator.Alloc(_memory_flags, _size);
     CHECKCALL(vkCreateBuffer, device, &create_info, nullptr, &buffer.buffer);
+
+    VkMemoryRequirements reqs = {};
+    vkGetBufferMemoryRequirements(device, buffer.buffer, &reqs);
+
+    buffer.alloc = allocator.Alloc(_memory_flags, _size, reqs.alignment);
     CHECKCALL(vkBindBufferMemory, device, buffer.buffer, buffer.alloc.memory, buffer.alloc.offset);
 
     return buffer;
