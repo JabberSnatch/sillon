@@ -17,7 +17,7 @@ struct Interface
                             vktk::Context* _vulkan,
                             vktk::Swapchain const& _swapchain);
 
-    void (*Update)(void* _state,
+    bool (*Update)(void* _state,
                    vktk::Context* _vulkan,
                    iotk::input_t const* _input,
                    iotk::input_t const* _lastInput);

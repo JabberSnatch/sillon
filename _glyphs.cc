@@ -350,7 +350,7 @@ void RenderResources(void* _pstate,
     vkDestroyShaderModule(_vulkan->device, fmodule, nullptr);
 }
 
-void Update(void* _pstate,
+bool Update(void* _pstate,
             vktk::Context*,
             iotk::input_t const* _input,
             iotk::input_t const* _lastInput)
@@ -359,6 +359,12 @@ void Update(void* _pstate,
 
     for (MovingGlyph* glyph : _state->glyphs)
         glyph->LogicUpdate(_state, _input);
+
+    if (_input->key_down[iotk::eKey::kEscape])
+    {
+        std::cout << "escape down" << std::endl;
+        return false;
+    }
 
     for (uint32_t index = 1u; index < 256; ++index)
     {
@@ -382,6 +388,8 @@ void Update(void* _pstate,
                 std::cout << "key up " << std::hex << index << std::endl;
         }
     }
+
+    return true;
 }
 
 void Draw(void* _pstate,

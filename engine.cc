@@ -25,7 +25,7 @@ struct plugin_t
                             vktk::Context* _vulkan,
                             vktk::Swapchain const& _swapchain);
 
-    void (*Update)(void* _state,
+    bool (*Update)(void* _state,
                    vktk::Context* _vulkan,
                    iotk::input_t const* _input,
                    iotk::input_t const* _lastInput);
@@ -86,7 +86,7 @@ extern "C" {
         context->glyphs_plugin.reset(new Glyphs::Interface());
         context->icosphere_plugin.reset(new Icosphere::Interface());
 
-#if 0
+#if 1
         context->plugin.ConstantResources = context->glyphs_plugin->ConstantResources;
         context->plugin.RenderResources = context->glyphs_plugin->RenderResources;
         context->plugin.Update = context->glyphs_plugin->Update;
@@ -153,15 +153,19 @@ extern "C" {
                                              _context->swapchain);
     }
 
-    DLLEXPORT void ModuleInterface_LogicUpdate(context_t* _context, iotk::input_t const* _input)
+    DLLEXPORT bool ModuleInterface_LogicUpdate(context_t* _context, iotk::input_t const* _input)
     {
+        bool keep_running = true;
+
         if (_context->plugin.Update)
-            _context->plugin.Update(_context->plugin.state,
-                                    _context->vulkan.get(),
-                                    _input,
-                                    &_context->lastInput);
+            keep_running = _context->plugin.Update(_context->plugin.state,
+                                                   _context->vulkan.get(),
+                                                   _input,
+                                                   &_context->lastInput);
 
         _context->lastInput = *_input;
+
+        return keep_running;
     }
 
     DLLEXPORT void ModuleInterface_DrawFrame(context_t* _context, bstk::OSWindow const* _window)

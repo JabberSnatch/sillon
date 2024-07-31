@@ -392,7 +392,7 @@ void RenderResources(void* _pstate,
     }
 }
 
-void Update(void* _pstate,
+bool Update(void* _pstate,
             vktk::Context* _vulkan,
             iotk::input_t const* _input,
             iotk::input_t const* _lastInput)
@@ -400,6 +400,8 @@ void Update(void* _pstate,
     state_t* _state = (state_t*)_pstate;
 
     _state->time += _input->time_delta;
+
+    return true;
 }
 
 void Draw(void* _pstate,
