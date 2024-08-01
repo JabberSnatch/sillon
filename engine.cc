@@ -4,6 +4,7 @@
 
 #include "_glyphs.hh"
 #include "_icosphere.hh"
+#include "_voxels.hh"
 
 #include <cstdio>
 #include <cstdint>
@@ -49,6 +50,7 @@ struct context_t
 
     std::unique_ptr<Glyphs::Interface> glyphs_plugin;
     std::unique_ptr<Icosphere::Interface> icosphere_plugin;
+    std::unique_ptr<Voxels::Interface> voxels_plugin;
     plugin_t plugin;
 };
 
@@ -85,16 +87,27 @@ extern "C" {
 
         context->glyphs_plugin.reset(new Glyphs::Interface());
         context->icosphere_plugin.reset(new Icosphere::Interface());
+        context->voxels_plugin.reset(new Voxels::Interface());
 
 #if 1
+        context->plugin.ConstantResources = context->voxels_plugin->ConstantResources;
+        context->plugin.RenderResources = context->voxels_plugin->RenderResources;
+        context->plugin.Update = context->voxels_plugin->Update;
+        context->plugin.Draw = context->voxels_plugin->Draw;
+        context->plugin.Shutdown = context->voxels_plugin->Shutdown;
+        context->plugin.state = context->voxels_plugin->state;
+#endif
+
+#if 0
         context->plugin.ConstantResources = context->glyphs_plugin->ConstantResources;
         context->plugin.RenderResources = context->glyphs_plugin->RenderResources;
         context->plugin.Update = context->glyphs_plugin->Update;
         context->plugin.Draw = context->glyphs_plugin->Draw;
         context->plugin.Shutdown = context->glyphs_plugin->Shutdown;
         context->plugin.state = context->glyphs_plugin->state;
-#else
+#endif
 
+#if 0
         context->plugin.ConstantResources = context->icosphere_plugin->ConstantResources;
         context->plugin.RenderResources = context->icosphere_plugin->RenderResources;
         context->plugin.Update = context->icosphere_plugin->Update;
