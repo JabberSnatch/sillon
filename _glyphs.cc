@@ -524,6 +524,7 @@ void Shutdown(void* _pstate,
         delete glyph;
 
     vkDestroyPipeline(_vulkan->device, _state->graphics_pipeline, nullptr);
+    _state->graphics_pipeline = VK_NULL_HANDLE;
     vkDestroyPipelineLayout(_vulkan->device, _state->pipeline_layout, nullptr);
 
     vkDestroyImage(_vulkan->device, _state->font.image, nullptr);
