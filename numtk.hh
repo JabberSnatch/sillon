@@ -252,7 +252,7 @@ log2(uint32_t _op)
 {
     if (_op == 0) return ~0u;
     uint32_t res = 0u;
-    while (_op >> 1) { ++res; }
+    while (_op >>= 1) { ++res; }
     return res;
 }
 
