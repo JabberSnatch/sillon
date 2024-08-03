@@ -89,7 +89,7 @@ extern "C" {
         context->icosphere_plugin.reset(new Icosphere::Interface());
         context->voxels_plugin.reset(new Voxels::Interface());
 
-#if 0
+#if 1
         context->plugin.ConstantResources = context->voxels_plugin->ConstantResources;
         context->plugin.RenderResources = context->voxels_plugin->RenderResources;
         context->plugin.Update = context->voxels_plugin->Update;
@@ -98,7 +98,7 @@ extern "C" {
         context->plugin.state = context->voxels_plugin->state;
 #endif
 
-#if 1
+#if 0
         context->plugin.ConstantResources = context->glyphs_plugin->ConstantResources;
         context->plugin.RenderResources = context->glyphs_plugin->RenderResources;
         context->plugin.Update = context->glyphs_plugin->Update;
@@ -133,6 +133,7 @@ extern "C" {
     {
         std::cout << "Shutdown" << std::endl;
 
+        _context->vulkan->WaitPendingDestroys();
         if (_context->plugin.Shutdown)
             _context->plugin.Shutdown(_context->plugin.state,
                                       _context->vulkan.get());
@@ -145,6 +146,7 @@ extern "C" {
     {
         std::cout << "Reload" << std::endl;
 
+        _context->vulkan->WaitPendingDestroys();
         if (_context->plugin.Shutdown)
             _context->plugin.Shutdown(_context->plugin.state,
                                       _context->vulkan.get());
