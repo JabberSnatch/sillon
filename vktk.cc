@@ -237,6 +237,8 @@ Context::Context(uint64_t _hinstance, uint64_t _hwindow)
 
 Context::~Context()
 {
+    WaitPendingDestroys();
+
 #if defined(_WIN32) || defined(__unix__)
     vkDestroySurfaceKHR(instance, surface, nullptr);
 #endif
@@ -950,22 +952,6 @@ Buffer Context::CreateBuffer(uint32_t _size,
     create_info.queueFamilyIndexCount = 0;
     create_info.pQueueFamilyIndices = nullptr;
 
-#if 0
-    VkMemoryAllocateInfo allocate_info{};
-    allocate_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocate_info.pNext = nullptr;
-    allocate_info.allocationSize = (VkDeviceSize)_size;
-    allocate_info.memoryTypeIndex = SelectMemoryType(_memory_flags, _size);
-
-    Buffer buffer{};
-    if (allocate_info.memoryTypeIndex == ~0u)
-        return buffer;
-
-    CHECKCALL(vkCreateBuffer, device, &create_info, nullptr, &buffer.buffer);
-    CHECKCALL(vkAllocateMemory, device, &allocate_info, nullptr, &buffer.memory);
-    CHECKCALL(vkBindBufferMemory, device, buffer.buffer, buffer.memory, 0);
-#endif
-
     Buffer buffer = {};
     CHECKCALL(vkCreateBuffer, device, &create_info, nullptr, &buffer.buffer);
 
@@ -980,9 +966,6 @@ Buffer Context::CreateBuffer(uint32_t _size,
 
 void Context::DestroyBuffer(Buffer& _buffer)
 {
-#if 0
-    vkFreeMemory(device, _buffer.memory, nullptr);
-#endif
     vkDestroyBuffer(device, _buffer, nullptr);
 }
 
@@ -1025,6 +1008,149 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
     CHECKCALL(vkAllocateMemory, device, &allocate_info, nullptr, &texture.memory);
     CHECKCALL(vkBindImageMemory, device, texture.image, texture.memory, 0);
     return texture;
+}
+
+Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
+                               VkImageType _type, VkFormat _format, VkImageUsageFlags _usage,
+                               std::function<void(void*)> const& _upload_callback)
+{
+    Texture result = CreateTexture(_width, _height, _depth, _type, _format, _usage);
+
+    uint64_t staging_size = _width * _height * _depth * VkFormatBytesPerUnit(_format);
+    Buffer staging = CreateBuffer(staging_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+
+    void* mapped_data = nullptr;
+    CHECKCALL(vkMapMemory, device, staging.alloc.memory, 0u, VK_WHOLE_SIZE, 0u, &mapped_data);
+    _upload_callback(mapped_data);
+    vkUnmapMemory(device, staging.alloc.memory);
+
+    vktk::CommandBuffer command_buffer = CreateCommandBuffer(present_queue);
+    command_buffer.Begin();
+
+    VkImageMemoryBarrier image_memory_barrier{};
+    image_memory_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    image_memory_barrier.pNext = nullptr;
+    image_memory_barrier.srcAccessMask = VK_ACCESS_NONE;
+    image_memory_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    image_memory_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    image_memory_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    image_memory_barrier.srcQueueFamilyIndex = 0u;
+    image_memory_barrier.dstQueueFamilyIndex = 0u;
+    image_memory_barrier.image = result.image;
+    image_memory_barrier.subresourceRange = VkImageSubresourceRange{
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        0u, 1u, 0u, 1u
+    };
+
+    VkBufferMemoryBarrier buffer_memory_barrier{};
+    buffer_memory_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    buffer_memory_barrier.pNext = nullptr;
+    buffer_memory_barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
+    buffer_memory_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    buffer_memory_barrier.srcQueueFamilyIndex = 0u;
+    buffer_memory_barrier.dstQueueFamilyIndex = 0u;
+    buffer_memory_barrier.buffer = staging.buffer;
+    buffer_memory_barrier.offset = 0u;
+    buffer_memory_barrier.size = staging_size;
+
+    vkCmdPipelineBarrier(command_buffer,
+                         VK_PIPELINE_STAGE_HOST_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         0u,
+                         0u, nullptr,
+                         1u, &buffer_memory_barrier,
+                         1u, &image_memory_barrier);
+
+    VkBufferImageCopy copy_region{};
+    copy_region.bufferOffset = 0u;
+    copy_region.bufferRowLength = 0u;
+    copy_region.bufferImageHeight = 0u;
+    copy_region.imageSubresource = VkImageSubresourceLayers {
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        0u, 0u, 1u
+    };
+    copy_region.imageOffset = VkOffset3D{ 0u, 0u, 0u };
+    copy_region.imageExtent = VkExtent3D{ _width, _height, _depth };
+
+    vkCmdCopyBufferToImage(command_buffer,
+                           staging.buffer,
+                           result.image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           1,
+                           &copy_region);
+
+    image_memory_barrier.oldLayout = image_memory_barrier.newLayout;
+    image_memory_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    image_memory_barrier.srcAccessMask = image_memory_barrier.dstAccessMask;
+    image_memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(command_buffer,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         0u,
+                         0u, nullptr,
+                         0u, nullptr,
+                         1u, &image_memory_barrier);
+
+    command_buffer.End();
+
+    PendingDestroy pending_destroy = {};
+    pending_destroy.buffer = staging;
+
+    VkFenceCreateInfo fence_info = {};
+    fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fence_info.pNext = nullptr;
+    fence_info.flags = 0;
+    CHECKCALL(vkCreateFence,
+              device, &fence_info, nullptr, &pending_destroy.fence);
+
+    VkSubmitInfo submit_info{};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.pNext = nullptr;
+    submit_info.waitSemaphoreCount = 0u;
+    submit_info.pWaitSemaphores = nullptr;
+    submit_info.pWaitDstStageMask = nullptr;
+    submit_info.commandBufferCount = 1u;
+    submit_info.pCommandBuffers = &command_buffer.handle;
+    submit_info.signalSemaphoreCount = 0u;
+    submit_info.pSignalSemaphores = nullptr;
+    vkQueueSubmit(present_queue, 1, &submit_info, pending_destroy.fence);
+
+    pending_destroys.push_back(pending_destroy);
+
+    return result;
+}
+
+void Context::TryPendingDestroys()
+{
+    std::vector<std::size_t> removed_indices = {};
+    for (std::size_t index = 0u; index < pending_destroys.size(); ++index)
+    {
+        PendingDestroy& pending_destroy = pending_destroys[index];
+        if (vkGetFenceStatus(device, pending_destroy.fence)
+            == VK_SUCCESS)
+        {
+            removed_indices.push_back(index);
+            DestroyBuffer(pending_destroy.buffer);
+            vkDestroyFence(device, pending_destroy.fence, nullptr);
+        }
+    }
+
+    for (std::size_t index = 0u; index < removed_indices.size(); ++index)
+        pending_destroys.erase(
+            std::next(pending_destroys.begin(),
+                      removed_indices[removed_indices.size() - 1 - index])
+        );
+}
+
+void Context::WaitPendingDestroys()
+{
+    for (PendingDestroy const& pending_destroy : pending_destroys)
+    {
+        CHECKCALL(vkWaitForFences, device, 1, &pending_destroy.fence, VK_TRUE, ~0ull);
+        vkDestroyFence(device, pending_destroy.fence, nullptr);
+    }
+    pending_destroys.clear();
 }
 
 VkFramebuffer Swapchain::AcquireNext(VkSemaphore _signal)

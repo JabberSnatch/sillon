@@ -108,7 +108,6 @@ struct Swapchain {
 struct Buffer {
     VkBuffer buffer;
     Allocation alloc;
-    //VkDeviceMemory memory;
 
     operator VkBuffer() { return buffer; }
 };
@@ -231,6 +230,12 @@ struct Context
     Texture CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
                           VkImageType _type, VkFormat _format, VkImageUsageFlags _usage);
 
+    Texture CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
+                          VkImageType _type, VkFormat _format, VkImageUsageFlags _usage,
+                          std::function<void(void*)> const& _upload_callback);
+
+    void TryPendingDestroys();
+    void WaitPendingDestroys();
 
     FPTable fp = {};
 
@@ -247,6 +252,13 @@ struct Context
     Queue copy_queue = {};
 
     Allocator allocator = {};
+
+    struct PendingDestroy
+    {
+        VkFence fence;
+        Buffer buffer;
+    };
+    std::vector<PendingDestroy> pending_destroys = {};
 };
 
 } // namespace vktk

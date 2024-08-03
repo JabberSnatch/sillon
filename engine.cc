@@ -98,7 +98,7 @@ extern "C" {
         context->plugin.state = context->voxels_plugin->state;
 #endif
 
-#if 0
+#if 1
         context->plugin.ConstantResources = context->glyphs_plugin->ConstantResources;
         context->plugin.RenderResources = context->glyphs_plugin->RenderResources;
         context->plugin.Update = context->glyphs_plugin->Update;
@@ -107,7 +107,7 @@ extern "C" {
         context->plugin.state = context->glyphs_plugin->state;
 #endif
 
-#if 1
+#if 0
         context->plugin.ConstantResources = context->icosphere_plugin->ConstantResources;
         context->plugin.RenderResources = context->icosphere_plugin->RenderResources;
         context->plugin.Update = context->icosphere_plugin->Update;
@@ -212,5 +212,7 @@ extern "C" {
 
         vkQueueWaitIdle(_context->vulkan->present_queue);
         vkDestroySemaphore(_context->vulkan->device, acquire_semaphore, nullptr);
+
+        _context->vulkan->TryPendingDestroys();
     }
 }

@@ -17,7 +17,6 @@ struct state_t
     VkPipelineLayout pipeline_layout;
     vktk::Texture font;
     VkImageView font_view;
-    vktk::Buffer staging;
     VkSampler sampler;
     VkDescriptorPool descriptor_pool;
     VkDescriptorSet descriptor_set;
@@ -129,32 +128,23 @@ void ConstantResources(void* _pstate,
     bmptk::BitmapFile bmp{};
     bmptk::Result result = bmptk::LoadBMP(fontfile.data(), &bmp);
 
-    _state->staging = _vulkan->CreateBuffer(
-        abs(bmp.width)*abs(bmp.height),
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-
-    void* mappedData = nullptr;
-    CHECKCALL(vkMapMemory, _vulkan->device,
-              _state->staging.alloc.memory, 0u, VK_WHOLE_SIZE, 0u, &mappedData);
-
-    uint8_t* imageBuffer = (uint8_t*)mappedData;
-    for (uint32_t y = 0; y < abs(bmp.height); ++y)
-    {
-        for (uint32_t x = 0; x < abs(bmp.width); ++x)
-        {
-            bmptk::PixelValue src = bmptk::GetPixel(&bmp, x, y);
-            uint8_t* dst = imageBuffer + x + y*abs(bmp.width);
-            *dst = src.red;
-        }
-    }
-
-    vkUnmapMemory(_vulkan->device, _state->staging.alloc.memory);
-
     _state->font = _vulkan->CreateTexture(
         abs(bmp.width), abs(bmp.height), 1,
         VK_IMAGE_TYPE_2D, VK_FORMAT_R8_UNORM,
         VK_IMAGE_USAGE_TRANSFER_DST_BIT
-        | VK_IMAGE_USAGE_SAMPLED_BIT);
+        | VK_IMAGE_USAGE_SAMPLED_BIT,
+        [&bmp](void* mapped_data){
+            uint8_t* imageBuffer = (uint8_t*)mapped_data;
+            for (uint32_t y = 0; y < abs(bmp.height); ++y)
+            {
+                for (uint32_t x = 0; x < abs(bmp.width); ++x)
+                {
+                    bmptk::PixelValue src = bmptk::GetPixel(&bmp, x, y);
+                    uint8_t* dst = imageBuffer + x + y*abs(bmp.width);
+                    *dst = src.red;
+                }
+            }
+        });
 
     VkImageViewCreateInfo image_view_create{};
     image_view_create.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -170,90 +160,6 @@ void ConstantResources(void* _pstate,
     };
     CHECKCALL(vkCreateImageView, _vulkan->device,
               &image_view_create, nullptr, &_state->font_view);
-
-    vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
-    command_buffer.Begin();
-
-    VkImageMemoryBarrier image_memory_barrier{};
-    image_memory_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    image_memory_barrier.pNext = nullptr;
-    image_memory_barrier.srcAccessMask = VK_ACCESS_NONE;
-    image_memory_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    image_memory_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    image_memory_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    image_memory_barrier.srcQueueFamilyIndex = 0u;
-    image_memory_barrier.dstQueueFamilyIndex = 0u;
-    image_memory_barrier.image = _state->font.image;
-    image_memory_barrier.subresourceRange = VkImageSubresourceRange{
-        VK_IMAGE_ASPECT_COLOR_BIT,
-        0u, 1u, 0u, 1u
-    };
-
-    VkBufferMemoryBarrier buffer_memory_barrier{};
-    buffer_memory_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    buffer_memory_barrier.pNext = nullptr;
-    buffer_memory_barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
-    buffer_memory_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    buffer_memory_barrier.srcQueueFamilyIndex = 0u;
-    buffer_memory_barrier.dstQueueFamilyIndex = 0u;
-    buffer_memory_barrier.buffer = _state->staging.buffer;
-    buffer_memory_barrier.offset = 0u;
-    buffer_memory_barrier.size = abs(bmp.width)*abs(bmp.height);
-
-    vkCmdPipelineBarrier(command_buffer,
-                         VK_PIPELINE_STAGE_HOST_BIT,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         0u,
-                         0u, nullptr,
-                         1u, &buffer_memory_barrier,
-                         1u, &image_memory_barrier);
-
-    VkBufferImageCopy copy_region{};
-    copy_region.bufferOffset = 0u;
-    copy_region.bufferRowLength = 0u;
-    copy_region.bufferImageHeight = 0u;
-    copy_region.imageSubresource = VkImageSubresourceLayers {
-        VK_IMAGE_ASPECT_COLOR_BIT,
-        0u, 0u, 1u
-    };
-    copy_region.imageOffset = VkOffset3D{ 0u, 0u, 0u };
-    copy_region.imageExtent = VkExtent3D{
-        (uint32_t)abs(bmp.width),
-        (uint32_t)abs(bmp.height), 1u };
-
-    vkCmdCopyBufferToImage(command_buffer,
-                           _state->staging.buffer,
-                           _state->font.image,
-                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                           1,
-                           &copy_region);
-
-    image_memory_barrier.oldLayout = image_memory_barrier.newLayout;
-    image_memory_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    image_memory_barrier.srcAccessMask = image_memory_barrier.dstAccessMask;
-    image_memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-    vkCmdPipelineBarrier(command_buffer,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                         0u,
-                         0u, nullptr,
-                         0u, nullptr,
-                         1u, &image_memory_barrier);
-
-    command_buffer.End();
-
-    VkSubmitInfo submit_info{};
-    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit_info.pNext = nullptr;
-    submit_info.waitSemaphoreCount = 0u;
-    submit_info.pWaitSemaphores = nullptr;
-    submit_info.pWaitDstStageMask = nullptr;
-    submit_info.commandBufferCount = 1u;
-    submit_info.pCommandBuffers = &command_buffer.handle;
-    submit_info.signalSemaphoreCount = 0u;
-    submit_info.pSignalSemaphores = nullptr;
-    vkQueueSubmit(_vulkan->present_queue, 1, &submit_info, VK_NULL_HANDLE);
 }
 
 void RenderResources(void* _pstate,
@@ -508,8 +414,6 @@ void Shutdown(void* _pstate,
     vkDestroyImage(_vulkan->device, _state->font.image, nullptr);
     vkFreeMemory(_vulkan->device, _state->font.memory, nullptr);
     vkDestroyImageView(_vulkan->device, _state->font_view, nullptr);
-    vkDestroyBuffer(_vulkan->device, _state->staging.buffer, nullptr);
-    //vkFreeMemory(_vulkan->device, _state->staging.alloc.memory, nullptr);
 
     vkDestroySampler(_vulkan->device, _state->sampler, nullptr);
     vkFreeDescriptorSets(_vulkan->device, _state->descriptor_pool, 1, &_state->descriptor_set);
