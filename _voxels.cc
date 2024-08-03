@@ -71,7 +71,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                         && field1.type == TAG_Byte)
                     {
                         std::cout << "Y " << (int32_t)*(int8_t const*)field1.payload << std::endl;
-                        if (*(int8_t const*)field1.payload != 1)
+                        if (*(int8_t const*)field1.payload != 2)
                             break;
                     }
 
@@ -128,10 +128,10 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
                         NBTLongArray const& block_data = *block_data_field;
                         uint32_t bit_count = numtk::log2(palette_size);
-                        if (palette_size - (1 << bit_count))
+                        if (palette_size - (1 << (bit_count-1)))
                             ++bit_count;
                         bit_count = std::max(bit_count, 4u);
-#if 0
+#if 1
                         std::cout << bit_count << std::endl;
                         uint32_t long_count = 4096 / (64/bit_count);
                         std::cout << long_count << " " << block_data.size() << std::endl;
@@ -152,6 +152,12 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                                 uint8_t* blocks = (uint8_t*)mapped_data;
                                 while (block_index < 4096 && data_index < block_data.size())
                                 {
+                                    if (data_offset + bit_count > 64)
+                                    {
+                                        data_offset = 0;
+                                        ++data_index;
+                                    }
+
                                     uint16_t block_id = (uint16_t)
                                         ((block_data[data_index] >> data_offset)
                                          & ((1ull << bit_count) - 1));
@@ -171,47 +177,64 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                                         : 0;
 #endif
                                     data_offset += bit_count;
-                                    if (data_offset > 64)
-                                    {
-                                        data_offset = 0;
-                                        ++data_index;
-                                    }
                                     ++block_index;
                                 }
-
-                                #if 1
-                                int counter = 0u;
-                                block_index = 0;
-                                data_index = 0;
-                                data_offset = 0;
-                                while (block_index < 4096 && data_index < block_data.size())
-                                {
-                                    uint16_t block_id = (uint16_t)
-                                        ((block_data[data_index] >> data_offset)
-                                         & ((1ull << bit_count) - 1));
-
-                                    uint32_t x = block_index % 16;
-                                    uint32_t z = (block_index / 16) % 16;
-                                    uint32_t y = (block_index / 256) % 16;
-
-                                    std::cout << palette_data[block_id] << " ";
-                                    if(++counter > 16)
-                                        std::cout << std::endl;
-                                    counter = counter % 16;
-
-                                    data_offset += bit_count;
-                                    if (data_offset > 64)
-                                    {
-                                        data_offset = 0;
-                                        ++data_index;
-                                    }
-                                    ++block_index;
-                                }
-                                std::cout << std::endl;
-                                #endif
-
                             });
 
+
+                        #if 0
+                        int ycounter = 0u;
+                        int zcounter = 0u;
+                        uint64_t block_index = 0;
+                        uint32_t data_index = 0;
+                        uint8_t data_offset = 0;
+                        std::array<uint16_t, 4096> blocks = {};
+                        while (block_index < 4096 && data_index < block_data.size())
+                        {
+                            if (data_offset + bit_count > 64)
+                            {
+                                data_offset = 0;
+                                ++data_index;
+                            }
+
+                            uint16_t block_id = (uint16_t)
+                                ((block_data[data_index] >> data_offset)
+                                 & ((1ull << bit_count) - 1));
+
+                            uint32_t x = block_index % 16;
+                            uint32_t z = (block_index / 16) % 16;
+                            uint32_t y = (block_index / 256) % 16;
+
+                            std::cout
+                                << ((palette_data[block_id] != "air")
+                                    && (palette_data[block_id] != "glow_lichen")
+                                    ? "X"
+                                    : "_");
+
+                            data_offset += bit_count;
+#if 0
+                            if (data_offset > 64)
+                            {
+                                data_offset = 0;
+                                ++data_index;
+                                std::cout << "|";
+                            }
+                            else
+                                std::cout << " ";
+#endif
+                            ++block_index;
+
+                            if(++ycounter > 15)
+                            {
+                                std::cout << std::endl;
+                                if (++zcounter > 15)
+                                    std::cout << std::endl;
+                            }
+                            ycounter = ycounter % 16;
+                            zcounter = zcounter % 16;
+                        }
+                        std::cout << std::endl;
+                        #endif
                     }
                 }
             }
