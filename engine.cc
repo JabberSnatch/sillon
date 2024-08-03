@@ -89,7 +89,7 @@ extern "C" {
         context->icosphere_plugin.reset(new Icosphere::Interface());
         context->voxels_plugin.reset(new Voxels::Interface());
 
-#if 1
+#if 0
         context->plugin.ConstantResources = context->voxels_plugin->ConstantResources;
         context->plugin.RenderResources = context->voxels_plugin->RenderResources;
         context->plugin.Update = context->voxels_plugin->Update;
@@ -107,7 +107,7 @@ extern "C" {
         context->plugin.state = context->glyphs_plugin->state;
 #endif
 
-#if 0
+#if 1
         context->plugin.ConstantResources = context->icosphere_plugin->ConstantResources;
         context->plugin.RenderResources = context->icosphere_plugin->RenderResources;
         context->plugin.Update = context->icosphere_plugin->Update;

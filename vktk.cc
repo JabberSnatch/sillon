@@ -206,6 +206,7 @@ Context::Context(uint64_t _hinstance, uint64_t _hwindow)
                       device, &command_pool_info, nullptr, &present_queue.command_pool);
 
             vkGetDeviceQueue(device, present_queue_index, 0, &present_queue.queue);
+            present_queue.device = device;
             present_queue.family_index = present_queue_index;
         }
 
@@ -219,6 +220,7 @@ Context::Context(uint64_t _hinstance, uint64_t _hwindow)
                       device, &command_pool_info, nullptr, &copy_queue.command_pool);
 
             vkGetDeviceQueue(device, copy_queue_index, 0, &copy_queue.queue);
+            copy_queue.device = device;
             copy_queue.family_index = copy_queue_index;
         }
     }
@@ -290,6 +292,37 @@ VkShaderModule Context::CompileShader_GLSL(VkShaderStageFlagBits _shaderStage,
     CHECKCALL(vkCreateShaderModule, device, &create_info, nullptr, &output);
     return output;
 }
+
+
+VkSemaphore Queue::Submit(VkCommandBuffer const* _command_buffers,
+                          uint32_t _command_buffer_count,
+                          VkSemaphore const* _wait_semaphores,
+                          VkPipelineStageFlags const* _wait_stages,
+                          uint32_t _wait_count,
+                          VkFence _signal_fence)
+{
+    VkSemaphore semaphore = {};
+    VkSemaphoreCreateInfo semaphore_info = {};
+    semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    semaphore_info.pNext = nullptr;
+    semaphore_info.flags = 0;
+    CHECKCALL(vkCreateSemaphore, device, &semaphore_info, nullptr, &semaphore);
+
+    VkSubmitInfo submit_info{};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.pNext = nullptr;
+    submit_info.waitSemaphoreCount = _wait_count;
+    submit_info.pWaitSemaphores = _wait_semaphores;
+    submit_info.pWaitDstStageMask = _wait_stages;
+    submit_info.commandBufferCount = _command_buffer_count;
+    submit_info.pCommandBuffers = _command_buffers;
+    submit_info.signalSemaphoreCount = 1u;
+    submit_info.pSignalSemaphores = &semaphore;
+    vkQueueSubmit(queue, 1, &submit_info, _signal_fence);
+
+    return semaphore;
+}
+
 
 void CommandBuffer::Begin()
 {

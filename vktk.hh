@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 #include <vulkan/vulkan.h>
@@ -133,10 +134,18 @@ struct ImageTransition {
 };
 
 struct Queue {
+    VkDevice device;
     uint32_t family_index;
     VkQueue queue;
     operator VkQueue() { return queue; }
     VkCommandPool command_pool;
+
+    VkSemaphore Submit(VkCommandBuffer const* _command_buffers,
+                       uint32_t _command_buffer_count,
+                       VkSemaphore const* _wait_semaphores = nullptr,
+                       VkPipelineStageFlags const* _wait_stages = nullptr,
+                       uint32_t _wait_count = 0u,
+                       VkFence _signal_fence = VK_NULL_HANDLE);
 };
 
 struct CommandBuffer {
