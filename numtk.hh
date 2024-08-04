@@ -25,6 +25,7 @@ struct vec2 : public std::array<scalar, 2>
     scalar const& y() const { return static_cast<scalar const&>(const_cast<vec2*>(this)->y()); }
 
     vec2 operator+(vec2 const& o) const { return { x()+o.x(), y()+o.y() }; }
+    vec2 operator+=(vec2 const& o) { x()+=o.x(); y()+=o.y(); return *this; }
     vec2 operator-(vec2 const& o) const { return { x()-o.x(), y()-o.y() }; }
     vec2 operator*(vec2 const& o) const { return { x()*o.x(), y()*o.y() }; }
     vec2 operator*(scalar s) const { return { x()*s, y()*s }; }
@@ -34,7 +35,7 @@ struct vec2 : public std::array<scalar, 2>
     scalar dot(vec2 const& o) const { return x()*o.x() + y()*o.y(); }
     float sqrnorm() const { return dot(*this); }
     float norm() const { return std::sqrt(sqrnorm()); }
-    vec2 normalise() const { return *this * norm(); }
+    vec2 normalise() const { return *this / norm(); }
 };
 
 template <typename scalar>
@@ -49,6 +50,7 @@ struct vec3 : public std::array<scalar, 3>
     scalar const& z() const { return static_cast<scalar const&>(const_cast<vec3*>(this)->z()); }
 
     vec3 operator+(vec3 const& o) const { return { x()+o.x(), y()+o.y(), z()+o.z() }; }
+    vec3 operator+=(vec3 const& o) { x()+=o.x(); y()+=o.y(); z()+=o.z(); return *this; }
     vec3 operator-(vec3 const& o) const { return { x()-o.x(), y()-o.y(), z()-o.z() }; }
     vec3 operator*(vec3 const& o) const { return { x()*o.x(), y()*o.y(), z()*o.z() }; }
     vec3 operator*(scalar s) const { return { x()*s, y()*s, z()*s }; }
@@ -58,7 +60,7 @@ struct vec3 : public std::array<scalar, 3>
     scalar dot(vec3 const& o) const { return x()*o.x() + y()*o.y() + z()*o.z(); }
     float sqrnorm() const { return dot(*this); }
     float norm() const { return std::sqrt(sqrnorm()); }
-    vec3 normalise() const { return *this * norm(); }
+    vec3 normalise() const { return *this / norm(); }
 
     vec3 cross(vec3 const& o) const {
         std::array<scalar, 3> const& data = *(std::array<scalar, 3> const*)this;

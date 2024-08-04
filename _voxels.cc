@@ -13,6 +13,8 @@ namespace {
 struct state_t
 {
     float time = 0.f;
+    numtk::vec2f turntable = { 0.f, 0.f };
+    bool updating_orientation = false;
 
     vktk::Texture chunk;
     VkImageView chunk_view;
@@ -528,7 +530,7 @@ void RenderResources(void* _pstate,
 
 bool Update(void* _pstate, vktk::Context* _vulkan,
             iotk::input_t const* _input,
-            iotk::input_t const*)
+            iotk::input_t const* _past_input)
 {
     state_t* _state = (state_t*)_pstate;
 
@@ -537,20 +539,30 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
     if (_input->key_down[iotk::eKey::kEscape])
         return false;
 
+    if (_input->button_down & iotk::fMouseButton::kLeftBtn)
+    {
+        numtk::vec2<int32_t> last_position{ _past_input->cursor[0], _past_input->cursor[1] };
+        numtk::vec2<int32_t> position{ _input->cursor[0], _input->cursor[1] };
+        numtk::vec2<int32_t> delta = position - last_position;
+        _state->turntable += numtk::vec2f{ 0.01f * (float)delta.x(), -0.01f * (float)delta.y() };
+    }
+
     {
         numtk::vec3<uint32_t> next_section = _state->current_section;
-        if (_input->key_down['w'])
+        #define KEY_PRESSED(key) _input->key_down[key] && !_past_input->key_down[key]
+        if (KEY_PRESSED('w'))
             ++next_section[0];
-        if (_input->key_down['s'])
+        if (KEY_PRESSED('s'))
             --next_section[0];
-        if (_input->key_down['d'])
+        if (KEY_PRESSED('d'))
             ++next_section[2];
-        if (_input->key_down['a'])
+        if (KEY_PRESSED('a'))
             --next_section[2];
-        if (_input->key_down['q'])
+        if (KEY_PRESSED('q'))
             --next_section[1];
-        if (_input->key_down['e'])
+        if (KEY_PRESSED('e'))
             ++next_section[1];
+        #undef KEY_PRESSED
 
         if (next_section != _state->current_section)
         {
@@ -624,14 +636,29 @@ void Draw(void* _pstate,
 
     numtk::mat4f* matrix = (numtk::mat4f*)_state->staging_area;
     float how = (float)_swapchain.size.height / (float)_swapchain.size.width;
-    numtk::vec3f forward = { std::sin(_state->time), 0.f, std::cos(_state->time) };
+    numtk::vec3f forward = {
+        std::cos(_state->turntable[1]) * std::cos(_state->turntable[0]),
+        std::sin(_state->turntable[1]),
+        std::cos(_state->turntable[1]) * std::sin(_state->turntable[0])
+    };
+    forward = forward.normalise();
+    numtk::vec3f up = { 0.f, 1.f, 0.f };
+    if (std::abs(1.f - forward.dot(numtk::vec3f{ 0.f, 1.f, 0.f })) > 1e-5f)
+        up = forward.cross(numtk::vec3f{ 0.f, 1.f, 0.f }).cross(forward).normalise();
+    else
+        up = forward.cross(numtk::vec3f{ 0.f, 0.f, 1.f }).cross(forward).normalise();
+
+    std::cout << forward.norm() << std::endl;
+    std::cout << _state->turntable.x() << " " << _state->turntable.y() << std::endl;
+    std::cout << forward.x() << " " << forward.y() << " " << forward.z() << std::endl;
+
     matrix[0] =
         numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how);
     matrix[2] =
         numtk::mat4f::View({ 0.f, 0.f, 1.f }, { 0.f, 1.f, 0.f }, { 0.f, 0.f, -3.f });
     matrix[1] =
         matrix[2]
-        * numtk::mat4f::View(forward, { 0.f, 1.f, 0.f }, { 0.f, 0.f, 0.f });
+        * numtk::mat4f::View(forward, up, { 0.f, 0.f, 0.f });
     ((int32_t*)(matrix + 3))[0] = _swapchain.size.width;
     ((int32_t*)(matrix + 3))[1] = _swapchain.size.height;
 
