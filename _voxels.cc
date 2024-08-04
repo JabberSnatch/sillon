@@ -26,18 +26,21 @@ struct state_t
     vktk::Buffer matrix_buffer;
     vktk::Buffer staging_buffer;
     void* staging_area;
+
+    numtk::vec3<uint32_t> current_section;
 };
 
-void ConstantResources(void* _pstate, vktk::Context* _vulkan)
+void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<uint32_t> const& coords)
 {
-    state_t* _state = (state_t*)_pstate;
-
     std::vector<uint8_t> testfile = systk::LoadFile("../r.-1.6.mca");
     mctk::MCAFileData mca_data = mctk::MCADecode(testfile.data(), testfile.size());
 
-    std::vector<mctk::NBTField> chunk_fields = mctk::MCAPackedNBTDecode(mca_data.chunks[700]);
+    uint32_t chunk_index = coords[0] + coords[2]*32;
+    std::vector<mctk::NBTField> chunk_fields = mctk::MCAPackedNBTDecode(mca_data.chunks[chunk_index]);
     if (chunk_fields.empty())
         return;
+
+    state->current_section = coords;
 
     using namespace mctk;
 
@@ -76,8 +79,10 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                     if (field1.name == "Y"
                         && field1.type == TAG_Byte)
                     {
+#if 0
                         std::cout << "Y " << (int32_t)*(int8_t const*)field1.payload << std::endl;
-                        if (*(int8_t const*)field1.payload != 2)
+#endif
+                        if (*(int8_t const*)field1.payload != coords[1])
                             break;
                     }
 
@@ -109,11 +114,11 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                                         if (field3.name == "Name"
                                             && field3.type == TAG_String)
                                         {
-#if 0
+                                            #if 0
                                             std::cout << "\t"
                                                       << *(NBTString const*)field3.payload
                                                       << std::endl;
-#endif
+                                            #endif
                                             palette_data.push_back(
                                                 (*(NBTString const*)field3.payload).substr(10));
                                         }
@@ -133,20 +138,21 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                         }
 
                         NBTLongArray const& block_data = *block_data_field;
-                        uint32_t bit_count = numtk::log2(palette_size);
+                        uint32_t bit_count = numtk::log2(palette_size-1);
                         if (palette_size - (1 << (bit_count-1)))
                             ++bit_count;
                         bit_count = std::max(bit_count, 4u);
-#if 1
+
+                        #if 0
                         std::cout << bit_count << std::endl;
                         uint32_t long_count = 4096 / (64/bit_count);
                         std::cout << long_count << " " << block_data.size() << std::endl;
                         for (uint32_t index = 0u; index < block_data.size(); ++index)
                             std::cout << std::hex << block_data[index] << " ";
                         std::cout << std::dec << std::endl;
-#endif
+                        #endif
 
-                        _state->chunk = _vulkan->CreateTexture(
+                        state->chunk = vulkan->CreateTexture(
                             16, 16, 16,
                             VK_IMAGE_TYPE_3D, VK_FORMAT_R8_UNORM,
                             VK_IMAGE_USAGE_TRANSFER_DST_BIT
@@ -172,80 +178,27 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                                     uint32_t z = (block_index / 16) % 16;
                                     uint32_t y = (block_index / 256) % 16;
 
-                                    blocks[y * 256 + z * 16 + x] =
-#if 1
-                                        (uint8_t)
-                                        (((float)block_id / (float)palette_data.size()) * 255.f);
-#else
-                                    ((palette_data[block_id] != "air")
-                                     && (palette_data[block_id] != "glow_lichen"))
+                                    blocks[z * 256 + y * 16 + x] =
+                                        ((palette_data[block_id] != "air")
+                                         && (palette_data[block_id] != "glow_lichen"))
                                         ? 255
                                         : 0;
-#endif
                                     data_offset += bit_count;
                                     ++block_index;
                                 }
                             });
-
-
-                        #if 0
-                        int ycounter = 0u;
-                        int zcounter = 0u;
-                        uint64_t block_index = 0;
-                        uint32_t data_index = 0;
-                        uint8_t data_offset = 0;
-                        std::array<uint16_t, 4096> blocks = {};
-                        while (block_index < 4096 && data_index < block_data.size())
-                        {
-                            if (data_offset + bit_count > 64)
-                            {
-                                data_offset = 0;
-                                ++data_index;
-                            }
-
-                            uint16_t block_id = (uint16_t)
-                                ((block_data[data_index] >> data_offset)
-                                 & ((1ull << bit_count) - 1));
-
-                            uint32_t x = block_index % 16;
-                            uint32_t z = (block_index / 16) % 16;
-                            uint32_t y = (block_index / 256) % 16;
-
-                            std::cout
-                                << ((palette_data[block_id] != "air")
-                                    && (palette_data[block_id] != "glow_lichen")
-                                    ? "X"
-                                    : "_");
-
-                            data_offset += bit_count;
-#if 0
-                            if (data_offset > 64)
-                            {
-                                data_offset = 0;
-                                ++data_index;
-                                std::cout << "|";
-                            }
-                            else
-                                std::cout << " ";
-#endif
-                            ++block_index;
-
-                            if(++ycounter > 15)
-                            {
-                                std::cout << std::endl;
-                                if (++zcounter > 15)
-                                    std::cout << std::endl;
-                            }
-                            ycounter = ycounter % 16;
-                            zcounter = zcounter % 16;
-                        }
-                        std::cout << std::endl;
-                        #endif
                     }
                 }
             }
         }
     }
+}
+
+void ConstantResources(void* _pstate, vktk::Context* _vulkan)
+{
+    state_t* _state = (state_t*)_pstate;
+
+    LoadSection(_state, _vulkan, { 28, 2, 21 });
 
     VkDescriptorPoolSize descpool_sizes[2] = {
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 },
@@ -305,9 +258,9 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     sampler_create.magFilter = VK_FILTER_NEAREST;
     sampler_create.minFilter = VK_FILTER_NEAREST;
     sampler_create.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    sampler_create.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_create.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    sampler_create.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler_create.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_create.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_create.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     CHECKCALL(vkCreateSampler, _vulkan->device,
               &sampler_create, nullptr, &_state->sampler);
 
@@ -338,13 +291,13 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
               &image_view_create, nullptr, &_state->chunk_view);
 
     _state->staging_buffer = _vulkan->CreateBuffer(
-        sizeof(numtk::mat4f) * 2 + sizeof(numtk::vec2f),
+        sizeof(numtk::mat4f) * 3 + sizeof(numtk::vec2f),
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
         | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
     _state->matrix_buffer = _vulkan->CreateBuffer(
-        sizeof(numtk::mat4f) * 2 + sizeof(numtk::vec2f),
+        sizeof(numtk::mat4f) * 3 + sizeof(numtk::vec2f),
         VK_BUFFER_USAGE_TRANSFER_DST_BIT
         | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
 
@@ -357,8 +310,9 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     numtk::mat4f* matrix = (numtk::mat4f*)_state->staging_area;
     matrix[0] = numtk::mat4f::Constant(0.f);
     matrix[1] = numtk::mat4f::Constant(0.f);
-    ((int32_t*)(matrix + 2))[0] = 1;
-    ((int32_t*)(matrix + 2))[1] = 1;
+    matrix[2] = numtk::mat4f::Constant(0.f);
+    ((int32_t*)(matrix + 3))[0] = 1;
+    ((int32_t*)(matrix + 3))[1] = 1;
 
     vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
     command_buffer.Begin();
@@ -373,7 +327,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         });
 
     command_buffer.BufferCopy(_state->matrix_buffer, 0, _state->staging_buffer, 0,
-                              sizeof(numtk::mat4f) * 2 + sizeof(numtk::vec2f));
+                              sizeof(numtk::mat4f) * 3 + sizeof(numtk::vec2f));
 
     command_buffer.BufferTransitions(
         VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -439,38 +393,108 @@ void RenderResources(void* _pstate,
     layout(std140, set = 0, binding = 1) uniform MatrixBlock {
         mat4 projection;
         mat4 view_model;
+        mat4 view;
         ivec2 screen_size;
     };
 
-    layout(location = 0) out vec2 texCoords;
+    layout(location = 0) out vec3 iFS_chunk_coords;
 
     void main() {
         vec3 vertex = kTriVertices[kTriIndices[gl_VertexIndex]];
         gl_Position = projection * view_model * vec4(vertex, 1.0);
-        //gl_Position = vec4(vertex, 1.0);
-        texCoords = vec2(0.0);
+        iFS_chunk_coords = vertex * 0.5 + vec3(0.5);
     }
     )_";
     static uint32_t const vsize = sizeof(vshader) - 1u;
 
     static char const fshader[] = R"(
     #version 450
-    layout(location = 0) in vec2 texCoords;
+    layout(location = 0) in vec3 iFS_chunk_coords;
     layout(location = 0) out vec4 color;
     layout(set = 0, binding = 0) uniform sampler3D chunk;
 
     layout(std140, set = 0, binding = 1) uniform MatrixBlock {
         mat4 projection;
         mat4 view_model;
+        mat4 view;
         ivec2 screen_size;
     };
 
+    #define CHUNK_VOXEL_COUNT 16.0
+
     void main() {
-        float fontv = texture(chunk, vec3(texCoords, 0.0)).x;
         vec2 uv = vec2(gl_FragCoord.x, gl_FragCoord.y) / vec2(screen_size.x, screen_size.y);
-        vec3 dir = inverse(mat3(projection)) * vec3(uv * 2.0 - vec2(1.0), 0.0);
-        color = vec4(dir * 0.5 + vec3(0.5), 1.0);
-//vec4(0.5, 0.5, 1.0, 1.0);
+        vec3 dir =
+            inverse(mat3(view_model)) *
+            inverse(mat3(projection))
+            * vec3(uv * 2.0 - vec2(1.0), 1.0);
+        dir = normalize(dir);
+        vec3 org = iFS_chunk_coords;
+        float block = texture(chunk, org).x;
+
+        vec3 step_sign = sign(dir);
+        vec3 voxel_space_org = org * CHUNK_VOXEL_COUNT;
+        vec3 p = floor(voxel_space_org);
+        vec3 manh = step_sign * (vec3(0.5) - fract(voxel_space_org)) + vec3(0.5);
+        vec3 compv = step_sign * 0.5 + vec3(0.5);
+        vec3 delta_t = 1.0 / abs(dir);
+        vec3 max_t = manh * delta_t;
+        vec3 uvwstep = step_sign / CHUNK_VOXEL_COUNT;
+        vec3 puvw = (p + vec3(0.5)) / CHUNK_VOXEL_COUNT;
+        vec3 start = puvw;
+
+        float accum = 0.0;
+        float t = 0.0;
+        vec3 n = vec3(0.0);
+
+        while((puvw.x * step_sign.x < compv.x)
+              && (puvw.y * step_sign.y < compv.y)
+              && (puvw.z * step_sign.z < compv.z))
+        {
+            accum += texture(chunk, puvw).x;
+            if (accum.x >= 1.0) break;
+
+            if (max_t.x < max_t.y)
+            {
+                if (max_t.x < max_t.z)
+                {
+                    puvw.x += uvwstep.x;
+                    max_t.x += delta_t.x;
+                    t += delta_t.x;
+                    n = -vec3(step_sign.x, 0.0, 0.0);
+                }
+                else
+                {
+                    puvw.z += uvwstep.z;
+                    max_t.z += delta_t.z;
+                    t += delta_t.z;
+                    n = -vec3(0.0, 0.0, step_sign.z);
+                }
+            }
+
+            else
+            {
+                if (max_t.y < max_t.z)
+                {
+                    puvw.y += uvwstep.y;
+                    max_t.y += delta_t.y;
+                    t += delta_t.y;
+                    n = -vec3(0.0, step_sign.y, 0.0);
+                }
+                else
+                {
+                    puvw.z += uvwstep.z;
+                    max_t.z += delta_t.z;
+                    t += delta_t.z;
+                    n = -vec3(0.0, 0.0, step_sign.z);
+                }
+            }
+        }
+
+        if (accum.x >= 1.0)
+            color = vec4(puvw, 1.0);
+        else
+            color = vec4(0.0);
     }
     )";
     static uint32_t const fsize = sizeof(fshader) - 1u;
@@ -502,7 +526,7 @@ void RenderResources(void* _pstate,
     vkDestroyShaderModule(_vulkan->device, fmodule, nullptr);
 }
 
-bool Update(void* _pstate, vktk::Context*,
+bool Update(void* _pstate, vktk::Context* _vulkan,
             iotk::input_t const* _input,
             iotk::input_t const*)
 {
@@ -512,6 +536,42 @@ bool Update(void* _pstate, vktk::Context*,
 
     if (_input->key_down[iotk::eKey::kEscape])
         return false;
+
+    {
+        numtk::vec3<uint32_t> next_section = _state->current_section;
+        if (_input->key_down['w'])
+            ++next_section[0];
+        if (_input->key_down['s'])
+            --next_section[0];
+        if (_input->key_down['d'])
+            ++next_section[2];
+        if (_input->key_down['a'])
+            --next_section[2];
+        if (_input->key_down['q'])
+            --next_section[1];
+        if (_input->key_down['e'])
+            ++next_section[1];
+
+        if (next_section != _state->current_section)
+        {
+            LoadSection(_state, _vulkan, next_section);
+
+            VkImageViewCreateInfo image_view_create{};
+            image_view_create.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            image_view_create.pNext = nullptr;
+            image_view_create.flags = 0u;
+            image_view_create.image = _state->chunk.image;
+            image_view_create.viewType = VK_IMAGE_VIEW_TYPE_3D;
+            image_view_create.format = VK_FORMAT_R8_UNORM;
+            image_view_create.components = VkComponentMapping{};
+            image_view_create.subresourceRange = VkImageSubresourceRange{
+                VK_IMAGE_ASPECT_COLOR_BIT,
+                0u, 1u, 0u, 1u
+            };
+            CHECKCALL(vkCreateImageView, _vulkan->device,
+                      &image_view_create, nullptr, &_state->chunk_view);
+        }
+    }
 
     return true;
 }
@@ -567,11 +627,13 @@ void Draw(void* _pstate,
     numtk::vec3f forward = { std::sin(_state->time), 0.f, std::cos(_state->time) };
     matrix[0] =
         numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how);
+    matrix[2] =
+        numtk::mat4f::View({ 0.f, 0.f, 1.f }, { 0.f, 1.f, 0.f }, { 0.f, 0.f, -3.f });
     matrix[1] =
-        numtk::mat4f::View({ 0.f, 0.f, 1.f }, { 0.f, 1.f, 0.f }, { 0.f, 0.f, -3.f })
+        matrix[2]
         * numtk::mat4f::View(forward, { 0.f, 1.f, 0.f }, { 0.f, 0.f, 0.f });
-    ((int32_t*)(matrix + 2))[0] = _swapchain.size.width;
-    ((int32_t*)(matrix + 2))[1] = _swapchain.size.height;
+    ((int32_t*)(matrix + 3))[0] = _swapchain.size.width;
+    ((int32_t*)(matrix + 3))[1] = _swapchain.size.height;
 
     vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
     command_buffer.Begin();
@@ -585,7 +647,7 @@ void Draw(void* _pstate,
 
     command_buffer.BufferCopy(_state->matrix_buffer, 0,
                               _state->staging_buffer, 0,
-                              sizeof(numtk::mat4f) * 2 + sizeof(numtk::vec2f));
+                              sizeof(numtk::mat4f) * 3 + sizeof(numtk::vec2f));
 
     command_buffer.BufferTransitions(
         VK_PIPELINE_STAGE_TRANSFER_BIT,
