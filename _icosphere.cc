@@ -254,14 +254,16 @@ void ConstantResources(void* _pstate,
     copy_commands.End();
     present_commands.End();
 
-    _state->copy_semaphore = _vulkan->copy_queue.Submit(
-        &copy_commands.handle, 1u
+    _vulkan->copy_queue.Submit(
+        &copy_commands.handle, 1u,
+        &_state->copy_semaphore
     );
 
     VkPipelineStageFlags dst_stage_mask =
         VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
-    _state->upload_semaphore = _vulkan->present_queue.Submit(
+    _vulkan->present_queue.Submit(
         &present_commands.handle, 1u,
+        &_state->upload_semaphore,
         &_state->copy_semaphore, &dst_stage_mask, 1u
     );
 }
@@ -456,14 +458,16 @@ void Draw(void* _pstate,
         copy_commands.End();
         present_commands.End();
 
-        _state->copy_semaphore = _vulkan->copy_queue.Submit(
-            &copy_commands.handle, 1u
+        _vulkan->copy_queue.Submit(
+            &copy_commands.handle, 1u,
+            &_state->copy_semaphore
         );
 
         VkPipelineStageFlags dst_stage_mask =
             VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
-        _state->upload_semaphore = _vulkan->present_queue.Submit(
+        _vulkan->present_queue.Submit(
             &present_commands.handle, 1u,
+            &_state->upload_semaphore,
             &_state->copy_semaphore, &dst_stage_mask, 1u
         );
     }
@@ -529,8 +533,9 @@ void Draw(void* _pstate,
             VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
         };
 
-        render_semaphore.handle = _vulkan->present_queue.Submit(
+        _vulkan->present_queue.Submit(
             &command_buffer.handle, 1u,
+            &render_semaphore.handle,
             wait_semaphores, wait_dst_stages,
             (_state->upload_semaphore == VK_NULL_HANDLE) ? 1u : 2u,
             render_semaphore.fence

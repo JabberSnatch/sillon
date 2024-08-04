@@ -12,6 +12,8 @@ namespace {
 
 struct state_t
 {
+    float time = 0.f;
+
     vktk::Texture chunk;
     VkImageView chunk_view;
     VkPipeline graphics_pipeline;
@@ -20,6 +22,10 @@ struct state_t
     VkDescriptorPool descriptor_pool;
     VkDescriptorSet descriptor_set;
     VkDescriptorSetLayout descset_layout;
+
+    vktk::Buffer matrix_buffer;
+    vktk::Buffer staging_buffer;
+    void* staging_area;
 };
 
 void ConstantResources(void* _pstate, vktk::Context* _vulkan)
@@ -241,8 +247,9 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         }
     }
 
-    VkDescriptorPoolSize descpool_sizes[1] = {
+    VkDescriptorPoolSize descpool_sizes[2] = {
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}
     };
 
     VkDescriptorPoolCreateInfo descpool_create{};
@@ -255,19 +262,30 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     CHECKCALL(vkCreateDescriptorPool, _vulkan->device,
               &descpool_create, nullptr, &_state->descriptor_pool);
 
-    VkDescriptorSetLayoutBinding binding{};
-    binding.binding = 0;
-    binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    binding.descriptorCount = 1;
-    binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    binding.pImmutableSamplers = nullptr;
+    VkDescriptorSetLayoutBinding bindings[2];
+    {
+        VkDescriptorSetLayoutBinding& binding = bindings[0];
+        binding.binding = 0;
+        binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        binding.descriptorCount = 1;
+        binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        binding.pImmutableSamplers = nullptr;
+    }
+    {
+        VkDescriptorSetLayoutBinding& binding = bindings[1];
+        binding.binding = 1;
+        binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        binding.descriptorCount = 1;
+        binding.stageFlags = VK_SHADER_STAGE_ALL;
+        binding.pImmutableSamplers = nullptr;
+    }
 
     VkDescriptorSetLayoutCreateInfo descset_create{};
     descset_create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     descset_create.pNext = nullptr;
     descset_create.flags = 0u;
-    descset_create.bindingCount = 1;
-    descset_create.pBindings = &binding;
+    descset_create.bindingCount = 2;
+    descset_create.pBindings = bindings;
     CHECKCALL(vkCreateDescriptorSetLayout, _vulkan->device,
               &descset_create, nullptr, &_state->descset_layout);
 
@@ -319,6 +337,59 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     CHECKCALL(vkCreateImageView, _vulkan->device,
               &image_view_create, nullptr, &_state->chunk_view);
 
+    _state->staging_buffer = _vulkan->CreateBuffer(
+        sizeof(numtk::mat4f) * 2 + sizeof(numtk::vec2f),
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    _state->matrix_buffer = _vulkan->CreateBuffer(
+        sizeof(numtk::mat4f) * 2 + sizeof(numtk::vec2f),
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT
+        | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+
+    _state->staging_area = nullptr;
+    CHECKCALL(vkMapMemory,
+              _vulkan->device, _state->staging_buffer.alloc.memory,
+              _state->staging_buffer.alloc.offset, _state->staging_buffer.alloc.size,
+              0, &_state->staging_area);
+
+    numtk::mat4f* matrix = (numtk::mat4f*)_state->staging_area;
+    matrix[0] = numtk::mat4f::Constant(0.f);
+    matrix[1] = numtk::mat4f::Constant(0.f);
+    ((int32_t*)(matrix + 2))[0] = 1;
+    ((int32_t*)(matrix + 2))[1] = 1;
+
+    vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
+    command_buffer.Begin();
+
+    command_buffer.BufferTransitions(
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        {
+            { _state->matrix_buffer,
+              VK_ACCESS_NONE,
+              VK_ACCESS_TRANSFER_WRITE_BIT },
+        });
+
+    command_buffer.BufferCopy(_state->matrix_buffer, 0, _state->staging_buffer, 0,
+                              sizeof(numtk::mat4f) * 2 + sizeof(numtk::vec2f));
+
+    command_buffer.BufferTransitions(
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+        {
+            { _state->matrix_buffer,
+              VK_ACCESS_TRANSFER_WRITE_BIT,
+              VK_ACCESS_UNIFORM_READ_BIT }
+        });
+
+    command_buffer.End();
+
+    _vulkan->present_queue.Submit(
+        &command_buffer.handle, 1u
+    );
+
     return;
 }
 
@@ -328,27 +399,56 @@ void RenderResources(void* _pstate,
 {
     state_t* _state = (state_t*)_pstate;
 
-
     constexpr uint32_t kStageCount = 2u;
+
+    //   2---6
+    //  /   /|
+    // 3---7 |
+    // | 0 | 4
+    // |   |/
+    // 1---5
+
+    //   Y
+    //   |
+    //   o-X
+    //  /
+    // Z
 
     static char const vshader[] = R"_(
     #version 450
-    const vec2 kTriVertices[] = vec2[4]( vec2(-1.0, -1.0),
-                                         vec2(-1.0, 1.0),
-                                         vec2(1.0, -1.0),
-                                         vec2(1.0, 1.0) );
+    const uint kTriIndices[] = uint[36](
+        0, 1, 2,  2, 1, 3,
+        0, 4, 1,  1, 4, 5,
+        3, 1, 7,  7, 1, 5,
+        7, 5, 6,  6, 5, 4,
+        2, 6, 0,  0, 6, 4,
+        2, 3, 6,  6, 3, 7
+    );
 
-    layout(location = 0) out vec2 texCoords;
-    layout(push_constant) uniform DataBlock {
-        float x;
-        float y;
-        uint char_index;
+    const vec3 kTriVertices[] = vec3[8](
+        vec3(-1.0, -1.0, -1.0),
+        vec3(-1.0, -1.0, 1.0),
+        vec3(-1.0, 1.0, -1.0),
+        vec3(-1.0, 1.0, 1.0),
+        vec3(1.0, -1.0, -1.0),
+        vec3(1.0, -1.0, 1.0),
+        vec3(1.0, 1.0, -1.0),
+        vec3(1.0, 1.0, 1.0)
+    );
+
+    layout(std140, set = 0, binding = 1) uniform MatrixBlock {
+        mat4 projection;
+        mat4 view_model;
+        ivec2 screen_size;
     };
 
+    layout(location = 0) out vec2 texCoords;
+
     void main() {
-        vec2 quad = kTriVertices[gl_VertexIndex];
-        gl_Position = vec4(quad, 0.0, 1.0);
-        texCoords = quad * 0.5 + vec2(0.5);
+        vec3 vertex = kTriVertices[kTriIndices[gl_VertexIndex]];
+        gl_Position = projection * view_model * vec4(vertex, 1.0);
+        //gl_Position = vec4(vertex, 1.0);
+        texCoords = vec2(0.0);
     }
     )_";
     static uint32_t const vsize = sizeof(vshader) - 1u;
@@ -358,9 +458,19 @@ void RenderResources(void* _pstate,
     layout(location = 0) in vec2 texCoords;
     layout(location = 0) out vec4 color;
     layout(set = 0, binding = 0) uniform sampler3D chunk;
+
+    layout(std140, set = 0, binding = 1) uniform MatrixBlock {
+        mat4 projection;
+        mat4 view_model;
+        ivec2 screen_size;
+    };
+
     void main() {
         float fontv = texture(chunk, vec3(texCoords, 0.0)).x;
-        color = vec4(0.5, 0.5, 1.0, 1.0) * fontv;
+        vec2 uv = vec2(gl_FragCoord.x, gl_FragCoord.y) / vec2(screen_size.x, screen_size.y);
+        vec3 dir = inverse(mat3(projection)) * vec3(uv * 2.0 - vec2(1.0), 0.0);
+        color = vec4(dir * 0.5 + vec3(0.5), 1.0);
+//vec4(0.5, 0.5, 1.0, 1.0);
     }
     )";
     static uint32_t const fsize = sizeof(fshader) - 1u;
@@ -383,18 +493,26 @@ void RenderResources(void* _pstate,
         {
             { vmodule, VK_SHADER_STAGE_VERTEX_BIT },
             { fmodule, VK_SHADER_STAGE_FRAGMENT_BIT }
-        } );
-
-    VkDescriptorPoolSize descpool_sizes[1] = {
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 },
-    };
+        },
+        VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+        {}
+    );
 
     vkDestroyShaderModule(_vulkan->device, vmodule, nullptr);
     vkDestroyShaderModule(_vulkan->device, fmodule, nullptr);
 }
 
-bool Update(void*, vktk::Context*, iotk::input_t const*, iotk::input_t const*)
+bool Update(void* _pstate, vktk::Context*,
+            iotk::input_t const* _input,
+            iotk::input_t const*)
 {
+    state_t* _state = (state_t*)_pstate;
+
+    _state->time += _input->time_delta;
+
+    if (_input->key_down[iotk::eKey::kEscape])
+        return false;
+
     return true;
 }
 
@@ -410,21 +528,71 @@ void Draw(void* _pstate,
     image_info.imageView = _state->chunk_view;
     image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    VkWriteDescriptorSet desc_write{};
-    desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    desc_write.pNext = nullptr;
-    desc_write.dstSet = _state->descriptor_set;
-    desc_write.dstBinding = 0u;
-    desc_write.dstArrayElement = 0u;
-    desc_write.descriptorCount = 1u;
-    desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    desc_write.pImageInfo = &image_info;
-    desc_write.pBufferInfo = nullptr;
-    desc_write.pTexelBufferView = nullptr;
-    vkUpdateDescriptorSets(_vulkan->device, 1u, &desc_write, 0u, nullptr);
+    VkDescriptorBufferInfo buffer_info = {};
+    buffer_info.buffer = _state->matrix_buffer;
+    buffer_info.offset = 0;
+    buffer_info.range = VK_WHOLE_SIZE;
+
+    VkWriteDescriptorSet desc_writes[2];
+    {
+        VkWriteDescriptorSet& desc_write = desc_writes[0];
+        desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        desc_write.pNext = nullptr;
+        desc_write.dstSet = _state->descriptor_set;
+        desc_write.dstBinding = 0u;
+        desc_write.dstArrayElement = 0u;
+        desc_write.descriptorCount = 1u;
+        desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        desc_write.pImageInfo = &image_info;
+        desc_write.pBufferInfo = nullptr;
+        desc_write.pTexelBufferView = nullptr;
+    }
+    {
+        VkWriteDescriptorSet& desc_write = desc_writes[1];
+        desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        desc_write.pNext = nullptr;
+        desc_write.dstSet = _state->descriptor_set;
+        desc_write.dstBinding = 1u;
+        desc_write.dstArrayElement = 0u;
+        desc_write.descriptorCount = 1u;
+        desc_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        desc_write.pImageInfo = nullptr;
+        desc_write.pBufferInfo = &buffer_info;
+        desc_write.pTexelBufferView = nullptr;
+    }
+    vkUpdateDescriptorSets(_vulkan->device, 2u, desc_writes, 0u, nullptr);
+
+    numtk::mat4f* matrix = (numtk::mat4f*)_state->staging_area;
+    float how = (float)_swapchain.size.height / (float)_swapchain.size.width;
+    numtk::vec3f forward = { std::sin(_state->time), 0.f, std::cos(_state->time) };
+    matrix[0] =
+        numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how);
+    matrix[1] =
+        numtk::mat4f::View({ 0.f, 0.f, 1.f }, { 0.f, 1.f, 0.f }, { 0.f, 0.f, -3.f })
+        * numtk::mat4f::View(forward, { 0.f, 1.f, 0.f }, { 0.f, 0.f, 0.f });
+    ((int32_t*)(matrix + 2))[0] = _swapchain.size.width;
+    ((int32_t*)(matrix + 2))[1] = _swapchain.size.height;
 
     vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
     command_buffer.Begin();
+
+    command_buffer.BufferTransitions(
+        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        {
+            { _state->matrix_buffer, VK_ACCESS_UNIFORM_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT }
+        });
+
+    command_buffer.BufferCopy(_state->matrix_buffer, 0,
+                              _state->staging_buffer, 0,
+                              sizeof(numtk::mat4f) * 2 + sizeof(numtk::vec2f));
+
+    command_buffer.BufferTransitions(
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+        {
+            { _state->matrix_buffer, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_UNIFORM_READ_BIT }
+        });
 
     VkViewport viewport{};
     viewport.x = 0.f; viewport.y = 0.f;
@@ -462,7 +630,7 @@ void Draw(void* _pstate,
                             1u, &_state->descriptor_set,
                             0u, nullptr);
 
-    vkCmdDraw(command_buffer, 4u, 1u, 0u, 0u);
+    vkCmdDraw(command_buffer, 36u, 1u, 0u, 0u);
 
     vkCmdEndRenderPass(command_buffer);
 

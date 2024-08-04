@@ -139,12 +139,13 @@ struct Queue {
     operator VkQueue() { return queue; }
     VkCommandPool command_pool;
 
-    VkSemaphore Submit(VkCommandBuffer const* _command_buffers,
-                       uint32_t _command_buffer_count,
-                       VkSemaphore const* _wait_semaphores = nullptr,
-                       VkPipelineStageFlags const* _wait_stages = nullptr,
-                       uint32_t _wait_count = 0u,
-                       VkFence _signal_fence = VK_NULL_HANDLE);
+    void Submit(VkCommandBuffer const* _command_buffers,
+                uint32_t _command_buffer_count,
+                VkSemaphore* _signal_semaphore = nullptr,
+                VkSemaphore const* _wait_semaphores = nullptr,
+                VkPipelineStageFlags const* _wait_stages = nullptr,
+                uint32_t _wait_count = 0u,
+                VkFence _signal_fence = VK_NULL_HANDLE);
 };
 
 struct CommandBuffer {
@@ -221,10 +222,16 @@ struct Context
     Swapchain CreateSwapchain(uint32_t const _size[2]);
 
     Buffer CreateBuffer(uint32_t _size,
-                        VkBufferUsageFlags _usage);
+                        VkBufferUsageFlags _usage,
+                        VkMemoryPropertyFlags _memory_flags =
+                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     Buffer CreateBuffer(uint32_t _size,
                         VkBufferUsageFlags _usage,
-                        VkMemoryPropertyFlags _memory_flags);
+                        std::function<void(void*)> const& _upload_callback,
+                        VkMemoryPropertyFlags _memory_flags =
+                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) = delete;
     void DestroyBuffer(Buffer& _buffer);
 
     Texture CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,

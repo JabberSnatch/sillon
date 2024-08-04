@@ -296,19 +296,22 @@ VkShaderModule Context::CompileShader_GLSL(VkShaderStageFlagBits _shaderStage,
 }
 
 
-VkSemaphore Queue::Submit(VkCommandBuffer const* _command_buffers,
-                          uint32_t _command_buffer_count,
-                          VkSemaphore const* _wait_semaphores,
-                          VkPipelineStageFlags const* _wait_stages,
-                          uint32_t _wait_count,
-                          VkFence _signal_fence)
+void Queue::Submit(VkCommandBuffer const* _command_buffers,
+                   uint32_t _command_buffer_count,
+                   VkSemaphore* _signal_semaphore,
+                   VkSemaphore const* _wait_semaphores,
+                   VkPipelineStageFlags const* _wait_stages,
+                   uint32_t _wait_count,
+                   VkFence _signal_fence)
 {
-    VkSemaphore semaphore = {};
-    VkSemaphoreCreateInfo semaphore_info = {};
-    semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    semaphore_info.pNext = nullptr;
-    semaphore_info.flags = 0;
-    CHECKCALL(vkCreateSemaphore, device, &semaphore_info, nullptr, &semaphore);
+    if (_signal_semaphore)
+    {
+        VkSemaphoreCreateInfo semaphore_info = {};
+        semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        semaphore_info.pNext = nullptr;
+        semaphore_info.flags = 0;
+        CHECKCALL(vkCreateSemaphore, device, &semaphore_info, nullptr, _signal_semaphore);
+    }
 
     VkSubmitInfo submit_info{};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -318,11 +321,9 @@ VkSemaphore Queue::Submit(VkCommandBuffer const* _command_buffers,
     submit_info.pWaitDstStageMask = _wait_stages;
     submit_info.commandBufferCount = _command_buffer_count;
     submit_info.pCommandBuffers = _command_buffers;
-    submit_info.signalSemaphoreCount = 1u;
-    submit_info.pSignalSemaphores = &semaphore;
+    submit_info.signalSemaphoreCount = _signal_semaphore ? 1u : 0u;
+    submit_info.pSignalSemaphores = _signal_semaphore;
     vkQueueSubmit(queue, 1, &submit_info, _signal_fence);
-
-    return semaphore;
 }
 
 
@@ -931,13 +932,6 @@ Swapchain Context::CreateSwapchain(uint32_t const _size[2])
     return swapchain;
 }
 
-Buffer Context::CreateBuffer(uint32_t _size, VkBufferUsageFlags _usage)
-{
-    return CreateBuffer(_size, _usage,
-                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
-                        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-}
-
 Buffer Context::CreateBuffer(uint32_t _size,
                              VkBufferUsageFlags _usage,
                              VkMemoryPropertyFlags _memory_flags)
@@ -1014,13 +1008,19 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
                                VkImageType _type, VkFormat _format, VkImageUsageFlags _usage,
                                std::function<void(void*)> const& _upload_callback)
 {
-    Texture result = CreateTexture(_width, _height, _depth, _type, _format, _usage);
+    Texture result = CreateTexture(_width, _height, _depth, _type, _format,
+                                   _usage | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
     uint64_t staging_size = _width * _height * _depth * VkFormatBytesPerUnit(_format);
     Buffer staging = CreateBuffer(staging_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
 
     void* mapped_data = nullptr;
-    CHECKCALL(vkMapMemory, device, staging.alloc.memory, 0u, VK_WHOLE_SIZE, 0u, &mapped_data);
+    CHECKCALL(vkMapMemory,
+              device,
+              staging.alloc.memory,
+              staging.alloc.offset,
+              staging.alloc.size,
+              0u, &mapped_data);
     _upload_callback(mapped_data);
     vkUnmapMemory(device, staging.alloc.memory);
 
