@@ -64,7 +64,8 @@ void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<uint32_t> co
     {
         if (field0.name == "Status"
             && field0.type == TAG_String
-            && *(NBTString const*)field0.payload != "full")
+            && !(*(NBTString const*)field0.payload == "full"
+                 || *(NBTString const*)field0.payload == "minecraft:full"))
             std::cout << "incomplete chunk, Status is "
                       << *(NBTString const*)field0.payload << std::endl;
 
@@ -431,7 +432,7 @@ void RenderResources(void* _pstate,
             inverse(mat3(projection))
             * vec3(uv * 2.0 - vec2(1.0), 1.0);
         dir = normalize(dir);
-        vec3 org = iFS_chunk_coords;
+        vec3 org = iFS_chunk_coords - dir * 0.00001;
         float block = texture(chunk, org).x;
 
         vec3 step_sign = sign(dir);
@@ -512,6 +513,9 @@ void RenderResources(void* _pstate,
                                     "fshader",
                                     fshader,
                                     fsize);
+
+    if (_state->graphics_pipeline != VK_NULL_HANDLE)
+        vkDestroyPipeline(_vulkan->device, _state->graphics_pipeline, nullptr);
 
     _state->graphics_pipeline = _vulkan->CreatePipeline(
         _state->pipeline_layout,
@@ -643,14 +647,16 @@ void Draw(void* _pstate,
     };
     forward = forward.normalise();
     numtk::vec3f up = { 0.f, 1.f, 0.f };
-    if (std::abs(1.f - forward.dot(numtk::vec3f{ 0.f, 1.f, 0.f })) > 1e-5f)
+    if (std::abs(1.f - forward.dot(numtk::vec3f{ 0.f, 1.f, 0.f })) > 1e-3f)
         up = forward.cross(numtk::vec3f{ 0.f, 1.f, 0.f }).cross(forward).normalise();
     else
         up = forward.cross(numtk::vec3f{ 0.f, 0.f, 1.f }).cross(forward).normalise();
 
+    #if 0
     std::cout << forward.norm() << std::endl;
     std::cout << _state->turntable.x() << " " << _state->turntable.y() << std::endl;
     std::cout << forward.x() << " " << forward.y() << " " << forward.z() << std::endl;
+    #endif
 
     matrix[0] =
         numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how);
@@ -756,6 +762,18 @@ void Shutdown(void* _pstate,
 {
     state_t* _state = (state_t*)_pstate;
     vkDestroyImage(_vulkan->device, _state->chunk.image, nullptr);
+
+    vkDestroyImageView(_vulkan->device, _state->chunk_view, nullptr);
+    vkDestroyPipeline(_vulkan->device, _state->graphics_pipeline, nullptr);
+    _state->graphics_pipeline = VK_NULL_HANDLE;
+    vkDestroyPipelineLayout(_vulkan->device, _state->pipeline_layout, nullptr);
+    vkDestroySampler(_vulkan->device, _state->sampler, nullptr);
+    vkFreeDescriptorSets(_vulkan->device, _state->descriptor_pool, 1, &_state->descriptor_set);
+    vkDestroyDescriptorPool(_vulkan->device, _state->descriptor_pool, nullptr);
+    vkDestroyDescriptorSetLayout(_vulkan->device, _state->descset_layout, nullptr);
+
+    vktk::Buffer matrix_buffer;
+    vktk::Buffer staging_buffer;
 }
 
 }
