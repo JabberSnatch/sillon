@@ -397,21 +397,6 @@ void Draw(void* _pstate,
     }
 
     RenderSemaphore render_semaphore = {};
-    {
-        VkSemaphoreCreateInfo semaphore_info = {};
-        semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-        semaphore_info.pNext = nullptr;
-        semaphore_info.flags = 0;
-        CHECKCALL(vkCreateSemaphore,
-                  _vulkan->device, &semaphore_info, nullptr, &render_semaphore.handle);
-
-        VkFenceCreateInfo fence_info = {};
-        fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        fence_info.pNext = nullptr;
-        fence_info.flags = 0;
-        CHECKCALL(vkCreateFence,
-                  _vulkan->device, &fence_info, nullptr, &render_semaphore.fence);
-    }
 
     {
         numtk::vec3f forward = { std::sin(_state->time), 0.f, std::cos(_state->time) };
@@ -538,7 +523,7 @@ void Draw(void* _pstate,
             &render_semaphore.handle,
             wait_semaphores, wait_dst_stages,
             (_state->upload_semaphore == VK_NULL_HANDLE) ? 1u : 2u,
-            render_semaphore.fence
+            &render_semaphore.fence
         );
 
         _state->dead_semaphores.push_back(_state->upload_semaphore);

@@ -302,7 +302,7 @@ void Queue::Submit(VkCommandBuffer const* _command_buffers,
                    VkSemaphore const* _wait_semaphores,
                    VkPipelineStageFlags const* _wait_stages,
                    uint32_t _wait_count,
-                   VkFence _signal_fence)
+                   VkFence* _signal_fence)
 {
     if (_signal_semaphore)
     {
@@ -311,6 +311,15 @@ void Queue::Submit(VkCommandBuffer const* _command_buffers,
         semaphore_info.pNext = nullptr;
         semaphore_info.flags = 0;
         CHECKCALL(vkCreateSemaphore, device, &semaphore_info, nullptr, _signal_semaphore);
+    }
+
+    if (_signal_fence)
+    {
+        VkFenceCreateInfo fence_info = {};
+        fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fence_info.pNext = nullptr;
+        fence_info.flags = 0;
+        CHECKCALL(vkCreateFence, device, &fence_info, nullptr, _signal_fence);
     }
 
     VkSubmitInfo submit_info{};
@@ -323,7 +332,7 @@ void Queue::Submit(VkCommandBuffer const* _command_buffers,
     submit_info.pCommandBuffers = _command_buffers;
     submit_info.signalSemaphoreCount = _signal_semaphore ? 1u : 0u;
     submit_info.pSignalSemaphores = _signal_semaphore;
-    vkQueueSubmit(queue, 1, &submit_info, _signal_fence);
+    vkQueueSubmit(queue, 1, &submit_info, _signal_fence ? *_signal_fence : VK_NULL_HANDLE);
 }
 
 

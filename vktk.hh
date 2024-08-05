@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <vector>
+#include <unordered_map>
 
 #include <vulkan/vulkan.h>
 
@@ -145,7 +146,7 @@ struct Queue {
                 VkSemaphore const* _wait_semaphores = nullptr,
                 VkPipelineStageFlags const* _wait_stages = nullptr,
                 uint32_t _wait_count = 0u,
-                VkFence _signal_fence = VK_NULL_HANDLE);
+                VkFence* _signal_fence = nullptr);
 };
 
 struct CommandBuffer {
@@ -259,6 +260,9 @@ struct Context
     Queue copy_queue = {};
 
     Allocator allocator = {};
+
+    using SynchronisedRoutine = std::function<void(VkDevice)>;
+    std::unordered_map<VkFence, std::vector<SynchronisedRoutine>> pending_routines = {};
 
     struct PendingDestroy
     {
