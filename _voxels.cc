@@ -46,6 +46,8 @@ struct state_t
     vktk::Buffer staging_buffer;
     void* staging_area;
 
+    vktk::Texture region_texture;
+    VkImageView region_view;
     RegionData region;
     numtk::vec3<uint32_t> current_section;
 };
@@ -204,11 +206,47 @@ void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<uint32_t> co
         });
 }
 
+void LoadRegion(state_t* state, vktk::Context* vulkan)
+{
+    RegionData const& region = state->region;
+    state->region_texture = vulkan->CreateTexture(
+        32, 32, 32,
+        VK_IMAGE_TYPE_3D, VK_FORMAT_R8_UNORM,
+        VK_IMAGE_USAGE_SAMPLED_BIT,
+        [&region](void* mapped_data) {
+            uint8_t* sections = (uint8_t*)mapped_data;
+
+            for (uint32_t xindex = 0; xindex < 32; ++xindex)
+            {
+                for (uint32_t zindex = 0; zindex < 32; ++zindex)
+                {
+                    RegionData::ChunkData const& chunk_data = region.chunks[xindex + zindex*32];
+                    for (uint32_t yindex = 0; yindex < 24; ++yindex)
+                    {
+                        RegionData::SectionData const& section = chunk_data.sections[yindex];
+                        float average = 0.f;
+
+                        if (!section.palette.empty())
+                            for (uint16_t block_id : section.block_ids)
+                                average +=
+                                    ((section.palette[block_id] != "air")
+                                     && (section.palette[block_id] != "glow_lichen"))
+                                    ? 1.f / 4096.f
+                                    : 0.f;
+
+                        sections[xindex + yindex*32 + zindex*32*32] = (uint8_t)(average * 255.f);
+                    }
+                }
+            }
+        });
+}
+
 void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 {
     state_t* _state = (state_t*)_pstate;
 
     _state->region = DeserialiseRegion("../r.-1.6.mca");
+    LoadRegion(_state, _vulkan);
     LoadSection(_state, _vulkan, { 28, 2, 21 });
 
     VkDescriptorPoolSize descpool_sizes[2] = {
@@ -300,6 +338,9 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     };
     CHECKCALL(vkCreateImageView, _vulkan->device,
               &image_view_create, nullptr, &_state->chunk_view);
+    image_view_create.image = _state->region_texture.image;
+    CHECKCALL(vkCreateImageView, _vulkan->device,
+              &image_view_create, nullptr, &_state->region_view);
 
     _state->staging_buffer = _vulkan->CreateBuffer(
         sizeof(numtk::mat4f) * 3 + sizeof(numtk::vec2f),
@@ -382,12 +423,21 @@ void RenderResources(void* _pstate,
     static char const vshader[] = R"_(
     #version 450
     const uint kTriIndices[] = uint[36](
+#if 1
         0, 1, 2,  2, 1, 3,
         0, 4, 1,  1, 4, 5,
         3, 1, 7,  7, 1, 5,
         7, 5, 6,  6, 5, 4,
         2, 6, 0,  0, 6, 4,
         2, 3, 6,  6, 3, 7
+#else
+        0, 2, 1,  1, 2, 3,
+        0, 1, 4,  4, 1, 5,
+        3, 7, 1,  1, 7, 5,
+        7, 6, 5,  5, 6, 4,
+        2, 0, 6,  6, 0, 4,
+        2, 6, 3,  3, 6, 7
+#endif
     );
 
     const vec3 kTriVertices[] = vec3[8](
@@ -431,7 +481,8 @@ void RenderResources(void* _pstate,
         ivec2 screen_size;
     };
 
-    #define CHUNK_VOXEL_COUNT 16.0
+    #define CHUNK_VOXEL_COUNT 32.0
+//16.0
 
     void main() {
         vec2 uv = vec2(gl_FragCoord.x, gl_FragCoord.y) / vec2(screen_size.x, screen_size.y);
@@ -440,6 +491,7 @@ void RenderResources(void* _pstate,
             inverse(mat3(projection))
             * vec3(uv * 2.0 - vec2(1.0), 1.0);
         dir = normalize(dir);
+        //dir = -dir;
         vec3 org = iFS_chunk_coords - dir * 0.00001;
         float block = texture(chunk, org).x;
 
@@ -457,13 +509,16 @@ void RenderResources(void* _pstate,
         float accum = 0.0;
         float t = 0.0;
         vec3 n = vec3(0.0);
+        vec3 c = vec3(0.0);
 
         while((puvw.x * step_sign.x < compv.x)
               && (puvw.y * step_sign.y < compv.y)
               && (puvw.z * step_sign.z < compv.z))
         {
-            accum += texture(chunk, puvw).x;
-            if (accum.x >= 1.0) break;
+            float d = texture(chunk, puvw).x;
+            c += puvw*d;
+            accum += d;
+            //if (accum.x >= 1.0) break;
 
             if (max_t.x < max_t.y)
             {
@@ -502,10 +557,16 @@ void RenderResources(void* _pstate,
             }
         }
 
+#if 0
         if (accum.x >= 1.0)
             color = vec4(puvw, 1.0);
         else
             color = vec4(0.0);
+#else
+        //color = vec4(c/16.0, accum/32.0);
+        color = vec4(vec3(accum/16.0),accum/32.0);
+        //color = vec4(vec3(16.0/t), accum);
+#endif
     }
     )";
     static uint32_t const fsize = sizeof(fshader) - 1u;
@@ -609,7 +670,7 @@ void Draw(void* _pstate,
 
     VkDescriptorImageInfo image_info{};
     image_info.sampler = _state->sampler;
-    image_info.imageView = _state->chunk_view;
+    image_info.imageView = _state->region_view;//_state->chunk_view;
     image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     VkDescriptorBufferInfo buffer_info = {};
