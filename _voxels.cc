@@ -30,7 +30,8 @@ struct RegionData
 struct state_t
 {
     float time = 0.f;
-    numtk::vec2f turntable = { 0.f, 0.f };
+    numtk::vec3f turntable = { 0.f, 0.f, 3.f };
+    float y_offset = 0.f;
     bool updating_orientation = false;
 
     vktk::Texture chunk;
@@ -423,7 +424,7 @@ void RenderResources(void* _pstate,
     static char const vshader[] = R"_(
     #version 450
     const uint kTriIndices[] = uint[36](
-#if 1
+#if 0
         0, 1, 2,  2, 1, 3,
         0, 4, 1,  1, 4, 5,
         3, 1, 7,  7, 1, 5,
@@ -491,7 +492,7 @@ void RenderResources(void* _pstate,
             inverse(mat3(projection))
             * vec3(uv * 2.0 - vec2(1.0), 1.0);
         dir = normalize(dir);
-        //dir = -dir;
+        dir = -dir;
         vec3 org = iFS_chunk_coords - dir * 0.00001;
         float block = texture(chunk, org).x;
 
@@ -617,7 +618,18 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         numtk::vec2<int32_t> last_position{ _past_input->cursor[0], _past_input->cursor[1] };
         numtk::vec2<int32_t> position{ _input->cursor[0], _input->cursor[1] };
         numtk::vec2<int32_t> delta = position - last_position;
-        _state->turntable += numtk::vec2f{ 0.01f * (float)delta.x(), -0.01f * (float)delta.y() };
+        _state->turntable += numtk::vec3f{ 0.01f * (float)delta.x(), 0.01f * (float)delta.y(), 0.f };
+    }
+
+    if (_input->button_down & iotk::fMouseButton::kRightBtn)
+    {
+        _state->y_offset += 0.01f * (float)(_input->cursor[1] -  _past_input->cursor[1]);
+    }
+
+    {
+        _state->turntable.z() += (float)_input->wheel_delta * 0.001f;
+        if (_state->turntable.z() < 1.f)
+            _state->turntable.z() = 1.f;
     }
 
     {
@@ -730,10 +742,10 @@ void Draw(void* _pstate,
     matrix[0] =
         numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how);
     matrix[2] =
-        numtk::mat4f::View({ 0.f, 0.f, 1.f }, { 0.f, 1.f, 0.f }, { 0.f, 0.f, -3.f });
+        numtk::mat4f::View({ 0.f, 0.f, -1.f }, { 0.f, 1.f, 0.f }, { 0.f, 0.f, _state->turntable.z() });
     matrix[1] =
         matrix[2]
-        * numtk::mat4f::View(forward, up, { 0.f, 0.f, 0.f });
+        * numtk::mat4f::View(forward, up, { 0.f, _state->y_offset, 0.f });
     ((int32_t*)(matrix + 3))[0] = _swapchain.size.width;
     ((int32_t*)(matrix + 3))[1] = _swapchain.size.height;
 
