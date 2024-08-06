@@ -10,6 +10,23 @@
 
 namespace {
 
+struct RegionData
+{
+    struct SectionData
+    {
+        std::vector<std::string> palette;
+        std::array<uint16_t, 4096> block_ids;
+    };
+
+    struct ChunkData
+    {
+        std::string status;
+        std::array<SectionData, 24> sections;
+    };
+
+    std::vector<ChunkData> chunks;
+};
+
 struct state_t
 {
     float time = 0.f;
@@ -29,65 +46,42 @@ struct state_t
     vktk::Buffer staging_buffer;
     void* staging_area;
 
+    RegionData region;
     numtk::vec3<uint32_t> current_section;
 };
 
-void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<uint32_t> const& coords)
+RegionData::ChunkData DecodeChunk(mctk::MCAChunkData const& chunk_data)
 {
-    std::vector<uint8_t> testfile = systk::LoadFile("../r.-1.6.mca");
-    mctk::MCAFileData mca_data = mctk::MCADecode(testfile.data(), testfile.size());
-
-    uint32_t chunk_index = coords[0] + coords[2]*32;
-    std::vector<mctk::NBTField> chunk_fields = mctk::MCAPackedNBTDecode(mca_data.chunks[chunk_index]);
-    if (chunk_fields.empty())
-        return;
-
-    state->current_section = coords;
-
     using namespace mctk;
 
-    // -6
-    // 213
+    RegionData::ChunkData output = {};
 
-    // -1
-    // 6
-
-    // -32 -> -1
-    // 192 -> 223
-
-    // 26
-    // 21
-    // -> 698
+    std::vector<NBTField> chunk_fields = MCAPackedNBTDecode(chunk_data);
+    if (chunk_fields.empty())
+        return output;
 
     NBTCompound const& root = *(NBTCompound const*)chunk_fields[0].payload;
     for (NBTField const& field0 : root)
     {
         if (field0.name == "Status"
-            && field0.type == TAG_String
-            && !(*(NBTString const*)field0.payload == "full"
-                 || *(NBTString const*)field0.payload == "minecraft:full"))
-            std::cout << "incomplete chunk, Status is "
-                      << *(NBTString const*)field0.payload << std::endl;
+            && field0.type == TAG_String)
+            output.status = *(NBTString const*)field0.payload;
 
         if (field0.name == "sections"
             && field0.type == TAG_List)
         {
             NBTList const& sections = *(NBTList const*)field0.payload;
             NBTCompound const* compounds = (NBTCompound const*)sections.data;
-            for (uint32_t section_index = 0u; section_index < sections.size; ++section_index)
+            for (uint32_t index = 0u; index < sections.size; ++index)
             {
-                NBTCompound const& compound = compounds[section_index];
+                NBTCompound const& compound = compounds[index];
+                int32_t section_index = 0;
+                RegionData::SectionData section_data = {};
                 for (NBTField const& field1 : compound)
                 {
                     if (field1.name == "Y"
                         && field1.type == TAG_Byte)
-                    {
-#if 0
-                        std::cout << "Y " << (int32_t)*(int8_t const*)field1.payload << std::endl;
-#endif
-                        if (*(int8_t const*)field1.payload != coords[1])
-                            break;
-                    }
+                        section_index = (*(int8_t const*)field1.payload) + 4;
 
                     if (field1.name == "block_states"
                         && field1.type == TAG_Compound)
@@ -95,7 +89,7 @@ void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<uint32_t> co
                         NBTCompound const& block_states = *(NBTCompound const*)field1.payload;
                         NBTLongArray const* block_data_field = nullptr;
                         uint32_t palette_size = 0u;
-                        std::vector<std::string> palette_data = {};
+                        std::vector<std::string>& palette_data = section_data.palette;
 
                         for (NBTField const& field2 : block_states)
                         {
@@ -113,19 +107,10 @@ void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<uint32_t> co
                                     NBTCompound const& block = blocks[block_index];
 
                                     for (NBTField const& field3 : block)
-                                    {
                                         if (field3.name == "Name"
                                             && field3.type == TAG_String)
-                                        {
-                                            #if 0
-                                            std::cout << "\t"
-                                                      << *(NBTString const*)field3.payload
-                                                      << std::endl;
-                                            #endif
                                             palette_data.push_back(
                                                 (*(NBTString const*)field3.payload).substr(10));
-                                        }
-                                    }
                                 }
                             }
 
@@ -136,7 +121,7 @@ void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<uint32_t> co
 
                         if (palette_size == 1)
                         {
-                            std::cout << "solid chunk" << std::endl;
+                            std::memset(section_data.block_ids.data(), 0, 2 * 4096);
                             continue;
                         }
 
@@ -146,61 +131,84 @@ void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<uint32_t> co
                             ++bit_count;
                         bit_count = std::max(bit_count, 4u);
 
-                        #if 0
-                        std::cout << bit_count << std::endl;
-                        uint32_t long_count = 4096 / (64/bit_count);
-                        std::cout << long_count << " " << block_data.size() << std::endl;
-                        for (uint32_t index = 0u; index < block_data.size(); ++index)
-                            std::cout << std::hex << block_data[index] << " ";
-                        std::cout << std::dec << std::endl;
-                        #endif
+                        uint64_t block_index = 0;
+                        uint32_t data_index = 0;
+                        uint8_t data_offset = 0;
+                        while (block_index < 4096 && data_index < block_data.size())
+                        {
+                            if (data_offset + bit_count > 64)
+                            {
+                                data_offset = 0;
+                                ++data_index;
+                            }
 
-                        state->chunk = vulkan->CreateTexture(
-                            16, 16, 16,
-                            VK_IMAGE_TYPE_3D, VK_FORMAT_R8_UNORM,
-                            VK_IMAGE_USAGE_TRANSFER_DST_BIT
-                            | VK_IMAGE_USAGE_SAMPLED_BIT,
-                            [&block_data, &palette_data, bit_count](void* mapped_data) {
-                                uint64_t block_index = 0;
-                                uint32_t data_index = 0;
-                                uint8_t data_offset = 0;
-                                uint8_t* blocks = (uint8_t*)mapped_data;
-                                while (block_index < 4096 && data_index < block_data.size())
-                                {
-                                    if (data_offset + bit_count > 64)
-                                    {
-                                        data_offset = 0;
-                                        ++data_index;
-                                    }
+                            uint16_t block_id = (uint16_t)
+                                ((block_data[data_index] >> data_offset)
+                                 & ((1ull << bit_count) - 1));
 
-                                    uint16_t block_id = (uint16_t)
-                                        ((block_data[data_index] >> data_offset)
-                                         & ((1ull << bit_count) - 1));
+                            uint32_t x = block_index % 16;
+                            uint32_t z = (block_index / 16) % 16;
+                            uint32_t y = (block_index / 256) % 16;
 
-                                    uint32_t x = block_index % 16;
-                                    uint32_t z = (block_index / 16) % 16;
-                                    uint32_t y = (block_index / 256) % 16;
-
-                                    blocks[z * 256 + y * 16 + x] =
-                                        ((palette_data[block_id] != "air")
-                                         && (palette_data[block_id] != "glow_lichen"))
-                                        ? 255
-                                        : 0;
-                                    data_offset += bit_count;
-                                    ++block_index;
-                                }
-                            });
+                            section_data.block_ids[z * 256 + y * 16 + x] = block_id;
+                            data_offset += bit_count;
+                            ++block_index;
+                        }
                     }
                 }
+
+                if (section_index > 0)
+                    output.sections[section_index] = std::move(section_data);
             }
         }
     }
+
+    return output;
+}
+
+RegionData DeserialiseRegion(std::string const& file_path)
+{
+    std::vector<uint8_t> region_file = systk::LoadFile(file_path.c_str());
+    mctk::MCAFileData mca_data = mctk::MCADecode(region_file.data(), region_file.size());
+    RegionData output = {};
+    output.chunks.reserve(1024);
+
+    for (uint32_t index = 0; index < 1024; ++index)
+        output.chunks.emplace_back(DecodeChunk(mca_data.chunks[index]));
+
+    return output;
+}
+
+void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<uint32_t> const& coords)
+{
+    state->current_section = coords;
+    uint32_t chunk_index = coords[0] + coords[2]*32;
+    RegionData::ChunkData const& chunk = state->region.chunks[chunk_index];
+    RegionData::SectionData const& section = chunk.sections[coords[1]+4];
+
+    state->chunk = vulkan->CreateTexture(
+        16, 16, 16,
+        VK_IMAGE_TYPE_3D, VK_FORMAT_R8_UNORM,
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT
+        | VK_IMAGE_USAGE_SAMPLED_BIT,
+        [&section](void* mapped_data) {
+            uint8_t* blocks = (uint8_t*)mapped_data;
+            for (uint32_t index = 0u; index < 4096; ++index)
+            {
+                blocks[index] =
+                    ((section.palette[section.block_ids[index]] != "air")
+                     && (section.palette[section.block_ids[index]] != "glow_lichen"))
+                    ? 255
+                    : 0;
+            }
+        });
 }
 
 void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 {
     state_t* _state = (state_t*)_pstate;
 
+    _state->region = DeserialiseRegion("../r.-1.6.mca");
     LoadSection(_state, _vulkan, { 28, 2, 21 });
 
     VkDescriptorPoolSize descpool_sizes[2] = {
