@@ -460,17 +460,18 @@ void RenderResources(void* _pstate,
         ivec2 screen_size;
     };
 
-    layout(location = 0) out vec3 iFS_chunk_coords;
+    layout(location = 0) out vec3 iFS_volume_coords;
 
     void main() {
         vec3 vertex = kTriVertices[kTriIndices[gl_VertexIndex]];
         gl_Position = projection * view_model * vec4(vertex, 1.0);
-        iFS_chunk_coords = vertex * 0.5 + vec3(0.5);
+        iFS_volume_coords = vertex * 0.5 + vec3(0.5);
     }
     )_";
 
     static char const voxel_traversal_func[] = R"(
-    vec2 VoxelTraversal(vec3 org, vec3 dir, sampler3D data, float d_max)
+    //vec2 VoxelTraversal(vec3 org, vec3 dir, sampler3D data, float d_max, float d_zero)
+    vec4 VoxelTraversal(vec3 org, vec3 dir, sampler3D data, float d_max, float d_zero)
     {
         vec3 step_sign = sign(dir);
         vec3 voxel_space_org = org * CHUNK_VOXEL_COUNT;
@@ -482,9 +483,27 @@ void RenderResources(void* _pstate,
         vec3 uvwstep = step_sign / CHUNK_VOXEL_COUNT;
         vec3 puvw = (p + vec3(0.5)) / CHUNK_VOXEL_COUNT;
         vec3 start = puvw;
+        float uvw_dt = length(uvwstep);
 
-        float accum = 0.0;
+        float accum = d_zero;
         float t = 0.0;
+
+        vec3 dt = vec3(sqrt(uvwstep.x*uvwstep.x / dir.x*dir.x),
+                       sqrt(uvwstep.y*uvwstep.y / dir.y*dir.y),
+                       sqrt(uvwstep.z*uvwstep.z / dir.z*dir.z));
+
+        // dt_x
+        // dir == (x, y, z)
+        // dir' == (dt_x, y * dt_x/x, z * dt_x/x)
+        // dt(x) = sqrt(dt_x^2 + (y*dt_x/x)^2 + (z*dt_x/x)^2)
+        // dt(x) = sqrt(dt_x^2 + (y^2*dt_x^2 + z^2*dt_x^2)/x^2)
+        // dt(x) = sqrt(dt_x^2 + (y^2+z^2)(dt_x^2)/x^2)
+        // dt(x) = sqrt((x^2+y^2+z^2)(dt_x^2)/x^2)
+        // (x^2+y^2+z^2) == 1
+        // dt(x) = sqrt(dt_x^2/x^2)
+
+        // step = (x, y)
+        // l(step) = sqrt(x^2 + y^2)
 
         while((puvw.x * step_sign.x < compv.x)
               && (puvw.y * step_sign.y < compv.y)
@@ -500,13 +519,13 @@ void RenderResources(void* _pstate,
                 {
                     puvw.x += uvwstep.x;
                     max_t.x += delta_t.x;
-                    t += delta_t.x;
+                    t += dt.x;
                 }
                 else
                 {
                     puvw.z += uvwstep.z;
                     max_t.z += delta_t.z;
-                    t += delta_t.z;
+                    t += dt.z;
                 }
             }
 
@@ -516,23 +535,23 @@ void RenderResources(void* _pstate,
                 {
                     puvw.y += uvwstep.y;
                     max_t.y += delta_t.y;
-                    t += delta_t.y;
+                    t += dt.y;
                 }
                 else
                 {
                     puvw.z += uvwstep.z;
                     max_t.z += delta_t.z;
-                    t += delta_t.z;
+                    t += dt.z;
                 }
             }
         }
 
-        return vec2(accum, t);
+        return vec4(puvw, t);
     }
     )";
 
     static char const region_fshader[] = R"(
-    layout(location = 0) in vec3 iFS_chunk_coords;
+    layout(location = 0) in vec3 iFS_volume_coords;
     layout(location = 0) out vec4 color;
     layout(set = 0, binding = 0) uniform sampler3D chunk;
 
@@ -551,53 +570,83 @@ void RenderResources(void* _pstate,
             * vec3(uv * 2.0 - vec2(1.0), 1.0);
         dir = normalize(dir);
         dir = -dir;
-        vec3 org = iFS_chunk_coords - dir * 0.00001;
+        vec3 org = iFS_volume_coords - dir * 0.00001;
 
-        vec2 traversal = VoxelTraversal(org, dir, chunk, 32.0);
-        float d = traversal.x;
-        float t = traversal.y;
+#if 1
+        float ref_d = 0.0;
+        float test_d = 0.0;
+
+        {
+            vec4 traversal = VoxelTraversal(org, dir, chunk, 4.0, 0.0);
+            vec3 puvw = traversal.xyz;
+            float d = traversal.w;
+
+            traversal = VoxelTraversal(puvw, dir, chunk, 8.0, d);
+            d = traversal.w;
+            float t = distance(org, traversal.xyz);
+
+            test_d = d;
+        }
+
+        {
+            vec4 traversal = VoxelTraversal(org, dir, chunk, 8.0, 0.0);
+            float d = traversal.w;
+            float t = distance(org, traversal.xyz);
+            ref_d = d;
+        }
+
+        color = vec4(vec3(ref_d - test_d, test_d - ref_d, 0.0), 1.0);
+#else
+        vec4 traversal = VoxelTraversal(org, dir, chunk, 8.0, 0.0);
+        float d = traversal.w;
+        float t = distance(org, traversal.xyz);
+        color = vec4(vec3(d - t, t - d, 0.0), 1.0);
+#endif
 
         //color = vec4(c/16.0, accum/32.0);
-        color = vec4(vec3(t/16.0),d/32.0);
-        //color = vec4(vec3(16.0/t), accum);
+        //color = vec4(vec3(t/16.0),d/32.0);
+        //color = vec4(vec3((d/16.0)), d);
+        //color = vec4(vec3(d - t, t - d, 0.0), 1.0);
     }
     )";
 
-    VkShaderModule vmodule =
-        _vulkan->CompileShader_GLSL(VK_SHADER_STAGE_VERTEX_BIT,
-                                    "draw_cube_vshader",
-                                    {
-                                        "#version 450",
-                                        "#define CW_CUBE",
-                                        draw_cube_vshader
-                                    });
+    {
+        VkShaderModule vmodule =
+            _vulkan->CompileShader_GLSL(VK_SHADER_STAGE_VERTEX_BIT,
+                                        "draw_cube_vshader_cw",
+                                        {
+                                            "#version 450",
+                                            "#define CW_CUBE",
+                                            draw_cube_vshader
+                                        });
 
-    VkShaderModule fmodule =
-        _vulkan->CompileShader_GLSL(VK_SHADER_STAGE_FRAGMENT_BIT,
-                                    "region_fshader",
-                                    {
-                                        "#version 450",
-                                        "#define CHUNK_VOXEL_COUNT 32.0",
-                                        voxel_traversal_func,
-                                        region_fshader
-                                    });
+        VkShaderModule fmodule =
+            _vulkan->CompileShader_GLSL(VK_SHADER_STAGE_FRAGMENT_BIT,
+                                        "region_fshader",
+                                        {
+                                            "#version 450",
+                                            "#define CHUNK_VOXEL_COUNT 32.0",
+                                            voxel_traversal_func,
+                                            region_fshader
+                                        });
 
-    if (_state->region_pipeline != VK_NULL_HANDLE)
-        vkDestroyPipeline(_vulkan->device, _state->region_pipeline, nullptr);
+        if (_state->region_pipeline != VK_NULL_HANDLE)
+            vkDestroyPipeline(_vulkan->device, _state->region_pipeline, nullptr);
 
-    _state->region_pipeline = _vulkan->CreatePipeline(
-        _state->pipeline_layout,
-        _swapchain.render_pass,
-        {
-            { vmodule, VK_SHADER_STAGE_VERTEX_BIT },
-            { fmodule, VK_SHADER_STAGE_FRAGMENT_BIT }
-        },
-        VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-        {}
-    );
+        _state->region_pipeline = _vulkan->CreatePipeline(
+            _state->pipeline_layout,
+            _swapchain.render_pass,
+            {
+                { vmodule, VK_SHADER_STAGE_VERTEX_BIT },
+                { fmodule, VK_SHADER_STAGE_FRAGMENT_BIT }
+            },
+            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+            {}
+        );
 
-    vkDestroyShaderModule(_vulkan->device, vmodule, nullptr);
-    vkDestroyShaderModule(_vulkan->device, fmodule, nullptr);
+        vkDestroyShaderModule(_vulkan->device, vmodule, nullptr);
+        vkDestroyShaderModule(_vulkan->device, fmodule, nullptr);
+    }
 }
 
 bool Update(void* _pstate, vktk::Context* _vulkan,
