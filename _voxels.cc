@@ -470,46 +470,26 @@ void RenderResources(void* _pstate,
     )_";
 
     static char const voxel_traversal_func[] = R"(
-    //vec2 VoxelTraversal(vec3 org, vec3 dir, sampler3D data, float d_max, float d_zero)
-    vec4 VoxelTraversal(vec3 org, vec3 dir, sampler3D data, float d_max, float d_zero)
+    vec2 VoxelTraversal(vec3 org, vec3 dir, sampler3D data, float d_max, float d_zero)
     {
         vec3 step_sign = sign(dir);
+        vec3 exit_value = step_sign * 0.5 + vec3(0.5);
+
         vec3 voxel_space_org = org * CHUNK_VOXEL_COUNT;
-        vec3 p = floor(voxel_space_org);
-        vec3 manh = step_sign * (vec3(0.5) - fract(voxel_space_org)) + vec3(0.5);
-        vec3 compv = step_sign * 0.5 + vec3(0.5);
-        vec3 delta_t = 1.0 / abs(dir);
-        vec3 max_t = manh * delta_t;
-        vec3 uvwstep = step_sign / CHUNK_VOXEL_COUNT;
-        vec3 puvw = (p + vec3(0.5)) / CHUNK_VOXEL_COUNT;
-        vec3 start = puvw;
-        float uvw_dt = length(uvwstep);
+        vec3 voxel_coords = (floor(voxel_space_org) + vec3(0.5)) / CHUNK_VOXEL_COUNT;
+        vec3 voxel_step = step_sign / CHUNK_VOXEL_COUNT;
+
+        vec3 edge_distance = exit_value - (step_sign * fract(voxel_space_org));
+        vec3 delta_t = 1.0 / (abs(dir) * CHUNK_VOXEL_COUNT);
+        vec3 max_t = abs(edge_distance) * delta_t;
 
         float accum = d_zero;
-        float t = 0.0;
 
-        vec3 dt = vec3(sqrt(uvwstep.x*uvwstep.x / dir.x*dir.x),
-                       sqrt(uvwstep.y*uvwstep.y / dir.y*dir.y),
-                       sqrt(uvwstep.z*uvwstep.z / dir.z*dir.z));
-
-        // dt_x
-        // dir == (x, y, z)
-        // dir' == (dt_x, y * dt_x/x, z * dt_x/x)
-        // dt(x) = sqrt(dt_x^2 + (y*dt_x/x)^2 + (z*dt_x/x)^2)
-        // dt(x) = sqrt(dt_x^2 + (y^2*dt_x^2 + z^2*dt_x^2)/x^2)
-        // dt(x) = sqrt(dt_x^2 + (y^2+z^2)(dt_x^2)/x^2)
-        // dt(x) = sqrt((x^2+y^2+z^2)(dt_x^2)/x^2)
-        // (x^2+y^2+z^2) == 1
-        // dt(x) = sqrt(dt_x^2/x^2)
-
-        // step = (x, y)
-        // l(step) = sqrt(x^2 + y^2)
-
-        while((puvw.x * step_sign.x < compv.x)
-              && (puvw.y * step_sign.y < compv.y)
-              && (puvw.z * step_sign.z < compv.z))
+        while((voxel_coords.x * step_sign.x < exit_value.x)
+              && (voxel_coords.y * step_sign.y < exit_value.y)
+              && (voxel_coords.z * step_sign.z < exit_value.z))
         {
-            accum += texture(data, puvw).x;
+            accum += texture(data, voxel_coords).x;
             if (accum >= d_max)
                 break;
 
@@ -517,15 +497,13 @@ void RenderResources(void* _pstate,
             {
                 if (max_t.x < max_t.z)
                 {
-                    puvw.x += uvwstep.x;
+                    voxel_coords.x += voxel_step.x;
                     max_t.x += delta_t.x;
-                    t += dt.x;
                 }
                 else
                 {
-                    puvw.z += uvwstep.z;
+                    voxel_coords.z += voxel_step.z;
                     max_t.z += delta_t.z;
-                    t += dt.z;
                 }
             }
 
@@ -533,20 +511,19 @@ void RenderResources(void* _pstate,
             {
                 if (max_t.y < max_t.z)
                 {
-                    puvw.y += uvwstep.y;
+                    voxel_coords.y += voxel_step.y;
                     max_t.y += delta_t.y;
-                    t += dt.y;
                 }
                 else
                 {
-                    puvw.z += uvwstep.z;
+                    voxel_coords.z += voxel_step.z;
                     max_t.z += delta_t.z;
-                    t += dt.z;
                 }
             }
         }
 
-        return vec4(puvw, t);
+        float exit_t = min(max_t.x, min(max_t.y, max_t.z));
+        return vec2(accum, exit_t);
     }
     )";
 
@@ -572,40 +549,39 @@ void RenderResources(void* _pstate,
         dir = -dir;
         vec3 org = iFS_volume_coords - dir * 0.00001;
 
-#if 1
+#if 0
         float ref_d = 0.0;
         float test_d = 0.0;
 
         {
-            vec4 traversal = VoxelTraversal(org, dir, chunk, 4.0, 0.0);
-            vec3 puvw = traversal.xyz;
-            float d = traversal.w;
+            vec2 traversal = VoxelTraversal(org, dir, chunk, 4.0, 0.0);
+            float d = traversal.x;
+            float t = traversal.y;
 
-            traversal = VoxelTraversal(puvw, dir, chunk, 8.0, d);
-            d = traversal.w;
-            float t = distance(org, traversal.xyz);
+            traversal = VoxelTraversal(org+dir*t, dir, chunk, 8.0, d);
+            d = traversal.x;
+            t = traversal.y;
 
             test_d = d;
         }
 
         {
-            vec4 traversal = VoxelTraversal(org, dir, chunk, 8.0, 0.0);
-            float d = traversal.w;
-            float t = distance(org, traversal.xyz);
+            vec2 traversal = VoxelTraversal(org, dir, chunk, 8.0, 0.0);
+            float d = traversal.x;
+            float t = traversal.y;
             ref_d = d;
         }
 
         color = vec4(vec3(ref_d - test_d, test_d - ref_d, 0.0), 1.0);
 #else
-        vec4 traversal = VoxelTraversal(org, dir, chunk, 8.0, 0.0);
-        float d = traversal.w;
-        float t = distance(org, traversal.xyz);
-        color = vec4(vec3(d - t, t - d, 0.0), 1.0);
+        vec2 traversal = VoxelTraversal(org, dir, chunk, 32.0, 0.0);
+        float d = traversal.x;
+        float t = traversal.y;
+        //color = vec4(vec3(org+dir*t), 1.0);
+        color = vec4(vec3((d/16.0)), d/32.0);
 #endif
 
-        //color = vec4(c/16.0, accum/32.0);
-        //color = vec4(vec3(t/16.0),d/32.0);
-        //color = vec4(vec3((d/16.0)), d);
+        //color = vec4(vec3(t),d/32.0);
         //color = vec4(vec3(d - t, t - d, 0.0), 1.0);
     }
     )";
