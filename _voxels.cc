@@ -36,7 +36,7 @@ struct state_t
 
     vktk::Texture chunk;
     VkImageView chunk_view;
-    VkPipeline graphics_pipeline;
+    VkPipeline region_pipeline;
     VkPipelineLayout pipeline_layout;
     VkSampler sampler;
     VkDescriptorPool descriptor_pool;
@@ -421,10 +421,10 @@ void RenderResources(void* _pstate,
     //  /
     // Z
 
-    static char const vshader[] = R"_(
-    #version 450
+    static char const draw_cube_vshader[] = R"_(
     const uint kTriIndices[] = uint[36](
-#if 0
+#ifndef CW_CUBE
+// COUNTERCLOCKWISE FACES
         0, 1, 2,  2, 1, 3,
         0, 4, 1,  1, 4, 5,
         3, 1, 7,  7, 1, 5,
@@ -432,6 +432,7 @@ void RenderResources(void* _pstate,
         2, 6, 0,  0, 6, 4,
         2, 3, 6,  6, 3, 7
 #else
+// CLOCKWISE FACES
         0, 2, 1,  1, 2, 3,
         0, 1, 4,  4, 1, 5,
         3, 7, 1,  1, 7, 5,
@@ -467,35 +468,10 @@ void RenderResources(void* _pstate,
         iFS_chunk_coords = vertex * 0.5 + vec3(0.5);
     }
     )_";
-    static uint32_t const vsize = sizeof(vshader) - 1u;
 
-    static char const fshader[] = R"(
-    #version 450
-    layout(location = 0) in vec3 iFS_chunk_coords;
-    layout(location = 0) out vec4 color;
-    layout(set = 0, binding = 0) uniform sampler3D chunk;
-
-    layout(std140, set = 0, binding = 1) uniform MatrixBlock {
-        mat4 projection;
-        mat4 view_model;
-        mat4 view;
-        ivec2 screen_size;
-    };
-
-    #define CHUNK_VOXEL_COUNT 32.0
-//16.0
-
-    void main() {
-        vec2 uv = vec2(gl_FragCoord.x, gl_FragCoord.y) / vec2(screen_size.x, screen_size.y);
-        vec3 dir =
-            inverse(mat3(view_model)) *
-            inverse(mat3(projection))
-            * vec3(uv * 2.0 - vec2(1.0), 1.0);
-        dir = normalize(dir);
-        dir = -dir;
-        vec3 org = iFS_chunk_coords - dir * 0.00001;
-        float block = texture(chunk, org).x;
-
+    static char const voxel_traversal_func[] = R"(
+    vec2 VoxelTraversal(vec3 org, vec3 dir, sampler3D data, float d_max)
+    {
         vec3 step_sign = sign(dir);
         vec3 voxel_space_org = org * CHUNK_VOXEL_COUNT;
         vec3 p = floor(voxel_space_org);
@@ -509,17 +485,14 @@ void RenderResources(void* _pstate,
 
         float accum = 0.0;
         float t = 0.0;
-        vec3 n = vec3(0.0);
-        vec3 c = vec3(0.0);
 
         while((puvw.x * step_sign.x < compv.x)
               && (puvw.y * step_sign.y < compv.y)
               && (puvw.z * step_sign.z < compv.z))
         {
-            float d = texture(chunk, puvw).x;
-            c += puvw*d;
-            accum += d;
-            //if (accum.x >= 1.0) break;
+            accum += texture(data, puvw).x;
+            if (accum >= d_max)
+                break;
 
             if (max_t.x < max_t.y)
             {
@@ -528,14 +501,12 @@ void RenderResources(void* _pstate,
                     puvw.x += uvwstep.x;
                     max_t.x += delta_t.x;
                     t += delta_t.x;
-                    n = -vec3(step_sign.x, 0.0, 0.0);
                 }
                 else
                 {
                     puvw.z += uvwstep.z;
                     max_t.z += delta_t.z;
                     t += delta_t.z;
-                    n = -vec3(0.0, 0.0, step_sign.z);
                 }
             }
 
@@ -546,48 +517,75 @@ void RenderResources(void* _pstate,
                     puvw.y += uvwstep.y;
                     max_t.y += delta_t.y;
                     t += delta_t.y;
-                    n = -vec3(0.0, step_sign.y, 0.0);
                 }
                 else
                 {
                     puvw.z += uvwstep.z;
                     max_t.z += delta_t.z;
                     t += delta_t.z;
-                    n = -vec3(0.0, 0.0, step_sign.z);
                 }
             }
         }
 
-#if 0
-        if (accum.x >= 1.0)
-            color = vec4(puvw, 1.0);
-        else
-            color = vec4(0.0);
-#else
-        //color = vec4(c/16.0, accum/32.0);
-        color = vec4(vec3(accum/16.0),accum/32.0);
-        //color = vec4(vec3(16.0/t), accum);
-#endif
+        return vec2(accum, t);
     }
     )";
-    static uint32_t const fsize = sizeof(fshader) - 1u;
+
+    static char const region_fshader[] = R"(
+    layout(location = 0) in vec3 iFS_chunk_coords;
+    layout(location = 0) out vec4 color;
+    layout(set = 0, binding = 0) uniform sampler3D chunk;
+
+    layout(std140, set = 0, binding = 1) uniform MatrixBlock {
+        mat4 projection;
+        mat4 view_model;
+        mat4 view;
+        ivec2 screen_size;
+    };
+
+    void main() {
+        vec2 uv = vec2(gl_FragCoord.x, gl_FragCoord.y) / vec2(screen_size.x, screen_size.y);
+        vec3 dir =
+            inverse(mat3(view_model)) *
+            inverse(mat3(projection))
+            * vec3(uv * 2.0 - vec2(1.0), 1.0);
+        dir = normalize(dir);
+        dir = -dir;
+        vec3 org = iFS_chunk_coords - dir * 0.00001;
+
+        vec2 traversal = VoxelTraversal(org, dir, chunk, 32.0);
+        float d = traversal.x;
+        float t = traversal.y;
+
+        //color = vec4(c/16.0, accum/32.0);
+        color = vec4(vec3(t/16.0),d/32.0);
+        //color = vec4(vec3(16.0/t), accum);
+    }
+    )";
 
     VkShaderModule vmodule =
         _vulkan->CompileShader_GLSL(VK_SHADER_STAGE_VERTEX_BIT,
-                                    "vshader",
-                                    vshader,
-                                    vsize);
+                                    "draw_cube_vshader",
+                                    {
+                                        "#version 450",
+                                        "#define CW_CUBE",
+                                        draw_cube_vshader
+                                    });
 
     VkShaderModule fmodule =
         _vulkan->CompileShader_GLSL(VK_SHADER_STAGE_FRAGMENT_BIT,
-                                    "fshader",
-                                    fshader,
-                                    fsize);
+                                    "region_fshader",
+                                    {
+                                        "#version 450",
+                                        "#define CHUNK_VOXEL_COUNT 32.0",
+                                        voxel_traversal_func,
+                                        region_fshader
+                                    });
 
-    if (_state->graphics_pipeline != VK_NULL_HANDLE)
-        vkDestroyPipeline(_vulkan->device, _state->graphics_pipeline, nullptr);
+    if (_state->region_pipeline != VK_NULL_HANDLE)
+        vkDestroyPipeline(_vulkan->device, _state->region_pipeline, nullptr);
 
-    _state->graphics_pipeline = _vulkan->CreatePipeline(
+    _state->region_pipeline = _vulkan->CreatePipeline(
         _state->pipeline_layout,
         _swapchain.render_pass,
         {
@@ -799,7 +797,7 @@ void Draw(void* _pstate,
 
     vkCmdBeginRenderPass(command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
-    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->graphics_pipeline);
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->region_pipeline);
     vkCmdBindDescriptorSets(command_buffer,
                             VK_PIPELINE_BIND_POINT_GRAPHICS,
                             _state->pipeline_layout, 0u,
@@ -845,8 +843,8 @@ void Shutdown(void* _pstate,
     vkDestroyImage(_vulkan->device, _state->chunk.image, nullptr);
 
     vkDestroyImageView(_vulkan->device, _state->chunk_view, nullptr);
-    vkDestroyPipeline(_vulkan->device, _state->graphics_pipeline, nullptr);
-    _state->graphics_pipeline = VK_NULL_HANDLE;
+    vkDestroyPipeline(_vulkan->device, _state->region_pipeline, nullptr);
+    _state->region_pipeline = VK_NULL_HANDLE;
     vkDestroyPipelineLayout(_vulkan->device, _state->pipeline_layout, nullptr);
     vkDestroySampler(_vulkan->device, _state->sampler, nullptr);
     vkFreeDescriptorSets(_vulkan->device, _state->descriptor_pool, 1, &_state->descriptor_set);

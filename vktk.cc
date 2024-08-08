@@ -16,6 +16,7 @@
 #include <shaderc/shaderc.hpp>
 
 #include <iostream>
+#include <numeric>
 #include <vector>
 
 namespace
@@ -250,6 +251,16 @@ Context::~Context()
     vkDestroyInstance(instance, nullptr);
 }
 
+
+VkShaderModule Context::CompileShader_GLSL(VkShaderStageFlagBits _shaderStage,
+                                           char const* _shaderName,
+                                           std::vector<std::string> const& _code)
+{
+    std::string full_source =
+        std::accumulate(_code.begin(), _code.end(), std::string(""),
+                        [](std::string const& a, std::string const& b){ return a + "\n" + b; });
+    return CompileShader_GLSL(_shaderStage, _shaderName, full_source.c_str(), full_source.size());
+}
 
 VkShaderModule Context::CompileShader_GLSL(VkShaderStageFlagBits _shaderStage,
                                            char const* _shaderName,

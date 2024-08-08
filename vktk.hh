@@ -186,6 +186,10 @@ struct Context
 
     VkShaderModule CompileShader_GLSL(VkShaderStageFlagBits _shaderStage,
                                       char const* _shaderName,
+                                      std::vector<std::string> const& _code);
+
+    VkShaderModule CompileShader_GLSL(VkShaderStageFlagBits _shaderStage,
+                                      char const* _shaderName,
                                       char const* _code,
                                       size_t _codeSize);
 
