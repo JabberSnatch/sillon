@@ -470,60 +470,71 @@ void RenderResources(void* _pstate,
     )_";
 
     static char const voxel_traversal_func[] = R"(
-    vec2 VoxelTraversal(vec3 org, vec3 dir, sampler3D data, float d_max, float d_zero)
+    struct DDAContext
     {
-        vec3 step_sign = sign(dir);
-        vec3 exit_value = step_sign * 0.5 + vec3(0.5);
+        vec3 step_sign;
+        vec3 exit_value;
+        vec3 edge_distance;
+        vec3 delta_t;
+        vec3 max_t;
+        vec3 voxel_coords;
+        vec3 voxel_step;
+    };
 
+    DDAContext InitDDAContext(vec3 org, vec3 dir)
+    {
         vec3 voxel_space_org = org * CHUNK_VOXEL_COUNT;
-        vec3 voxel_coords = (floor(voxel_space_org) + vec3(0.5)) / CHUNK_VOXEL_COUNT;
-        vec3 voxel_step = step_sign / CHUNK_VOXEL_COUNT;
 
-        vec3 edge_distance = exit_value - (step_sign * fract(voxel_space_org));
-        vec3 delta_t = 1.0 / (abs(dir) * CHUNK_VOXEL_COUNT);
-        vec3 max_t = abs(edge_distance) * delta_t;
+        DDAContext ctx;
+        ctx.step_sign = sign(dir);
+        ctx.exit_value = ctx.step_sign * 0.5 + vec3(0.5);
+        ctx.edge_distance = ctx.exit_value - (ctx.step_sign * fract(voxel_space_org));
+        ctx.delta_t = 1.0 / (abs(dir) * CHUNK_VOXEL_COUNT);
+        ctx.max_t = abs(ctx.edge_distance) * ctx.delta_t;
+        ctx.voxel_coords = (floor(voxel_space_org) + vec3(0.5)) / CHUNK_VOXEL_COUNT;
+        ctx.voxel_step = ctx.step_sign / CHUNK_VOXEL_COUNT;
+        return ctx;
+    }
 
-        float accum = d_zero;
+    vec2 StepDDAContext(inout DDAContext ctx, sampler3D data)
+    {
+        float mask = 1.0;
+        if (!((ctx.voxel_coords.x * ctx.step_sign.x < ctx.exit_value.x)
+              && (ctx.voxel_coords.y * ctx.step_sign.y < ctx.exit_value.y)
+              && (ctx.voxel_coords.z * ctx.step_sign.z < ctx.exit_value.z)))
+            mask = 0.0;
 
-        while((voxel_coords.x * step_sign.x < exit_value.x)
-              && (voxel_coords.y * step_sign.y < exit_value.y)
-              && (voxel_coords.z * step_sign.z < exit_value.z))
+        float d = texture(data, ctx.voxel_coords).x * mask;
+
+        if (ctx.max_t.x < ctx.max_t.y)
         {
-            accum += texture(data, voxel_coords).x;
-            if (accum >= d_max)
-                break;
-
-            if (max_t.x < max_t.y)
+            if (ctx.max_t.x < ctx.max_t.z)
             {
-                if (max_t.x < max_t.z)
-                {
-                    voxel_coords.x += voxel_step.x;
-                    max_t.x += delta_t.x;
-                }
-                else
-                {
-                    voxel_coords.z += voxel_step.z;
-                    max_t.z += delta_t.z;
-                }
+                ctx.voxel_coords.x += ctx.voxel_step.x * mask;
+                ctx.max_t.x += ctx.delta_t.x * mask;
             }
-
             else
             {
-                if (max_t.y < max_t.z)
-                {
-                    voxel_coords.y += voxel_step.y;
-                    max_t.y += delta_t.y;
-                }
-                else
-                {
-                    voxel_coords.z += voxel_step.z;
-                    max_t.z += delta_t.z;
-                }
+                ctx.voxel_coords.z += ctx.voxel_step.z * mask;
+                ctx.max_t.z += ctx.delta_t.z * mask;
             }
         }
 
-        float exit_t = min(max_t.x, min(max_t.y, max_t.z));
-        return vec2(accum, exit_t);
+        else
+        {
+            if (ctx.max_t.y < ctx.max_t.z)
+            {
+                ctx.voxel_coords.y += ctx.voxel_step.y * mask;
+                ctx.max_t.y += ctx.delta_t.y * mask;
+            }
+            else
+            {
+                ctx.voxel_coords.z += ctx.voxel_step.z * mask;
+                ctx.max_t.z += ctx.delta_t.z * mask;
+            }
+        }
+
+        return vec2(d, 1.0 - mask);
     }
     )";
 
@@ -549,37 +560,13 @@ void RenderResources(void* _pstate,
         dir = -dir;
         vec3 org = iFS_volume_coords - dir * 0.00001;
 
-#if 0
-        float ref_d = 0.0;
-        float test_d = 0.0;
+        DDAContext ctx = InitDDAContext(org, dir);
+        vec2 d = vec2(0.0);
+        while (d.x < 64.0 && d.y == 0.0)
+            d += StepDDAContext(ctx, chunk);
 
-        {
-            vec2 traversal = VoxelTraversal(org, dir, chunk, 4.0, 0.0);
-            float d = traversal.x;
-            float t = traversal.y;
-
-            traversal = VoxelTraversal(org+dir*t, dir, chunk, 8.0, d);
-            d = traversal.x;
-            t = traversal.y;
-
-            test_d = d;
-        }
-
-        {
-            vec2 traversal = VoxelTraversal(org, dir, chunk, 8.0, 0.0);
-            float d = traversal.x;
-            float t = traversal.y;
-            ref_d = d;
-        }
-
-        color = vec4(vec3(ref_d - test_d, test_d - ref_d, 0.0), 1.0);
-#else
-        vec2 traversal = VoxelTraversal(org, dir, chunk, 32.0, 0.0);
-        float d = traversal.x;
-        float t = traversal.y;
-        //color = vec4(vec3(org+dir*t), 1.0);
-        color = vec4(vec3((d/16.0)), d/32.0);
-#endif
+        float t = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
+        color = vec4(vec3((d.x/16.0)), d.x/32.0);
 
         //color = vec4(vec3(t),d/32.0);
         //color = vec4(vec3(d - t, t - d, 0.0), 1.0);

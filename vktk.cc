@@ -93,6 +93,7 @@ Context::Context(uint64_t _hinstance, uint64_t _hwindow)
 
             if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
             {
+                std::cout << "[vktk] [" << properties.deviceName << "]" << std::endl;
                 physical_device = availableDevices[devIndex];
                 memory_properties = memoryProperties;
                 break;
