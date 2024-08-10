@@ -212,10 +212,10 @@ void LoadRegion(state_t* state, vktk::Context* vulkan)
     RegionData const& region = state->region;
     state->region_texture = vulkan->CreateTexture(
         32, 32, 32,
-        VK_IMAGE_TYPE_3D, VK_FORMAT_R8_UNORM,
+        VK_IMAGE_TYPE_3D, VK_FORMAT_R16G16_UINT,
         VK_IMAGE_USAGE_SAMPLED_BIT,
         [&region](void* mapped_data) {
-            uint8_t* sections = (uint8_t*)mapped_data;
+            uint16_t* sections = (uint16_t*)mapped_data;
 
             for (uint32_t xindex = 0; xindex < 32; ++xindex)
             {
@@ -235,7 +235,11 @@ void LoadRegion(state_t* state, vktk::Context* vulkan)
                                     ? 1.f / 4096.f
                                     : 0.f;
 
-                        sections[xindex + yindex*32 + zindex*32*32] = (uint8_t)(average * 255.f);
+                        uint32_t index = xindex + yindex*32 + zindex*32*32;
+                        sections[index * 2] = (uint16_t)(average * 65535.f);
+                        sections[index * 2+1] = 0xffff;
+                        //sections[index * 4+1] = 0xff;
+                        //sections[index * 4+2] = 0xff;
                     }
                 }
             }
@@ -331,7 +335,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     image_view_create.flags = 0u;
     image_view_create.image = _state->chunk.image;
     image_view_create.viewType = VK_IMAGE_VIEW_TYPE_3D;
-    image_view_create.format = VK_FORMAT_R8_UNORM;
+    image_view_create.format = VK_FORMAT_R16G16_UINT;
     image_view_create.components = VkComponentMapping{};
     image_view_create.subresourceRange = VkImageSubresourceRange{
         VK_IMAGE_ASPECT_COLOR_BIT,
@@ -479,6 +483,7 @@ void RenderResources(void* _pstate,
         vec3 max_t;
         vec3 voxel_coords;
         vec3 voxel_step;
+        float mask;
     };
 
     DDAContext InitDDAContext(vec3 org, vec3 dir)
@@ -493,30 +498,60 @@ void RenderResources(void* _pstate,
         ctx.max_t = abs(ctx.edge_distance) * ctx.delta_t;
         ctx.voxel_coords = (floor(voxel_space_org) + vec3(0.5)) / CHUNK_VOXEL_COUNT;
         ctx.voxel_step = ctx.step_sign / CHUNK_VOXEL_COUNT;
+
+        // Equivalent to mask =
+        // ((voxel_coords.x * step_sign.x < exit_value.x) &&
+        // (voxel_coords.y * step_sign.y < exit_value.y) &&
+        // (voxel_coords.z * step_sign.z < exit_value.z)) ? 1.0 : 0.0
+        ctx.mask =
+            (1.0 - step(ctx.exit_value.x, ctx.voxel_coords.x * ctx.step_sign.x))
+            * (1.0 - step(ctx.exit_value.y, ctx.voxel_coords.y * ctx.step_sign.y))
+            * (1.0 - step(ctx.exit_value.z, ctx.voxel_coords.z * ctx.step_sign.z));
+
         return ctx;
     }
 
-    vec2 StepDDAContext(inout DDAContext ctx, sampler3D data)
+    void StepDDAContext(inout DDAContext ctx)
     {
-        float mask = 1.0;
-        if (!((ctx.voxel_coords.x * ctx.step_sign.x < ctx.exit_value.x)
-              && (ctx.voxel_coords.y * ctx.step_sign.y < ctx.exit_value.y)
-              && (ctx.voxel_coords.z * ctx.step_sign.z < ctx.exit_value.z)))
-            mask = 0.0;
+        ctx.mask =
+            (1.0 - step(ctx.exit_value.x, ctx.voxel_coords.x * ctx.step_sign.x))
+            * (1.0 - step(ctx.exit_value.y, ctx.voxel_coords.y * ctx.step_sign.y))
+            * (1.0 - step(ctx.exit_value.z, ctx.voxel_coords.z * ctx.step_sign.z));
 
-        float d = texture(data, ctx.voxel_coords).x * mask;
+#if 1
+        vec3 order = vec3(
+            // ctx.max_t.x < ctx.max_t.y
+            1.0 - step(ctx.max_t.y, ctx.max_t.x),
+            // ctx.max_t.x < ctx.max_t.z
+            1.0 - step(ctx.max_t.z, ctx.max_t.x),
+            // ctx.max_t.y < ctx.max_t.z
+            1.0 - step(ctx.max_t.z, ctx.max_t.y));
+
+        vec3 exec_mask = vec3(
+            // X && Y
+            order.x * order.y,
+            // !X && Z
+            (1.0 - order.x) * order.z,
+            // (X && !Y) || (!X && Z)
+            order.x * (1.0 - order.y) + (1.0 - order.x) * (1.0 - order.z)
+        ) * ctx.mask;
+
+        ctx.voxel_coords += ctx.voxel_step * exec_mask;
+        ctx.max_t += ctx.delta_t * exec_mask;
+
+#else
 
         if (ctx.max_t.x < ctx.max_t.y)
         {
             if (ctx.max_t.x < ctx.max_t.z)
             {
-                ctx.voxel_coords.x += ctx.voxel_step.x * mask;
-                ctx.max_t.x += ctx.delta_t.x * mask;
+                ctx.voxel_coords.x += ctx.voxel_step.x * ctx.mask;
+                ctx.max_t.x += ctx.delta_t.x * ctx.mask;
             }
             else
             {
-                ctx.voxel_coords.z += ctx.voxel_step.z * mask;
-                ctx.max_t.z += ctx.delta_t.z * mask;
+                ctx.voxel_coords.z += ctx.voxel_step.z * ctx.mask;
+                ctx.max_t.z += ctx.delta_t.z * ctx.mask;
             }
         }
 
@@ -524,24 +559,23 @@ void RenderResources(void* _pstate,
         {
             if (ctx.max_t.y < ctx.max_t.z)
             {
-                ctx.voxel_coords.y += ctx.voxel_step.y * mask;
-                ctx.max_t.y += ctx.delta_t.y * mask;
+                ctx.voxel_coords.y += ctx.voxel_step.y * ctx.mask;
+                ctx.max_t.y += ctx.delta_t.y * ctx.mask;
             }
             else
             {
-                ctx.voxel_coords.z += ctx.voxel_step.z * mask;
-                ctx.max_t.z += ctx.delta_t.z * mask;
+                ctx.voxel_coords.z += ctx.voxel_step.z * ctx.mask;
+                ctx.max_t.z += ctx.delta_t.z * ctx.mask;
             }
         }
-
-        return vec2(d, 1.0 - mask);
+#endif
     }
     )";
 
     static char const region_fshader[] = R"(
     layout(location = 0) in vec3 iFS_volume_coords;
     layout(location = 0) out vec4 color;
-    layout(set = 0, binding = 0) uniform sampler3D chunk;
+    layout(set = 0, binding = 0) uniform usampler3D chunk;
 
     layout(std140, set = 0, binding = 1) uniform MatrixBlock {
         mat4 projection;
@@ -560,17 +594,21 @@ void RenderResources(void* _pstate,
         dir = -dir;
         vec3 org = iFS_volume_coords - dir * 0.00001;
 
+        mat4 world_mat = projection * view_model;
+
         DDAContext ctx = InitDDAContext(org, dir);
-        vec2 d = vec2(0.0);
-        while (d.x < 64.0 && d.y == 0.0)
+        float d = 0.0;
+        while (d < 64.0 && ctx.mask == 1.0)
         {
-            vec2 step = StepDDAContext(ctx, chunk);
+            float step = (float(texture(chunk, ctx.voxel_coords).x) / 65535.0) * ctx.mask;
+            StepDDAContext(ctx);
+
             float t = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
-            vec4 p = vec4((org*2.0) - vec3(1.0) + dir*t*2.0, 1.0);
-            p = projection * view_model * p;
+            vec4 p = world_mat * vec4((org + dir*t)*2.0 - vec3(1.0), 1.0);
             p /= p.w;
             if (p.z > 1.0)
                 break;
+
             d += step;
         }
 
