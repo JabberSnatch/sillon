@@ -563,9 +563,18 @@ void RenderResources(void* _pstate,
         DDAContext ctx = InitDDAContext(org, dir);
         vec2 d = vec2(0.0);
         while (d.x < 64.0 && d.y == 0.0)
-            d += StepDDAContext(ctx, chunk);
+        {
+            vec2 step = StepDDAContext(ctx, chunk);
+            float t = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
+            vec4 p = vec4((org*2.0) - vec3(1.0) + dir*t*2.0, 1.0);
+            p = projection * view_model * p;
+            p /= p.w;
+            if (p.z > 1.0)
+                break;
+            d += step;
+        }
 
-        float t = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
+        //color = vec4(vec3(p.z), 1.0);
         color = vec4(vec3((d.x/16.0)), d.x/32.0);
 
         //color = vec4(vec3(t),d/32.0);
