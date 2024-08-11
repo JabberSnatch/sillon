@@ -116,6 +116,7 @@ struct Buffer {
 struct Texture {
     VkImage image;
     VkDeviceMemory memory;
+    VkFormat format;
 };
 
 struct BufferTransition {
@@ -134,7 +135,7 @@ struct ImageTransition {
 };
 
 struct Queue {
-    VkDevice device;
+    struct vktk::Context* context;
     uint32_t family_index;
     VkQueue queue;
     operator VkQueue() { return queue; }
@@ -146,13 +147,21 @@ struct Queue {
                 VkSemaphore const* _wait_semaphores = nullptr,
                 VkPipelineStageFlags const* _wait_stages = nullptr,
                 uint32_t _wait_count = 0u,
-                VkFence* _signal_fence = nullptr);
+                VkFence* _signal_fence = nullptr) const;
 };
 
 struct CommandBuffer {
     Queue const& queue;
     VkCommandBuffer handle;
+    std::vector<Buffer> pending_destroys = {};
     operator VkCommandBuffer() { return handle; }
+
+    void Submit(VkSemaphore* _signal_semaphore = nullptr,
+                VkSemaphore const* _wait_semaphores = nullptr,
+                VkPipelineStageFlags const* _wait_stages = nullptr,
+                uint32_t _wait_count = 0u,
+                VkFence* _signal_fence = nullptr);
+
     void Begin();
 
     void BufferCopy(VkBuffer _dst, uint64_t _dst_offset,
@@ -162,6 +171,9 @@ struct CommandBuffer {
     void BufferCopy(Buffer const& _dst, uint64_t _dst_offset,
                     Buffer const& _src, uint64_t _src_offset, uint64_t _size);
 #endif
+
+    void UpdateTexture(Texture _texture, VkOffset3D _offset, VkExtent3D _extent,
+                       std::function<void(void*)> const& _upload_callback);
 
     void BufferTransitions(VkPipelineStageFlags _src_stage,
                            VkPipelineStageFlags _dst_stage,
@@ -183,6 +195,10 @@ struct Context
 {
     Context(uint64_t _hinstance, uint64_t _hwindow);
     ~Context();
+    Context(Context const&) = delete;
+    Context(Context&&) = delete;
+    Context& operator=(Context const&) = delete;
+    Context& operator=(Context&&) = delete;
 
     VkShaderModule CompileShader_GLSL(VkShaderStageFlagBits _shaderStage,
                                       char const* _shaderName,

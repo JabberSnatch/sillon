@@ -208,7 +208,7 @@ Context::Context(uint64_t _hinstance, uint64_t _hwindow)
                       device, &command_pool_info, nullptr, &present_queue.command_pool);
 
             vkGetDeviceQueue(device, present_queue_index, 0, &present_queue.queue);
-            present_queue.device = device;
+            present_queue.context = this;
             present_queue.family_index = present_queue_index;
         }
 
@@ -222,7 +222,7 @@ Context::Context(uint64_t _hinstance, uint64_t _hwindow)
                       device, &command_pool_info, nullptr, &copy_queue.command_pool);
 
             vkGetDeviceQueue(device, copy_queue_index, 0, &copy_queue.queue);
-            copy_queue.device = device;
+            copy_queue.context = this;
             copy_queue.family_index = copy_queue_index;
         }
     }
@@ -314,7 +314,7 @@ void Queue::Submit(VkCommandBuffer const* _command_buffers,
                    VkSemaphore const* _wait_semaphores,
                    VkPipelineStageFlags const* _wait_stages,
                    uint32_t _wait_count,
-                   VkFence* _signal_fence)
+                   VkFence* _signal_fence) const
 {
     if (_signal_semaphore)
     {
@@ -322,7 +322,7 @@ void Queue::Submit(VkCommandBuffer const* _command_buffers,
         semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
         semaphore_info.pNext = nullptr;
         semaphore_info.flags = 0;
-        CHECKCALL(vkCreateSemaphore, device, &semaphore_info, nullptr, _signal_semaphore);
+        CHECKCALL(vkCreateSemaphore, context->device, &semaphore_info, nullptr, _signal_semaphore);
     }
 
     if (_signal_fence)
@@ -331,7 +331,7 @@ void Queue::Submit(VkCommandBuffer const* _command_buffers,
         fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
         fence_info.pNext = nullptr;
         fence_info.flags = 0;
-        CHECKCALL(vkCreateFence, device, &fence_info, nullptr, _signal_fence);
+        CHECKCALL(vkCreateFence, context->device, &fence_info, nullptr, _signal_fence);
     }
 
     VkSubmitInfo submit_info{};
@@ -347,6 +347,26 @@ void Queue::Submit(VkCommandBuffer const* _command_buffers,
     vkQueueSubmit(queue, 1, &submit_info, _signal_fence ? *_signal_fence : VK_NULL_HANDLE);
 }
 
+void CommandBuffer::Submit(VkSemaphore* _signal_semaphore,
+                           VkSemaphore const* _wait_semaphores,
+                           VkPipelineStageFlags const* _wait_stages,
+                           uint32_t _wait_count,
+                           VkFence* _signal_fence)
+{
+    VkFence fallback_fence;
+    if (!pending_destroys.empty() && !_signal_fence)
+        _signal_fence = &fallback_fence;
+
+    queue.Submit(&handle, 1, _signal_semaphore,
+                 _wait_semaphores, _wait_stages, _wait_count,
+                 _signal_fence);
+
+    for (Buffer const& buffer : pending_destroys)
+        queue.context->pending_destroys.emplace_back(Context::PendingDestroy{
+            *_signal_fence, buffer
+        });
+    pending_destroys.clear();
+}
 
 void CommandBuffer::Begin()
 {
@@ -379,6 +399,51 @@ void CommandBuffer::BufferCopy(Buffer const& _dst, uint64_t _dst_offset,
     vkCmdCopyBuffer(handle, _src.buffer, _dst.buffer, 1, &buffer_copy);
 }
 #endif
+
+void CommandBuffer::UpdateTexture(Texture _texture, VkOffset3D _offset, VkExtent3D _extent,
+                                  std::function<void(void*)> const& _upload_callback)
+{
+    uint64_t staging_size = VkFormatBytesPerUnit(_texture.format)
+        * _extent.width
+        * _extent.height
+        * _extent.depth;
+    Buffer staging = queue.context->CreateBuffer(staging_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+
+    void* mapped_data = nullptr;
+    CHECKCALL(vkMapMemory,
+              queue.context->device,
+              staging.alloc.memory,
+              staging.alloc.offset,
+              staging.alloc.size,
+              0u, &mapped_data);
+    _upload_callback(mapped_data);
+    vkUnmapMemory(queue.context->device, staging.alloc.memory);
+
+    BufferTransitions(VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                      {
+                          { staging.buffer, VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT }
+                      });
+
+    VkBufferImageCopy copy_region{};
+    copy_region.bufferOffset = 0u;
+    copy_region.bufferRowLength = 0u;
+    copy_region.bufferImageHeight = 0u;
+    copy_region.imageSubresource = VkImageSubresourceLayers {
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        0u, 0u, 1u
+    };
+    copy_region.imageOffset = _offset;
+    copy_region.imageExtent = _extent;
+
+    vkCmdCopyBufferToImage(*this,
+                           staging.buffer,
+                           _texture.image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           1,
+                           &copy_region);
+
+    pending_destroys.emplace_back(staging);
+}
 
 void CommandBuffer::BufferTransitions(VkPipelineStageFlags _src_stage,
                                       VkPipelineStageFlags _dst_stage,
@@ -1008,6 +1073,7 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
     uint32_t size = _width * _height * _depth * bpp;
 
     Texture texture{};
+    texture.format = _format;
     CHECKCALL(vkCreateImage, device, &create_info, nullptr, &texture.image);
 
     VkMemoryRequirements requirements{};
