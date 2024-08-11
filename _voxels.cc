@@ -309,7 +309,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     LoadSection(_state, _vulkan, { 28, 2, 21 });
 
     VkDescriptorPoolSize descpool_sizes[2] = {
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 },
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2 },
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}
     };
 
@@ -323,7 +323,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     CHECKCALL(vkCreateDescriptorPool, _vulkan->device,
               &descpool_create, nullptr, &_state->descriptor_pool);
 
-    VkDescriptorSetLayoutBinding bindings[2];
+    VkDescriptorSetLayoutBinding bindings[3];
     {
         VkDescriptorSetLayoutBinding& binding = bindings[0];
         binding.binding = 0;
@@ -340,12 +340,20 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         binding.stageFlags = VK_SHADER_STAGE_ALL;
         binding.pImmutableSamplers = nullptr;
     }
+    {
+        VkDescriptorSetLayoutBinding& binding = bindings[2];
+        binding.binding = 2;
+        binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        binding.descriptorCount = 1;
+        binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        binding.pImmutableSamplers = nullptr;
+    }
 
     VkDescriptorSetLayoutCreateInfo descset_create{};
     descset_create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     descset_create.pNext = nullptr;
     descset_create.flags = 0u;
-    descset_create.bindingCount = 2;
+    descset_create.bindingCount = 3;
     descset_create.pBindings = bindings;
     CHECKCALL(vkCreateDescriptorSetLayout, _vulkan->device,
               &descset_create, nullptr, &_state->descset_layout);
@@ -389,7 +397,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     image_view_create.flags = 0u;
     image_view_create.image = _state->chunk_texture.image;
     image_view_create.viewType = VK_IMAGE_VIEW_TYPE_3D;
-    image_view_create.format = VK_FORMAT_R16G16_UINT;
+    image_view_create.format =  _state->chunk_texture.format;
     image_view_create.components = VkComponentMapping{};
     image_view_create.subresourceRange = VkImageSubresourceRange{
         VK_IMAGE_ASPECT_COLOR_BIT,
@@ -398,6 +406,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     CHECKCALL(vkCreateImageView, _vulkan->device,
               &image_view_create, nullptr, &_state->chunk_view);
     image_view_create.image = _state->region_texture.image;
+    image_view_create.format = _state->region_texture.format;
     CHECKCALL(vkCreateImageView, _vulkan->device,
               &image_view_create, nullptr, &_state->region_view);
 
@@ -537,27 +546,29 @@ void RenderResources(void* _pstate,
         vec3 max_t;
         vec3 voxel_coords;
         vec3 voxel_step;
-        float mask;
+        vec4 mask;
+        //float mask;
     };
 
-    DDAContext InitDDAContext(vec3 org, vec3 dir)
+    DDAContext InitDDAContext(vec3 org, vec3 dir, float voxel_count)
     {
-        vec3 voxel_space_org = org * CHUNK_VOXEL_COUNT;
+        vec3 voxel_space_org = org * voxel_count;
 
         DDAContext ctx;
         ctx.step_sign = sign(dir);
         ctx.exit_value = ctx.step_sign * 0.5 + vec3(0.5);
         ctx.edge_distance = ctx.exit_value - (ctx.step_sign * fract(voxel_space_org));
-        ctx.delta_t = 1.0 / (abs(dir) * CHUNK_VOXEL_COUNT);
+        ctx.delta_t = 1.0 / (abs(dir) * voxel_count);
         ctx.max_t = abs(ctx.edge_distance) * ctx.delta_t;
-        ctx.voxel_coords = (floor(voxel_space_org) + vec3(0.5)) / CHUNK_VOXEL_COUNT;
-        ctx.voxel_step = ctx.step_sign / CHUNK_VOXEL_COUNT;
+        ctx.voxel_coords = (floor(voxel_space_org) + vec3(0.5)) / voxel_count;
+        ctx.voxel_step = ctx.step_sign / voxel_count;
 
+        ctx.mask.xyz = vec3(0.0);
         // Equivalent to mask =
         // ((voxel_coords.x * step_sign.x < exit_value.x) &&
         // (voxel_coords.y * step_sign.y < exit_value.y) &&
         // (voxel_coords.z * step_sign.z < exit_value.z)) ? 1.0 : 0.0
-        ctx.mask =
+        ctx.mask.w =
             (1.0 - step(ctx.exit_value.x, ctx.voxel_coords.x * ctx.step_sign.x))
             * (1.0 - step(ctx.exit_value.y, ctx.voxel_coords.y * ctx.step_sign.y))
             * (1.0 - step(ctx.exit_value.z, ctx.voxel_coords.z * ctx.step_sign.z));
@@ -567,7 +578,7 @@ void RenderResources(void* _pstate,
 
     void StepDDAContext(inout DDAContext ctx)
     {
-        ctx.mask =
+        ctx.mask.w =
             (1.0 - step(ctx.exit_value.x, ctx.voxel_coords.x * ctx.step_sign.x))
             * (1.0 - step(ctx.exit_value.y, ctx.voxel_coords.y * ctx.step_sign.y))
             * (1.0 - step(ctx.exit_value.z, ctx.voxel_coords.z * ctx.step_sign.z));
@@ -581,17 +592,17 @@ void RenderResources(void* _pstate,
             // ctx.max_t.y < ctx.max_t.z
             1.0 - step(ctx.max_t.z, ctx.max_t.y));
 
-        vec3 exec_mask = vec3(
+        ctx.mask.xyz = vec3(
             // X && Y
             order.x * order.y,
             // !X && Z
             (1.0 - order.x) * order.z,
             // (X && !Y) || (!X && Z)
             order.x * (1.0 - order.y) + (1.0 - order.x) * (1.0 - order.z)
-        ) * ctx.mask;
+        ) * ctx.mask.w;
 
-        ctx.voxel_coords += ctx.voxel_step * exec_mask;
-        ctx.max_t += ctx.delta_t * exec_mask;
+        ctx.voxel_coords += ctx.voxel_step * ctx.mask.xyz;
+        ctx.max_t += ctx.delta_t * ctx.mask.xyz;
 
 #else
 
@@ -629,7 +640,8 @@ void RenderResources(void* _pstate,
     static char const region_fshader[] = R"(
     layout(location = 0) in vec3 iFS_volume_coords;
     layout(location = 0) out vec4 color;
-    layout(set = 0, binding = 0) uniform usampler3D chunk;
+    layout(set = 0, binding = 0) uniform usampler3D region;
+    layout(set = 0, binding = 2) uniform sampler3D chunk;
 
     layout(std140, set = 0, binding = 1) uniform MatrixBlock {
         mat4 projection;
@@ -650,17 +662,23 @@ void RenderResources(void* _pstate,
 
         mat4 world_mat = projection * view_model;
 
-        DDAContext ctx = InitDDAContext(org, dir);
+        DDAContext ctx = InitDDAContext(org, dir, 32.0);
         float d = 0.0;
-        while (d < 64.0 && ctx.mask == 1.0)
+        bool chunk_rendered = false;
+        while (d < 64.0 && ctx.mask.w == 1.0)
         {
-            uvec2 data = texture(chunk, ctx.voxel_coords).xy;
+            uvec2 data = texture(region, ctx.voxel_coords).xy;
             if (data.y == 0)
             {
-                d = 1.0/0.0;
+                //ctx.max_t -= ctx.delta_t * ctx.mask.xyz;
+                float t = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
+                org = fract((org + dir*t) * 32*(1.0 - 0.0001*ctx.step_sign));
+                dir = -dir;
+                ctx = InitDDAContext(org, dir, 16.0);
+                chunk_rendered = true;
                 break;
             }
-            float step = (float(data.x) / 65535.0) * ctx.mask;
+            float step = (float(data.x) / 65535.0) * ctx.mask.w;
             StepDDAContext(ctx);
 
             float t = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
@@ -672,8 +690,26 @@ void RenderResources(void* _pstate,
             d += step;
         }
 
+        if (chunk_rendered)
+        {
+            chunk_rendered = false;
+            while (!chunk_rendered && ctx.mask.w == 1.0)
+            {
+                float step = texture(chunk, ctx.voxel_coords).x;
+                StepDDAContext(ctx);
+                if (step > 0.0)
+                    chunk_rendered = true;
+            }
+        }
+
         //color = vec4(vec3(p.z), 1.0);
-        color = vec4(vec3((d.x/16.0)), d.x/32.0);
+        if (!chunk_rendered)
+            color = vec4(vec3((d.x/16.0)), d.x/32.0);
+        else
+        {
+            float t = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
+            color = vec4(vec3(t), d);
+        }
 
         //color = vec4(vec3(t),d/32.0);
         //color = vec4(vec3(d - t, t - d, 0.0), 1.0);
@@ -780,7 +816,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
             image_view_create.flags = 0u;
             image_view_create.image = _state->chunk_texture.image;
             image_view_create.viewType = VK_IMAGE_VIEW_TYPE_3D;
-            image_view_create.format = VK_FORMAT_R8_UNORM;
+            image_view_create.format = _state->chunk_texture.format;
             image_view_create.components = VkComponentMapping{};
             image_view_create.subresourceRange = VkImageSubresourceRange{
                 VK_IMAGE_ASPECT_COLOR_BIT,
@@ -801,17 +837,22 @@ void Draw(void* _pstate,
 {
     state_t* _state = (state_t*)_pstate;
 
-    VkDescriptorImageInfo image_info{};
-    image_info.sampler = _state->sampler;
-    image_info.imageView = _state->region_view;//_state->chunk_view;
-    image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    VkDescriptorImageInfo region_image_info{};
+    region_image_info.sampler = _state->sampler;
+    region_image_info.imageView = _state->region_view;
+    region_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     VkDescriptorBufferInfo buffer_info = {};
     buffer_info.buffer = _state->matrix_buffer;
     buffer_info.offset = 0;
     buffer_info.range = VK_WHOLE_SIZE;
 
-    VkWriteDescriptorSet desc_writes[2];
+    VkDescriptorImageInfo chunk_image_info{};
+    chunk_image_info.sampler = _state->sampler;
+    chunk_image_info.imageView = _state->chunk_view;
+    chunk_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkWriteDescriptorSet desc_writes[3];
     {
         VkWriteDescriptorSet& desc_write = desc_writes[0];
         desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -821,10 +862,11 @@ void Draw(void* _pstate,
         desc_write.dstArrayElement = 0u;
         desc_write.descriptorCount = 1u;
         desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        desc_write.pImageInfo = &image_info;
+        desc_write.pImageInfo = &region_image_info;
         desc_write.pBufferInfo = nullptr;
         desc_write.pTexelBufferView = nullptr;
     }
+
     {
         VkWriteDescriptorSet& desc_write = desc_writes[1];
         desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -838,7 +880,21 @@ void Draw(void* _pstate,
         desc_write.pBufferInfo = &buffer_info;
         desc_write.pTexelBufferView = nullptr;
     }
-    vkUpdateDescriptorSets(_vulkan->device, 2u, desc_writes, 0u, nullptr);
+
+    {
+        VkWriteDescriptorSet& desc_write = desc_writes[2];
+        desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        desc_write.pNext = nullptr;
+        desc_write.dstSet = _state->descriptor_set;
+        desc_write.dstBinding = 2u;
+        desc_write.dstArrayElement = 0u;
+        desc_write.descriptorCount = 1u;
+        desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        desc_write.pImageInfo = &chunk_image_info;
+        desc_write.pBufferInfo = nullptr;
+        desc_write.pTexelBufferView = nullptr;
+    }
+    vkUpdateDescriptorSets(_vulkan->device, 3u, desc_writes, 0u, nullptr);
 
     numtk::mat4f* matrix = (numtk::mat4f*)_state->staging_area;
     float how = (float)_swapchain.size.height / (float)_swapchain.size.width;
