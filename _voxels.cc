@@ -34,7 +34,6 @@ struct state_t
     float y_offset = 0.f;
     bool updating_orientation = false;
 
-    vktk::Texture chunk;
     VkImageView chunk_view;
     VkPipeline region_pipeline;
     VkPipelineLayout pipeline_layout;
@@ -47,10 +46,11 @@ struct state_t
     vktk::Buffer staging_buffer;
     void* staging_area;
 
+    vktk::Texture chunk_texture;
     vktk::Texture region_texture;
     VkImageView region_view;
     RegionData region;
-    numtk::vec3<uint32_t> current_section;
+    numtk::vec3<int32_t> current_section;
 };
 
 RegionData::ChunkData DecodeChunk(mctk::MCAChunkData const& chunk_data)
@@ -182,14 +182,13 @@ RegionData DeserialiseRegion(std::string const& file_path)
     return output;
 }
 
-void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<uint32_t> const& coords)
+void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<int32_t> const& coords)
 {
-    state->current_section = coords;
     uint32_t chunk_index = coords[0] + coords[2]*32;
     RegionData::ChunkData const& chunk = state->region.chunks[chunk_index];
     RegionData::SectionData const& section = chunk.sections[coords[1]+4];
 
-    state->chunk = vulkan->CreateTexture(
+    state->chunk_texture = vulkan->CreateTexture(
         16, 16, 16,
         VK_IMAGE_TYPE_3D, VK_FORMAT_R8_UNORM,
         VK_IMAGE_USAGE_TRANSFER_DST_BIT
@@ -205,6 +204,58 @@ void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<uint32_t> co
                     : 0;
             }
         });
+
+    vktk::CommandBuffer update_commands = vulkan->CreateCommandBuffer(vulkan->present_queue);
+    update_commands.Begin();
+
+    update_commands.ImageTransitions(
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        {
+            {
+                state->region_texture.image,
+                VK_ACCESS_SHADER_READ_BIT,
+                VK_ACCESS_TRANSFER_WRITE_BIT,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            }
+        });
+
+    update_commands.UpdateTexture(
+        state->region_texture,
+        VkOffset3D{ coords[0], coords[1], coords[2] },
+        VkExtent3D{ 1, 1, 1 },
+        [](void* mapped_data) {
+            uint16_t* section_info = (uint16_t*)mapped_data;
+            section_info[1] = 0x0;
+        });
+
+    update_commands.UpdateTexture(
+        state->region_texture,
+        VkOffset3D{ state->current_section[0], state->current_section[1], state->current_section[2] },
+        VkExtent3D{ 1, 1, 1 },
+        [](void* mapped_data) {
+            uint16_t* section_info = (uint16_t*)mapped_data;
+            section_info[1] = 0xffff;
+        });
+
+    update_commands.ImageTransitions(
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        {
+            {
+                state->region_texture.image,
+                VK_ACCESS_TRANSFER_WRITE_BIT,
+                VK_ACCESS_SHADER_READ_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            }
+        });
+
+    update_commands.End();
+    update_commands.queue.Submit(&update_commands.handle, 1);
+
+    state->current_section = coords;
 }
 
 void LoadRegion(state_t* state, vktk::Context* vulkan)
@@ -222,24 +273,27 @@ void LoadRegion(state_t* state, vktk::Context* vulkan)
                 for (uint32_t zindex = 0; zindex < 32; ++zindex)
                 {
                     RegionData::ChunkData const& chunk_data = region.chunks[xindex + zindex*32];
-                    for (uint32_t yindex = 0; yindex < 24; ++yindex)
+                    for (uint32_t yindex = 0; yindex < 32; ++yindex)
                     {
-                        RegionData::SectionData const& section = chunk_data.sections[yindex];
-                        float average = 0.f;
-
-                        if (!section.palette.empty())
-                            for (uint16_t block_id : section.block_ids)
-                                average +=
-                                    ((section.palette[block_id] != "air")
-                                     && (section.palette[block_id] != "glow_lichen"))
-                                    ? 1.f / 4096.f
-                                    : 0.f;
-
                         uint32_t index = xindex + yindex*32 + zindex*32*32;
-                        sections[index * 2] = (uint16_t)(average * 65535.f);
+                        RegionData::SectionData const& section = chunk_data.sections[yindex];
                         sections[index * 2+1] = 0xffff;
-                        //sections[index * 4+1] = 0xff;
-                        //sections[index * 4+2] = 0xff;
+                        if (yindex < 24)
+                        {
+                            float average = 0.f;
+
+                            if (!section.palette.empty())
+                                for (uint16_t block_id : section.block_ids)
+                                    average +=
+                                        ((section.palette[block_id] != "air")
+                                         && (section.palette[block_id] != "glow_lichen"))
+                                        ? 1.f / 4096.f
+                                        : 0.f;
+
+                            sections[index * 2] = (uint16_t)(average * 65535.f);
+                        }
+                        else
+                            sections[index * 2] = 0;
                     }
                 }
             }
@@ -333,7 +387,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     image_view_create.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     image_view_create.pNext = nullptr;
     image_view_create.flags = 0u;
-    image_view_create.image = _state->chunk.image;
+    image_view_create.image = _state->chunk_texture.image;
     image_view_create.viewType = VK_IMAGE_VIEW_TYPE_3D;
     image_view_create.format = VK_FORMAT_R16G16_UINT;
     image_view_create.components = VkComponentMapping{};
@@ -600,7 +654,13 @@ void RenderResources(void* _pstate,
         float d = 0.0;
         while (d < 64.0 && ctx.mask == 1.0)
         {
-            float step = (float(texture(chunk, ctx.voxel_coords).x) / 65535.0) * ctx.mask;
+            uvec2 data = texture(chunk, ctx.voxel_coords).xy;
+            if (data.y == 0)
+            {
+                d = 1.0/0.0;
+                break;
+            }
+            float step = (float(data.x) / 65535.0) * ctx.mask;
             StepDDAContext(ctx);
 
             float t = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
@@ -690,7 +750,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
     }
 
     {
-        numtk::vec3<uint32_t> next_section = _state->current_section;
+        numtk::vec3<int32_t> next_section = _state->current_section;
         #define KEY_PRESSED(key) _input->key_down[key] && !_past_input->key_down[key]
         if (KEY_PRESSED('w'))
             ++next_section[0];
@@ -706,6 +766,10 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
             ++next_section[1];
         #undef KEY_PRESSED
 
+        next_section.x() = std::max(0, std::min(31, next_section.x()));
+        next_section.y() = std::max(0, std::min(23, next_section.y()));
+        next_section.z() = std::max(0, std::min(31, next_section.z()));
+
         if (next_section != _state->current_section)
         {
             LoadSection(_state, _vulkan, next_section);
@@ -714,7 +778,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
             image_view_create.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
             image_view_create.pNext = nullptr;
             image_view_create.flags = 0u;
-            image_view_create.image = _state->chunk.image;
+            image_view_create.image = _state->chunk_texture.image;
             image_view_create.viewType = VK_IMAGE_VIEW_TYPE_3D;
             image_view_create.format = VK_FORMAT_R8_UNORM;
             image_view_create.components = VkComponentMapping{};
@@ -899,7 +963,7 @@ void Shutdown(void* _pstate,
               vktk::Context* _vulkan)
 {
     state_t* _state = (state_t*)_pstate;
-    vkDestroyImage(_vulkan->device, _state->chunk.image, nullptr);
+    vkDestroyImage(_vulkan->device, _state->chunk_texture.image, nullptr);
 
     vkDestroyImageView(_vulkan->device, _state->chunk_view, nullptr);
     vkDestroyPipeline(_vulkan->device, _state->region_pipeline, nullptr);
