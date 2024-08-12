@@ -547,7 +547,6 @@ void RenderResources(void* _pstate,
         vec3 voxel_coords;
         vec3 voxel_step;
         vec4 mask;
-        //float mask;
     };
 
     DDAContext InitDDAContext(vec3 org, vec3 dir, float voxel_count)
@@ -599,10 +598,10 @@ void RenderResources(void* _pstate,
             (1.0 - order.x) * order.z,
             // (X && !Y) || (!X && Z)
             order.x * (1.0 - order.y) + (1.0 - order.x) * (1.0 - order.z)
-        ) * ctx.mask.w;
+        );
 
-        ctx.voxel_coords += ctx.voxel_step * ctx.mask.xyz;
-        ctx.max_t += ctx.delta_t * ctx.mask.xyz;
+        ctx.voxel_coords += ctx.voxel_step * ctx.mask.xyz * ctx.mask.w;
+        ctx.max_t += ctx.delta_t * ctx.mask.xyz * ctx.mask.w;
 
 #else
 
@@ -696,9 +695,12 @@ void RenderResources(void* _pstate,
             while (!chunk_rendered && ctx.mask.w == 1.0)
             {
                 float step = texture(chunk, ctx.voxel_coords).x;
-                StepDDAContext(ctx);
                 if (step > 0.0)
+                {
                     chunk_rendered = true;
+                    break;
+                }
+                StepDDAContext(ctx);
             }
         }
 
@@ -707,8 +709,11 @@ void RenderResources(void* _pstate,
             color = vec4(vec3((d.x/16.0)), d.x/32.0);
         else
         {
-            float t = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
-            color = vec4(vec3(t), d);
+            float t0 = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
+            ctx.max_t -= ctx.delta_t * ctx.mask.xyz;
+            float t1 = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
+            color = vec4(org + dir*t0, d);
+            //color = vec4(ctx.voxel_coords, d);
         }
 
         //color = vec4(vec3(t),d/32.0);
@@ -780,9 +785,10 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
     }
 
     {
-        _state->turntable.z() += (float)_input->wheel_delta * 0.001f;
-        if (_state->turntable.z() < 1.f)
-            _state->turntable.z() = 1.f;
+        //_state->turntable.z() += (float)_input->wheel_delta * 0.001f;
+        _state->turntable.z() *= (1.f + 0.0005f * (float)_input->wheel_delta);
+        if (_state->turntable.z() < 0.01f)
+            _state->turntable.z() = 0.01f;
     }
 
     {
@@ -916,13 +922,19 @@ void Draw(void* _pstate,
     std::cout << forward.x() << " " << forward.y() << " " << forward.z() << std::endl;
     #endif
 
+    numtk::vec3f center = (numtk::vec3f{
+        (float)_state->current_section.x() + 0.5f,
+        (float)_state->current_section.y() + 0.5f,
+        (float)_state->current_section.z() + 0.5f
+    } / 16.f) - numtk::vec3f{ 1.f, 1.f, 1.f } + numtk::vec3f{ 0.f, _state->y_offset, 0.f };
+
     matrix[0] =
         numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how);
     matrix[2] =
         numtk::mat4f::View({ 0.f, 0.f, -1.f }, { 0.f, 1.f, 0.f }, { 0.f, 0.f, _state->turntable.z() });
     matrix[1] =
         matrix[2]
-        * numtk::mat4f::View(forward, up, { 0.f, _state->y_offset, 0.f });
+        * numtk::mat4f::View(forward, up, center);
     ((int32_t*)(matrix + 3))[0] = _swapchain.size.width;
     ((int32_t*)(matrix + 3))[1] = _swapchain.size.height;
 
