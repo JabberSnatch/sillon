@@ -78,7 +78,7 @@ RegionData::ChunkData DecodeChunk(mctk::MCAChunkData const& chunk_data)
             for (uint32_t index = 0u; index < sections.size; ++index)
             {
                 NBTCompound const& compound = compounds[index];
-                int32_t section_index = 0;
+                int32_t section_index = -1;
                 RegionData::SectionData section_data = {};
                 for (NBTField const& field1 : compound)
                 {
@@ -160,7 +160,7 @@ RegionData::ChunkData DecodeChunk(mctk::MCAChunkData const& chunk_data)
                     }
                 }
 
-                if (section_index > 0)
+                if (section_index >= 0)
                     output.sections[section_index] = std::move(section_data);
             }
         }
@@ -186,7 +186,7 @@ void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<int32_t> con
 {
     uint32_t chunk_index = coords[0] + coords[2]*32;
     RegionData::ChunkData const& chunk = state->region.chunks[chunk_index];
-    RegionData::SectionData const& section = chunk.sections[coords[1]+4];
+    RegionData::SectionData const& section = chunk.sections[coords[1]];
 
     state->chunk_texture = vulkan->CreateTexture(
         16, 16, 16,
@@ -198,7 +198,8 @@ void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<int32_t> con
             for (uint32_t index = 0u; index < 4096; ++index)
             {
                 blocks[index] =
-                    ((section.palette[section.block_ids[index]] != "air")
+                    (!section.palette.empty()
+                     && (section.palette[section.block_ids[index]] != "air")
                      && (section.palette[section.block_ids[index]] != "glow_lichen"))
                     ? 255
                     : 0;
@@ -306,7 +307,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
     _state->region = DeserialiseRegion("../r.-1.6.mca");
     LoadRegion(_state, _vulkan);
-    LoadSection(_state, _vulkan, { 28, 2, 21 });
+    LoadSection(_state, _vulkan, { 28, 6, 21 });
 
     VkDescriptorPoolSize descpool_sizes[2] = {
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2 },
