@@ -649,6 +649,9 @@ void RenderResources(void* _pstate,
         ivec2 screen_size;
     };
 
+    #define REGION_SIZE 32.0
+    #define SECTION_SIZE 16.0
+
     void main() {
         vec2 uv = vec2(gl_FragCoord.x, gl_FragCoord.y) / vec2(screen_size.x, screen_size.y);
         vec3 dir =
@@ -661,7 +664,7 @@ void RenderResources(void* _pstate,
 
         mat4 world_mat = projection * view_model;
 
-        DDAContext ctx = InitDDAContext(org, dir, 32.0);
+        DDAContext ctx = InitDDAContext(org, dir, REGION_SIZE);
         float d = 0.0;
         bool chunk_rendered = false;
         while (d < 64.0 && ctx.mask.w == 1.0)
@@ -669,11 +672,11 @@ void RenderResources(void* _pstate,
             uvec2 data = texture(region, ctx.voxel_coords).xy;
             if (data.y == 0)
             {
-                //ctx.max_t -= ctx.delta_t * ctx.mask.xyz;
                 float t = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
-                org = fract((org + dir*t) * 32*(1.0 - 0.0001*ctx.step_sign));
+                vec3 hit_pos = (org + dir*t) * REGION_SIZE*(1.0 - 0.0001*ctx.step_sign);
+                org = hit_pos - floor(ctx.voxel_coords * REGION_SIZE);
                 dir = -dir;
-                ctx = InitDDAContext(org, dir, 16.0);
+                ctx = InitDDAContext(org, dir, SECTION_SIZE);
                 chunk_rendered = true;
                 break;
             }
@@ -689,6 +692,7 @@ void RenderResources(void* _pstate,
             d += step;
         }
 
+        float t = 0.0;
         if (chunk_rendered)
         {
             chunk_rendered = false;
@@ -700,6 +704,7 @@ void RenderResources(void* _pstate,
                     chunk_rendered = true;
                     break;
                 }
+                t = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
                 StepDDAContext(ctx);
             }
         }
@@ -709,10 +714,7 @@ void RenderResources(void* _pstate,
             color = vec4(vec3((d.x/16.0)), d.x/32.0);
         else
         {
-            float t0 = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
-            ctx.max_t -= ctx.delta_t * ctx.mask.xyz;
-            float t1 = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
-            color = vec4(org + dir*t0, d);
+            color = vec4(org+dir*t,1.0);
             //color = vec4(ctx.voxel_coords, d);
         }
 
