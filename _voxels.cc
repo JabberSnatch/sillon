@@ -552,9 +552,10 @@ void RenderResources(void* _pstate,
 
     DDAContext InitDDAContext(vec3 org, vec3 dir, float voxel_count)
     {
-        vec3 voxel_space_org = org * voxel_count;
+        vec3 voxel_space_org = clamp(org, vec3(0.0), vec3(0.99999)) * voxel_count;
 
         DDAContext ctx;
+
         ctx.step_sign = sign(dir);
         ctx.exit_value = ctx.step_sign * 0.5 + vec3(0.5);
         ctx.edge_distance = ctx.exit_value - (ctx.step_sign * fract(voxel_space_org));
@@ -674,7 +675,7 @@ void RenderResources(void* _pstate,
             if (data.y == 0)
             {
                 float t = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
-                vec3 hit_pos = (org + dir*t) * REGION_SIZE*(1.0 - 0.0001*ctx.step_sign);
+                vec3 hit_pos = (org + dir*t) * REGION_SIZE*(1.0 - 0.00001*ctx.step_sign);
                 org = hit_pos - floor(ctx.voxel_coords * REGION_SIZE);
                 dir = -dir;
                 ctx = InitDDAContext(org, dir, SECTION_SIZE);
