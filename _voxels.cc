@@ -33,8 +33,8 @@ struct state_t
     numtk::vec3f turntable = { 0.f, 0.f, 3.f };
     float y_offset = 0.f;
     bool updating_orientation = false;
+    numtk::vec3<int32_t> current_section;
 
-    VkImageView chunk_view;
     VkPipeline region_pipeline;
     VkPipelineLayout pipeline_layout;
     VkSampler sampler;
@@ -47,10 +47,10 @@ struct state_t
     void* staging_area;
 
     vktk::Texture chunk_texture;
+    VkImageView chunk_view;
     vktk::Texture region_texture;
     VkImageView region_view;
     RegionData region;
-    numtk::vec3<int32_t> current_section;
 };
 
 RegionData::ChunkData DecodeChunk(mctk::MCAChunkData const& chunk_data)
@@ -219,6 +219,7 @@ void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<int32_t> con
                 VK_ACCESS_TRANSFER_WRITE_BIT,
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_ASPECT_COLOR_BIT,
             }
         });
 
@@ -250,6 +251,7 @@ void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<int32_t> con
                 VK_ACCESS_SHADER_READ_BIT,
                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_IMAGE_ASPECT_COLOR_BIT,
             }
         });
 
@@ -317,7 +319,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     VkDescriptorPoolCreateInfo descpool_create{};
     descpool_create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     descpool_create.pNext = nullptr;
-    descpool_create.flags = 0u;
+    descpool_create.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
     descpool_create.maxSets = 1u;
     descpool_create.poolSizeCount = sizeof(descpool_sizes) / sizeof(descpool_sizes[0]);
     descpool_create.pPoolSizes = descpool_sizes;
@@ -1035,19 +1037,33 @@ void Shutdown(void* _pstate,
               vktk::Context* _vulkan)
 {
     state_t* _state = (state_t*)_pstate;
-    vkDestroyImage(_vulkan->device, _state->chunk_texture.image, nullptr);
-
-    vkDestroyImageView(_vulkan->device, _state->chunk_view, nullptr);
     vkDestroyPipeline(_vulkan->device, _state->region_pipeline, nullptr);
     _state->region_pipeline = VK_NULL_HANDLE;
     vkDestroyPipelineLayout(_vulkan->device, _state->pipeline_layout, nullptr);
+    _state->pipeline_layout = VK_NULL_HANDLE;
     vkDestroySampler(_vulkan->device, _state->sampler, nullptr);
-    vkFreeDescriptorSets(_vulkan->device, _state->descriptor_pool, 1, &_state->descriptor_set);
-    vkDestroyDescriptorPool(_vulkan->device, _state->descriptor_pool, nullptr);
-    vkDestroyDescriptorSetLayout(_vulkan->device, _state->descset_layout, nullptr);
+    _state->sampler = VK_NULL_HANDLE;
 
-    vktk::Buffer matrix_buffer;
-    vktk::Buffer staging_buffer;
+    vkFreeDescriptorSets(_vulkan->device, _state->descriptor_pool, 1, &_state->descriptor_set);
+    _state->descriptor_set = VK_NULL_HANDLE;
+    vkDestroyDescriptorPool(_vulkan->device, _state->descriptor_pool, nullptr);
+    _state->descriptor_pool = VK_NULL_HANDLE;
+    vkDestroyDescriptorSetLayout(_vulkan->device, _state->descset_layout, nullptr);
+    _state->descset_layout = VK_NULL_HANDLE;
+
+    vkDestroyImage(_vulkan->device, _state->chunk_texture.image, nullptr);
+    _state->chunk_texture.image = VK_NULL_HANDLE;
+    vkFreeMemory(_vulkan->device, _state->chunk_texture.memory, nullptr);
+    _state->chunk_texture.memory = VK_NULL_HANDLE;
+    vkDestroyImageView(_vulkan->device, _state->chunk_view, nullptr);
+    _state->chunk_view = VK_NULL_HANDLE;
+
+    vkDestroyImage(_vulkan->device, _state->region_texture.image, nullptr);
+    _state->region_texture.image = VK_NULL_HANDLE;
+    vkFreeMemory(_vulkan->device, _state->region_texture.memory, nullptr);
+    _state->region_texture.memory = VK_NULL_HANDLE;
+    vkDestroyImageView(_vulkan->device, _state->region_view, nullptr);
+    _state->region_view = VK_NULL_HANDLE;
 }
 
 }
