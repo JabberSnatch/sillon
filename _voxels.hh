@@ -28,6 +28,8 @@ struct Interface
 
     void (*Shutdown)(void* _state, vktk::Context* _vulkan);
 
+    void ReloadPointers();
+
     void* state;
 };
 

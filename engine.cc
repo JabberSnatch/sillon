@@ -71,6 +71,48 @@ static bool UpdateSwapchain(context_t* _context, uint32_t const _size[2])
     return result;
 }
 
+static void LoadPlugins(context_t* context)
+{
+#if 1
+    context->voxels_plugin->ReloadPointers();
+    context->plugin.ConstantResources = context->voxels_plugin->ConstantResources;
+    context->plugin.RenderResources = context->voxels_plugin->RenderResources;
+    context->plugin.Update = context->voxels_plugin->Update;
+    context->plugin.Draw = context->voxels_plugin->Draw;
+    context->plugin.Shutdown = context->voxels_plugin->Shutdown;
+    context->plugin.state = context->voxels_plugin->state;
+#endif
+
+#if 0
+    context->plugin.ConstantResources = context->glyphs_plugin->ConstantResources;
+    context->plugin.RenderResources = context->glyphs_plugin->RenderResources;
+    context->plugin.Update = context->glyphs_plugin->Update;
+    context->plugin.Draw = context->glyphs_plugin->Draw;
+    context->plugin.Shutdown = context->glyphs_plugin->Shutdown;
+    context->plugin.state = context->glyphs_plugin->state;
+#endif
+
+#if 0
+    context->plugin.ConstantResources = context->icosphere_plugin->ConstantResources;
+    context->plugin.RenderResources = context->icosphere_plugin->RenderResources;
+    context->plugin.Update = context->icosphere_plugin->Update;
+    context->plugin.Draw = context->icosphere_plugin->Draw;
+    context->plugin.Shutdown = context->icosphere_plugin->Shutdown;
+    context->plugin.state = context->icosphere_plugin->state;
+#endif
+
+#if 0
+    std::cout << "loaded plugin : " << std::endl << std::hex
+              << "\t" << (intptr_t)context->plugin.ConstantResources << std::endl
+              << "\t" << (intptr_t)context->plugin.RenderResources << std::endl
+              << "\t" << (intptr_t)context->plugin.Update << std::endl
+              << "\t" << (intptr_t)context->plugin.Draw << std::endl
+              << "\t" << (intptr_t)context->plugin.Shutdown << std::endl
+              << "\t" << (intptr_t)context->plugin.state << std::endl;
+    std::cout << std::dec;
+#endif
+}
+
 // geometry
 // camera
 // structured data
@@ -89,32 +131,7 @@ extern "C" {
         context->icosphere_plugin.reset(new Icosphere::Interface());
         context->voxels_plugin.reset(new Voxels::Interface());
 
-#if 1
-        context->plugin.ConstantResources = context->voxels_plugin->ConstantResources;
-        context->plugin.RenderResources = context->voxels_plugin->RenderResources;
-        context->plugin.Update = context->voxels_plugin->Update;
-        context->plugin.Draw = context->voxels_plugin->Draw;
-        context->plugin.Shutdown = context->voxels_plugin->Shutdown;
-        context->plugin.state = context->voxels_plugin->state;
-#endif
-
-#if 0
-        context->plugin.ConstantResources = context->glyphs_plugin->ConstantResources;
-        context->plugin.RenderResources = context->glyphs_plugin->RenderResources;
-        context->plugin.Update = context->glyphs_plugin->Update;
-        context->plugin.Draw = context->glyphs_plugin->Draw;
-        context->plugin.Shutdown = context->glyphs_plugin->Shutdown;
-        context->plugin.state = context->glyphs_plugin->state;
-#endif
-
-#if 0
-        context->plugin.ConstantResources = context->icosphere_plugin->ConstantResources;
-        context->plugin.RenderResources = context->icosphere_plugin->RenderResources;
-        context->plugin.Update = context->icosphere_plugin->Update;
-        context->plugin.Draw = context->icosphere_plugin->Draw;
-        context->plugin.Shutdown = context->icosphere_plugin->Shutdown;
-        context->plugin.state = context->icosphere_plugin->state;
-#endif
+        LoadPlugins(context);
 
         if (context->plugin.ConstantResources)
             context->plugin.ConstantResources(context->plugin.state,
@@ -153,9 +170,13 @@ extern "C" {
 
         _context->swapchain.Release();
 
+#if 0
         _context->vulkan.release();
         _context->vulkan.reset(new vktk::Context(_context->window.hinstance,
                                                  _context->window.hwindow));
+#endif
+
+        LoadPlugins(_context);
 
         if (_context->plugin.ConstantResources)
             _context->plugin.ConstantResources(_context->plugin.state,

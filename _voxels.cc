@@ -1072,17 +1072,28 @@ namespace Voxels
 {
 
 Interface::Interface()
-    : ConstantResources{ ::ConstantResources }
-    , RenderResources{ ::RenderResources }
-    , Update{ ::Update }
-    , Draw{ ::Draw }
-    , Shutdown{ ::Shutdown }
+    : ConstantResources{}
+    , RenderResources{}
+    , Update{}
+    , Draw{}
+    , Shutdown{}
     , state{ new state_t{} }
-{}
+{
+    ReloadPointers();
+}
 
 Interface::~Interface()
 {
     delete (state_t*)state;
+}
+
+void Interface::ReloadPointers()
+{
+    ConstantResources = ::ConstantResources;
+    RenderResources = ::RenderResources;
+    Update = ::Update;
+    Draw = ::Draw;
+    Shutdown = ::Shutdown;
 }
 
 }
