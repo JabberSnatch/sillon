@@ -87,6 +87,8 @@ struct Allocator
 
     uint32_t SelectMemoryType(VkMemoryPropertyFlags _flags, uint32_t _required_size);
     void AllocateChunk(ChunkStorage& _storage);
+
+    void Release();
 };
 
 struct Swapchain {
@@ -287,7 +289,7 @@ struct Context
     struct PendingDestroy
     {
         VkFence fence;
-        Buffer buffer;
+        std::vector<Buffer> buffers;
     };
     std::vector<PendingDestroy> pending_destroys = {};
 };

@@ -248,6 +248,8 @@ Context::~Context()
     vkDestroyCommandPool(device, present_queue.command_pool, nullptr);
     vkDestroyCommandPool(device, copy_queue.command_pool, nullptr);
 
+    allocator.Release();
+
     vkDestroyDevice(device, nullptr);
     vkDestroyInstance(instance, nullptr);
 }
@@ -361,10 +363,15 @@ void CommandBuffer::Submit(VkSemaphore* _signal_semaphore,
                  _wait_semaphores, _wait_stages, _wait_count,
                  _signal_fence);
 
+
+
     for (Buffer const& buffer : pending_destroys)
-        queue.context->pending_destroys.emplace_back(Context::PendingDestroy{
-            *_signal_fence, buffer
-        });
+        std::cout << "queuing submit staging buffer destroy " << std::hex
+                  << buffer.buffer << std::dec << std::endl;
+
+    queue.context->pending_destroys.emplace_back(Context::PendingDestroy{
+        *_signal_fence, pending_destroys
+    });
     pending_destroys.clear();
 }
 
@@ -442,6 +449,7 @@ void CommandBuffer::UpdateTexture(Texture _texture, VkOffset3D _offset, VkExtent
                            1,
                            &copy_region);
 
+    std::cout << std::hex << "staging buffer " << staging.buffer << std::dec << std::endl;
     pending_destroys.emplace_back(staging);
 }
 
@@ -638,6 +646,15 @@ void Allocator::AllocateChunk(ChunkStorage& _storage)
         (_storage.chunks.size()+1) * kChunkBlockCount
     });
     _storage.chunks.push_back(device_memory);
+}
+
+void Allocator::Release()
+{
+    for (ChunkStorage& heap : heaps)
+        for (VkDeviceMemory chunk : heap.chunks)
+            vkFreeMemory(device, chunk, nullptr);
+
+    heaps.clear();
 }
 
 CommandBuffer Context::CreateCommandBuffer(Queue const& queue)
@@ -1182,7 +1199,7 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
     command_buffer.End();
 
     PendingDestroy pending_destroy = {};
-    pending_destroy.buffer = staging;
+    pending_destroy.buffers.push_back(staging);
 
     VkFenceCreateInfo fence_info = {};
     fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
@@ -1203,6 +1220,8 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
     submit_info.pSignalSemaphores = nullptr;
     vkQueueSubmit(present_queue, 1, &submit_info, pending_destroy.fence);
 
+    std::cout << "queuing staging buffer destroy " << std::hex
+              << pending_destroy.buffers[0] << std::dec << std::endl;
     pending_destroys.push_back(pending_destroy);
 
     return result;
@@ -1218,8 +1237,15 @@ void Context::TryPendingDestroys()
             == VK_SUCCESS)
         {
             removed_indices.push_back(index);
-            DestroyBuffer(pending_destroy.buffer);
+            for (Buffer& buffer : pending_destroy.buffers)
+            {
+                std::cout << "destroying buffer " << std::hex
+                          << buffer << std::dec << std::endl;
+                DestroyBuffer(buffer);
+            }
             vkDestroyFence(device, pending_destroy.fence, nullptr);
+            std::cout << "destroying fence " << std::hex
+                      << pending_destroy.fence << std::dec << std::endl;
         }
     }
 
@@ -1232,10 +1258,18 @@ void Context::TryPendingDestroys()
 
 void Context::WaitPendingDestroys()
 {
-    for (PendingDestroy const& pending_destroy : pending_destroys)
+    for (PendingDestroy& pending_destroy : pending_destroys)
     {
         CHECKCALL(vkWaitForFences, device, 1, &pending_destroy.fence, VK_TRUE, ~0ull);
+        for (Buffer& buffer : pending_destroy.buffers)
+        {
+            std::cout << "waiting for fence to destroy " << std::hex
+                      << buffer << std::dec << std::endl;
+            DestroyBuffer(buffer);
+        }
         vkDestroyFence(device, pending_destroy.fence, nullptr);
+        std::cout << "destroying fence " << std::hex
+                  << pending_destroy.fence << std::dec << std::endl;
     }
     pending_destroys.clear();
 }

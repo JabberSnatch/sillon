@@ -256,7 +256,7 @@ void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<int32_t> con
         });
 
     update_commands.End();
-    update_commands.queue.Submit(&update_commands.handle, 1);
+    update_commands.Submit();
 
     state->current_section = coords;
 }
@@ -1064,6 +1064,11 @@ void Shutdown(void* _pstate,
     _state->region_texture.memory = VK_NULL_HANDLE;
     vkDestroyImageView(_vulkan->device, _state->region_view, nullptr);
     _state->region_view = VK_NULL_HANDLE;
+
+    vkUnmapMemory(_vulkan->device, _state->staging_buffer.alloc.memory);
+
+    _vulkan->DestroyBuffer(_state->matrix_buffer);
+    _vulkan->DestroyBuffer(_state->staging_buffer);
 }
 
 }
