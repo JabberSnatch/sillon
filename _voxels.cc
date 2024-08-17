@@ -403,24 +403,8 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     CHECKCALL(vkCreatePipelineLayout, _vulkan->device, &pipeline_create, nullptr,
               &_state->pipeline_layout);
 
-    VkImageViewCreateInfo image_view_create{};
-    image_view_create.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    image_view_create.pNext = nullptr;
-    image_view_create.flags = 0u;
-    image_view_create.image = _state->chunk_texture.image;
-    image_view_create.viewType = VK_IMAGE_VIEW_TYPE_3D;
-    image_view_create.format =  _state->chunk_texture.format;
-    image_view_create.components = VkComponentMapping{};
-    image_view_create.subresourceRange = VkImageSubresourceRange{
-        VK_IMAGE_ASPECT_COLOR_BIT,
-        0u, 1u, 0u, 1u
-    };
-    CHECKCALL(vkCreateImageView, _vulkan->device,
-              &image_view_create, nullptr, &_state->chunk_view);
-    image_view_create.image = _state->region_texture.image;
-    image_view_create.format = _state->region_texture.format;
-    CHECKCALL(vkCreateImageView, _vulkan->device,
-              &image_view_create, nullptr, &_state->region_view);
+    _state->chunk_view = _vulkan->CreateImageView(_state->chunk_texture);
+    _state->region_view = _vulkan->CreateImageView(_state->region_texture);
 
     _state->staging_buffer = _vulkan->CreateBuffer(
         sizeof(numtk::mat4f) * 3 + sizeof(numtk::vec2f),
@@ -837,20 +821,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                     vkDestroyImageView(_context.device, chunk_view, nullptr);
                 });
 
-            VkImageViewCreateInfo image_view_create{};
-            image_view_create.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-            image_view_create.pNext = nullptr;
-            image_view_create.flags = 0u;
-            image_view_create.image = _state->chunk_texture.image;
-            image_view_create.viewType = VK_IMAGE_VIEW_TYPE_3D;
-            image_view_create.format = _state->chunk_texture.format;
-            image_view_create.components = VkComponentMapping{};
-            image_view_create.subresourceRange = VkImageSubresourceRange{
-                VK_IMAGE_ASPECT_COLOR_BIT,
-                0u, 1u, 0u, 1u
-            };
-            CHECKCALL(vkCreateImageView, _vulkan->device,
-                      &image_view_create, nullptr, &_state->chunk_view);
+            _state->chunk_view = _vulkan->CreateImageView(_state->chunk_texture);
         }
     }
 

@@ -120,6 +120,7 @@ struct Buffer {
 struct Texture {
     VkImage image;
     VkDeviceMemory memory;
+    VkImageType image_type;
     VkFormat format;
 };
 
@@ -266,6 +267,7 @@ struct Context
                           VkImageType _type, VkFormat _format, VkImageUsageFlags _usage,
                           std::function<void(void*)> const& _upload_callback);
     void DestroyTexture(Texture const& _texture) const;
+    VkImageView CreateImageView(Texture const& _texture) const;
 
     FPTable fp = {};
 

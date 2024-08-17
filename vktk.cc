@@ -1100,6 +1100,7 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
     uint32_t size = _width * _height * _depth * bpp;
 
     Texture texture{};
+    texture.image_type = _type;
     texture.format = _format;
     CHECKCALL(vkCreateImage, device, &create_info, nullptr, &texture.image);
 
@@ -1246,6 +1247,28 @@ void Context::DestroyTexture(Texture const& _texture) const
 {
     vkDestroyImage(device, _texture.image, nullptr);
     vkFreeMemory(device, _texture.memory, nullptr);
+}
+
+VkImageView Context::CreateImageView(Texture const& _texture) const
+{
+    VkImageView output = {};
+    VkImageViewCreateInfo image_view_create{};
+    image_view_create.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    image_view_create.pNext = nullptr;
+    image_view_create.flags = 0u;
+    image_view_create.image = _texture.image;
+    image_view_create.viewType = (VkImageViewType)_texture.image_type;
+    image_view_create.format = _texture.format;
+    image_view_create.components = VkComponentMapping{};
+    image_view_create.subresourceRange = VkImageSubresourceRange{
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        0u, 1u, 0u, 1u
+    };
+
+    CHECKCALL(vkCreateImageView, device,
+              &image_view_create, nullptr, &output);
+
+    return output;
 }
 
 VkFramebuffer Swapchain::AcquireNext(VkSemaphore _signal)
