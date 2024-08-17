@@ -239,7 +239,7 @@ Context::Context(uint64_t _hinstance, uint64_t _hwindow)
 
 Context::~Context()
 {
-    WaitPendingDestroys();
+    WaitScheduledRoutines();
 
 #if defined(_WIN32) || defined(__unix__)
     vkDestroySurfaceKHR(instance, surface, nullptr);
@@ -363,16 +363,25 @@ void CommandBuffer::Submit(VkSemaphore* _signal_semaphore,
                  _wait_semaphores, _wait_stages, _wait_count,
                  _signal_fence);
 
-
-
     for (Buffer const& buffer : pending_destroys)
-        std::cout << "queuing submit staging buffer destroy " << std::hex
+        std::cout << "[CommandSubmit] scheduling staging buffer destruction " << std::hex
                   << buffer.buffer << std::dec << std::endl;
 
-    queue.context->pending_destroys.emplace_back(Context::PendingDestroy{
-        *_signal_fence, pending_destroys
-    });
-    pending_destroys.clear();
+    queue.context->ScheduleRoutine(
+        *_signal_fence,
+        [pending_destroys = std::move(pending_destroys)](Context& context) {
+            for (Buffer const& buffer : pending_destroys)
+            {
+                std::cout << "[ScheduledRoutine] destroying buffer " << std::hex
+                          << buffer.buffer << std::dec << std::endl;
+                context.DestroyBuffer(buffer);
+            }
+        });
+
+    if (_signal_fence == &fallback_fence)
+        queue.context->ScheduleFenceDestroy(fallback_fence);
+
+    pending_destroys = {};
 }
 
 void CommandBuffer::Begin()
@@ -449,7 +458,8 @@ void CommandBuffer::UpdateTexture(Texture _texture, VkOffset3D _offset, VkExtent
                            1,
                            &copy_region);
 
-    std::cout << std::hex << "staging buffer " << staging.buffer << std::dec << std::endl;
+    std::cout << "[CommandUpdateTexture] scheduled staging buffer destruction "
+              << std::hex << staging.buffer << std::dec << std::endl;
     pending_destroys.emplace_back(staging);
 }
 
@@ -1061,7 +1071,7 @@ Buffer Context::CreateBuffer(uint32_t _size,
     return buffer;
 }
 
-void Context::DestroyBuffer(Buffer& _buffer)
+void Context::DestroyBuffer(Buffer const& _buffer) const
 {
     vkDestroyBuffer(device, _buffer, nullptr);
 }
@@ -1198,15 +1208,14 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
 
     command_buffer.End();
 
-    PendingDestroy pending_destroy = {};
-    pending_destroy.buffers.push_back(staging);
+    VkFence staging_fence = {};
 
     VkFenceCreateInfo fence_info = {};
     fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fence_info.pNext = nullptr;
     fence_info.flags = 0;
     CHECKCALL(vkCreateFence,
-              device, &fence_info, nullptr, &pending_destroy.fence);
+              device, &fence_info, nullptr, &staging_fence);
 
     VkSubmitInfo submit_info{};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -1218,60 +1227,25 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
     submit_info.pCommandBuffers = &command_buffer.handle;
     submit_info.signalSemaphoreCount = 0u;
     submit_info.pSignalSemaphores = nullptr;
-    vkQueueSubmit(present_queue, 1, &submit_info, pending_destroy.fence);
+    vkQueueSubmit(present_queue, 1, &submit_info, staging_fence);
 
-    std::cout << "queuing staging buffer destroy " << std::hex
-              << pending_destroy.buffers[0] << std::dec << std::endl;
-    pending_destroys.push_back(pending_destroy);
+    std::cout << "[CreateTexture] scheduled staging buffer destruction "
+              << std::hex << staging.buffer << std::dec << std::endl;
+    ScheduleRoutine(staging_fence, [staging](Context& _context) {
+        std::cout << "[ScheduledRoutine] staging buffer destroyed "
+                  << std::hex << staging.buffer << std::dec << std::endl;
+        _context.DestroyBuffer(staging);
+    });
+
+    ScheduleFenceDestroy(staging_fence);
 
     return result;
 }
 
-void Context::TryPendingDestroys()
+void Context::DestroyTexture(Texture const& _texture) const
 {
-    std::vector<std::size_t> removed_indices = {};
-    for (std::size_t index = 0u; index < pending_destroys.size(); ++index)
-    {
-        PendingDestroy& pending_destroy = pending_destroys[index];
-        if (vkGetFenceStatus(device, pending_destroy.fence)
-            == VK_SUCCESS)
-        {
-            removed_indices.push_back(index);
-            for (Buffer& buffer : pending_destroy.buffers)
-            {
-                std::cout << "destroying buffer " << std::hex
-                          << buffer << std::dec << std::endl;
-                DestroyBuffer(buffer);
-            }
-            vkDestroyFence(device, pending_destroy.fence, nullptr);
-            std::cout << "destroying fence " << std::hex
-                      << pending_destroy.fence << std::dec << std::endl;
-        }
-    }
-
-    for (std::size_t index = 0u; index < removed_indices.size(); ++index)
-        pending_destroys.erase(
-            std::next(pending_destroys.begin(),
-                      removed_indices[removed_indices.size() - 1 - index])
-        );
-}
-
-void Context::WaitPendingDestroys()
-{
-    for (PendingDestroy& pending_destroy : pending_destroys)
-    {
-        CHECKCALL(vkWaitForFences, device, 1, &pending_destroy.fence, VK_TRUE, ~0ull);
-        for (Buffer& buffer : pending_destroy.buffers)
-        {
-            std::cout << "waiting for fence to destroy " << std::hex
-                      << buffer << std::dec << std::endl;
-            DestroyBuffer(buffer);
-        }
-        vkDestroyFence(device, pending_destroy.fence, nullptr);
-        std::cout << "destroying fence " << std::hex
-                  << pending_destroy.fence << std::dec << std::endl;
-    }
-    pending_destroys.clear();
+    vkDestroyImage(device, _texture.image, nullptr);
+    vkFreeMemory(device, _texture.memory, nullptr);
 }
 
 VkFramebuffer Swapchain::AcquireNext(VkSemaphore _signal)
@@ -1325,6 +1299,78 @@ VkDeviceMemory Context::MemAlloc(VkMemoryPropertyFlags _flags, uint32_t _size)
     VkDeviceMemory device_memory = {};
     CHECKCALL(vkAllocateMemory, device, &allocate_info, nullptr, &device_memory);
     return device_memory;
+}
+
+void Context::ScheduleRoutine(VkFence _fence, SynchronisedRoutine _routine)
+{
+    if (!pending_routines.contains(_fence))
+        pending_routines.emplace(_fence, std::vector<SynchronisedRoutine>{});
+    pending_routines[_fence].push_back(_routine);
+}
+
+void Context::ScheduleFenceDestroy(VkFence _fence)
+{
+    pending_fences.emplace(_fence);
+}
+
+void Context::TryScheduledRoutines()
+{
+    std::vector<VkFence> finished_fences = {};
+    for (auto const& bind_point : pending_routines)
+    {
+        if (vkGetFenceStatus(device, bind_point.first) != VK_SUCCESS)
+            continue;
+
+        for (SynchronisedRoutine const& routine : bind_point.second)
+            routine(*this);
+
+        finished_fences.push_back(bind_point.first);
+    }
+
+    for (VkFence fence : finished_fences)
+        pending_routines.erase(fence);
+    finished_fences.clear();
+
+    for (VkFence fence : pending_fences)
+    {
+        if (vkGetFenceStatus(device, fence) != VK_SUCCESS)
+            continue;
+
+        vkDestroyFence(device, fence, nullptr);
+#if 0
+        std::cout << "[PollFences] destroying fence " << std::hex
+                  << fence << std::dec << std::endl;
+#endif
+        finished_fences.push_back(fence);
+    }
+
+    for (VkFence fence : finished_fences)
+        pending_fences.erase(fence);
+}
+
+void Context::WaitScheduledRoutines()
+{
+    for (auto const& bind_point : pending_routines)
+    {
+        CHECKCALL(vkWaitForFences, device, 1, &bind_point.first, VK_TRUE, ~0ull);
+
+        for (SynchronisedRoutine const& routine : bind_point.second)
+            routine(*this);
+
+        vkDestroyFence(device, bind_point.first, nullptr);
+        std::cout << "[WaitFences] destroying fence " << std::hex
+                  << bind_point.first << std::dec << std::endl;
+    }
+    pending_routines.clear();
+
+    for (VkFence fence : pending_fences)
+    {
+        CHECKCALL(vkWaitForFences, device, 1, &fence, VK_TRUE, ~0ull);
+        vkDestroyFence(device, fence, nullptr);
+        std::cout << "[WaitFences] destroying fence " << std::hex
+                  << fence << std::dec << std::endl;
+    }
+    pending_fences.clear();
 }
 
 char const* VkResultToStr(VkResult _vkResult)

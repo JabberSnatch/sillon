@@ -150,7 +150,7 @@ extern "C" {
     {
         std::cout << "Shutdown" << std::endl;
 
-        _context->vulkan->WaitPendingDestroys();
+        _context->vulkan->WaitScheduledRoutines();
         if (_context->plugin.Shutdown)
             _context->plugin.Shutdown(_context->plugin.state,
                                       _context->vulkan.get());
@@ -163,7 +163,7 @@ extern "C" {
     {
         std::cout << "Reload" << std::endl;
 
-        _context->vulkan->WaitPendingDestroys();
+        _context->vulkan->WaitScheduledRoutines();
         if (_context->plugin.Shutdown)
             _context->plugin.Shutdown(_context->plugin.state,
                                       _context->vulkan.get());
@@ -236,6 +236,6 @@ extern "C" {
         vkQueueWaitIdle(_context->vulkan->present_queue);
         vkDestroySemaphore(_context->vulkan->device, acquire_semaphore, nullptr);
 
-        _context->vulkan->TryPendingDestroys();
+        _context->vulkan->TryScheduledRoutines();
     }
 }

@@ -42,6 +42,8 @@ struct state_t
     VkDescriptorSet descriptor_set;
     VkDescriptorSetLayout descset_layout;
 
+    VkFence last_submit;
+
     vktk::Buffer matrix_buffer;
     vktk::Buffer staging_buffer;
     void* staging_area;
@@ -187,6 +189,13 @@ void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<int32_t> con
     uint32_t chunk_index = coords[0] + coords[2]*32;
     RegionData::ChunkData const& chunk = state->region.chunks[chunk_index];
     RegionData::SectionData const& section = chunk.sections[coords[1]];
+
+    if (state->last_submit != VK_NULL_HANDLE
+        && state->chunk_texture.image != VK_NULL_HANDLE)
+        vulkan->ScheduleRoutine(state->last_submit,
+                                [texture = state->chunk_texture](vktk::Context& _context) {
+                                    _context.DestroyTexture(texture);
+                                });
 
     state->chunk_texture = vulkan->CreateTexture(
         16, 16, 16,
@@ -822,6 +831,12 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         {
             LoadSection(_state, _vulkan, next_section);
 
+            _vulkan->ScheduleRoutine(
+                _state->last_submit,
+                [chunk_view = _state->chunk_view](vktk::Context& _context) {
+                    vkDestroyImageView(_context.device, chunk_view, nullptr);
+                });
+
             VkImageViewCreateInfo image_view_create{};
             image_view_create.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
             image_view_create.pNext = nullptr;
@@ -922,11 +937,11 @@ void Draw(void* _pstate,
     else
         up = forward.cross(numtk::vec3f{ 0.f, 0.f, 1.f }).cross(forward).normalise();
 
-    #if 0
+#if 0
     std::cout << forward.norm() << std::endl;
     std::cout << _state->turntable.x() << " " << _state->turntable.y() << std::endl;
     std::cout << forward.x() << " " << forward.y() << " " << forward.z() << std::endl;
-    #endif
+#endif
 
     numtk::vec3f center = (numtk::vec3f{
         (float)_state->current_section.x() + 0.5f,
@@ -1007,18 +1022,16 @@ void Draw(void* _pstate,
 
     command_buffer.End();
 
+    if (_state->last_submit != VK_NULL_HANDLE)
+        _vulkan->ScheduleFenceDestroy(_state->last_submit);
+
     VkPipelineStageFlags wait_dst_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    VkSubmitInfo submit_info{};
-    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit_info.pNext = nullptr;
-    submit_info.waitSemaphoreCount = 1u;
-    submit_info.pWaitSemaphores = &_acquire_semaphore;
-    submit_info.pWaitDstStageMask = &wait_dst_stage;
-    submit_info.commandBufferCount = 1u;
-    submit_info.pCommandBuffers = &command_buffer.handle;
-    submit_info.signalSemaphoreCount = 0u;
-    submit_info.pSignalSemaphores = nullptr;
-    vkQueueSubmit(_vulkan->present_queue, 1, &submit_info, VK_NULL_HANDLE);
+    command_buffer.Submit(nullptr, &_acquire_semaphore, &wait_dst_stage, 1u,
+                          &_state->last_submit);
+#if 0
+    std::cout << "[VoxelsDraw] submitted on fence "
+              << std::hex << _state->last_submit << std::dec << std::endl;
+#endif
 
     VkPresentInfoKHR present_info{};
     present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -1069,6 +1082,12 @@ void Shutdown(void* _pstate,
 
     _vulkan->DestroyBuffer(_state->matrix_buffer);
     _vulkan->DestroyBuffer(_state->staging_buffer);
+
+    if (_state->last_submit != VK_NULL_HANDLE)
+    {
+        _vulkan->ScheduleFenceDestroy(_state->last_submit);
+        _state->last_submit = VK_NULL_HANDLE;
+    }
 }
 
 }

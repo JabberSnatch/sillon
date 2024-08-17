@@ -4,6 +4,7 @@
 #include <functional>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 
 #include <vulkan/vulkan.h>
 
@@ -113,6 +114,7 @@ struct Buffer {
     Allocation alloc;
 
     operator VkBuffer() { return buffer; }
+    operator VkBuffer() const { return buffer; }
 };
 
 struct Texture {
@@ -254,8 +256,8 @@ struct Context
                         std::function<void(void*)> const& _upload_callback,
                         VkMemoryPropertyFlags _memory_flags =
                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
-                        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) = delete;
-    void DestroyBuffer(Buffer& _buffer);
+                        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    void DestroyBuffer(Buffer const& _buffer) const;
 
     Texture CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
                           VkImageType _type, VkFormat _format, VkImageUsageFlags _usage);
@@ -263,9 +265,7 @@ struct Context
     Texture CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
                           VkImageType _type, VkFormat _format, VkImageUsageFlags _usage,
                           std::function<void(void*)> const& _upload_callback);
-
-    void TryPendingDestroys();
-    void WaitPendingDestroys();
+    void DestroyTexture(Texture const& _texture) const;
 
     FPTable fp = {};
 
@@ -283,15 +283,13 @@ struct Context
 
     Allocator allocator = {};
 
-    using SynchronisedRoutine = std::function<void(VkDevice)>;
+    using SynchronisedRoutine = std::function<void(Context&)>;
+    void ScheduleRoutine(VkFence _fence, SynchronisedRoutine _routine);
+    void ScheduleFenceDestroy(VkFence _fence);
+    void TryScheduledRoutines();
+    void WaitScheduledRoutines();
     std::unordered_map<VkFence, std::vector<SynchronisedRoutine>> pending_routines = {};
-
-    struct PendingDestroy
-    {
-        VkFence fence;
-        std::vector<Buffer> buffers;
-    };
-    std::vector<PendingDestroy> pending_destroys = {};
+    std::unordered_set<VkFence> pending_fences = {};
 };
 
 } // namespace vktk
