@@ -565,10 +565,13 @@ void RenderResources(void* _pstate,
     };
 
     layout(location = 0) out vec3 iFS_volume_coords;
+    layout(location = 1) out vec3 iFS_camera_position;
 
     void main() {
         vec3 vertex = kTriVertices[kTriIndices[gl_VertexIndex]];
         gl_Position = projection * view_model * vec4(vertex, 1.0);
+
+        iFS_camera_position = (inverse(view_model) * vec4(vec3(0.0), 1.0)).xyz;
         iFS_volume_coords = vertex * 0.5 + vec3(0.5);
     }
     )_";
@@ -644,6 +647,7 @@ void RenderResources(void* _pstate,
 
     static char const region_fshader[] = R"(
     layout(location = 0) in vec3 iFS_volume_coords;
+    layout(location = 1) in vec3 iFS_camera_position;
     layout(location = 0) out vec4 color;
     layout(set = 0, binding = 0) uniform usampler3D region;
     layout(set = 0, binding = 2) uniform sampler3D chunk;
@@ -668,12 +672,31 @@ void RenderResources(void* _pstate,
             * vec3(uv * 2.0 - vec2(1.0), 1.0);
         dir = normalize(dir);
         //dir = -dir;
-        vec3 org = iFS_volume_coords - dir * 0.00001;
+        vec3 step_sign = sign(-dir);
+        vec3 max_t = abs(((step_sign * 0.5 + vec3(0.5)) - (step_sign * iFS_volume_coords)) / dir);
+
+        float depth = distance(iFS_camera_position * 0.5 + vec3(0.5), iFS_volume_coords);
+
+        vec3 org = iFS_volume_coords
+            - dir * 0.00001
+            - (dir * min(depth, min(max_t.x, min(max_t.y, max_t.z))));
 
         mat4 world_mat = projection * view_model;
 
         DDAContext ctx = InitDDAContext(org, dir, REGION_SIZE);
         float d = 0.0;
+        float t = 0.0;
+
+        bool voxel_rendered = false;
+        DDAContext ctx_cache;
+        vec3 org_cache;
+
+        uint hard_stop = 0;
+
+        while (!voxel_rendered && ctx.mask.w == 1.0 && hard_stop < 16)
+        {
+        hard_stop++;
+
         bool chunk_rendered = false;
         uint chunk_index = 0xffff;
         while (d < 64.0 && ctx.mask.w == 1.0)
@@ -681,12 +704,14 @@ void RenderResources(void* _pstate,
             uvec2 data = texture(region, ctx.voxel_coords).xy;
             if (data.y != 0xffff)
             {
-                ctx.max_t -= ctx.delta_t * ctx.mask.xyz * ctx.mask.w;
+                ctx_cache = ctx;
+                org_cache = org;
 
-                float t = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
-                vec3 hit_pos = (org + dir*t) * REGION_SIZE*(1.0 - 0.00001*ctx.step_sign);
+                ctx.max_t -= ctx.delta_t * ctx.mask.xyz * ctx.mask.w;
+                float step_t = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
+                vec3 hit_pos = (org + dir*step_t) * REGION_SIZE * (1.0 - 0.00001*ctx.step_sign);
                 org = hit_pos - floor(ctx.voxel_coords * REGION_SIZE);
-                //dir = -dir;
+
                 ctx = InitDDAContext(org, dir, SECTION_SIZE);
                 chunk_rendered = true;
                 chunk_index = data.y;
@@ -697,43 +722,62 @@ void RenderResources(void* _pstate,
             float step = (float(data.x) / 65535.0) * ctx.mask.w;
             StepDDAContext(ctx);
 
-            float t = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
-            vec4 p = world_mat * vec4((org + dir*t)*2.0 - vec3(1.0), 1.0);
-            p /= p.w;
-            if (p.z > 1.0)
-                break;
+            vec3 max_t = (ctx.max_t - ctx.delta_t * ctx.mask.xyz) * ctx.mask.w;
+            t = min(max_t.x, min(max_t.y, max_t.z));
 
             d += step;
         }
 
-        float t = 0.0;
         if (chunk_rendered)
         {
-            chunk_rendered = false;
-            while (!chunk_rendered && ctx.mask.w == 1.0)
+            while (!voxel_rendered && ctx.mask.w == 1.0)
             {
                 float step = texture(chunks[chunk_index], ctx.voxel_coords).x;
                 if (step > 0.0)
                 {
-                    chunk_rendered = true;
+                    voxel_rendered = true;
                     break;
                 }
-                t = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
                 StepDDAContext(ctx);
             }
         }
 
-        //color = vec4(vec3(p.z), 1.0);
-        if (!chunk_rendered)
+        if (chunk_rendered && !voxel_rendered)
+        {
+            ctx = ctx_cache;
+            org = org_cache;
+            StepDDAContext(ctx);
+        }
+        else if (voxel_rendered)
+        {
+            vec3 max_t = (ctx.max_t - ctx.delta_t * ctx.mask.xyz) * ctx.mask.w;
+            //t += min(max_t.x, min(max_t.y, max_t.z)) / SECTION_SIZE;
+            t = min(max_t.x, min(max_t.y, max_t.z));
+
+            //ctx = ctx_cache;
+            //ctx.max_t -= ctx.delta_t * ctx.mask.xyz * ctx.mask.w;
+            //float root_t = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
+            //ctx.max_t -= ctx.delta_t * ctx.mask.xyz * ctx.mask.w;
+            //float section_t = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
+            //t = distance((org_cache + dir*t/REGION_SIZE) * 2.0 - vec3(1.0), iFS_camera_position);
+            //org = org_cache;
+
+            vec3 hit_pos = (org_cache + dir*t);
+            //t = distance(hit_pos * 2.0 - vec3(1.0), iFS_camera_position);
+        }
+
+        }
+
+        if (!voxel_rendered)
+        {
             color = vec4(vec3((d.x/16.0)), d.x/32.0);
+        }
         else
         {
             color = vec4(org+dir*t,1.0);
-            //color = vec4(ctx.voxel_coords, d);
+            //color = vec4(vec3(t*2.0), 1.0);
+            //color = vec4((org_cache + dir*t), 1.0);
         }
-
-        //color = vec4(vec3(t),d/32.0);
-        //color = vec4(vec3(d - t, t - d, 0.0), 1.0);
     }
     )";
 
@@ -743,7 +787,7 @@ void RenderResources(void* _pstate,
                                         "draw_cube_vshader_cw",
                                         {
                                             "#version 450",
-                                            //"#define CW_CUBE",
+                                            "#define CW_CUBE",
                                             draw_cube_vshader
                                         });
 
