@@ -184,9 +184,13 @@ Context::Context(uint64_t _hinstance, uint64_t _hwindow)
             copy_queue_info.pQueuePriorities = &kQueuePriority;
         }
 
+        VkPhysicalDeviceVulkan12Features features = {};
+        features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+        features.runtimeDescriptorArray = VK_TRUE;
+
         VkDeviceCreateInfo device_info{};
         device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-        device_info.pNext = nullptr;
+        device_info.pNext = &features;
         device_info.flags = 0;
         device_info.queueCreateInfoCount = 2;
         device_info.pQueueCreateInfos = queue_info;
@@ -1380,9 +1384,11 @@ void Context::WaitScheduledRoutines()
         for (SynchronisedRoutine const& routine : bind_point.second)
             routine(*this);
 
+#if 0
         vkDestroyFence(device, bind_point.first, nullptr);
         std::cout << "[WaitFences] destroying fence " << std::hex
                   << bind_point.first << std::dec << std::endl;
+#endif
     }
     pending_routines.clear();
 

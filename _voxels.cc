@@ -55,8 +55,8 @@ struct state_t
     RegionData region;
 
     uint32_t section_index = 0;
-    vktk::Texture section_textures[128];
-    VkImageView section_views[128];
+    std::vector<vktk::Texture> section_textures{};
+    std::vector<VkImageView> section_views{};
 };
 
 RegionData::ChunkData DecodeChunk(mctk::MCAChunkData const& chunk_data)
@@ -190,9 +190,6 @@ RegionData DeserialiseRegion(std::string const& file_path)
 
 void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<int32_t> const& coords)
 {
-    if (state->section_index >= 128)
-        return;
-
     uint32_t chunk_index = coords[0] + coords[2]*32;
     RegionData::ChunkData const& chunk = state->region.chunks[chunk_index];
     RegionData::SectionData const& section = chunk.sections[coords[1]];
@@ -204,26 +201,28 @@ void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<int32_t> con
                                     _context.DestroyTexture(texture);
                                 });
 
-    state->section_textures[state->section_index] = vulkan->CreateTexture(
-        16, 16, 16,
-        VK_IMAGE_TYPE_3D, VK_FORMAT_R8_UNORM,
-        VK_IMAGE_USAGE_TRANSFER_DST_BIT
-        | VK_IMAGE_USAGE_SAMPLED_BIT,
-        [&section](void* mapped_data) {
-            uint8_t* blocks = (uint8_t*)mapped_data;
-            for (uint32_t index = 0u; index < 4096; ++index)
-            {
-                blocks[index] =
-                    (!section.palette.empty()
-                     && (section.palette[section.block_ids[index]] != "air")
-                     && (section.palette[section.block_ids[index]] != "glow_lichen"))
-                    ? 255
-                    : 0;
-            }
-        });
+    state->section_textures.push_back(
+        vulkan->CreateTexture(
+            16, 16, 16,
+            VK_IMAGE_TYPE_3D, VK_FORMAT_R8_UNORM,
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT
+            | VK_IMAGE_USAGE_SAMPLED_BIT,
+            [&section](void* mapped_data) {
+                uint8_t* blocks = (uint8_t*)mapped_data;
+                for (uint32_t index = 0u; index < 4096; ++index)
+                {
+                    blocks[index] =
+                        (!section.palette.empty()
+                         && (section.palette[section.block_ids[index]] != "air")
+                         && (section.palette[section.block_ids[index]] != "glow_lichen"))
+                        ? 255
+                        : 0;
+                }
+            }));
 
-    state->section_views[state->section_index] =
-        vulkan->CreateImageView(state->section_textures[state->section_index]);
+    state->section_views.push_back(
+        vulkan->CreateImageView(state->section_textures[state->section_index])
+    );
 
 #if 1
     state->chunk_texture = vulkan->CreateTexture(
@@ -303,6 +302,30 @@ void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<int32_t> con
     state->section_index++;
 }
 
+void LoadArea(state_t* _state, vktk::Context* _vulkan,
+              numtk::vec3<int32_t> const& _begin,
+              numtk::vec3<int32_t> const& _end)
+{
+    uint32_t sync_counter = 0;
+    for (int32_t x = _begin.x(); x < _end.x(); ++x)
+    {
+        for (int32_t y = _begin.y(); y < _end.y(); ++y)
+        {
+            for (int32_t z = _begin.z(); z < _end.z(); ++z)
+            {
+                LoadSection(_state, _vulkan, { x, y, z });
+
+                if (sync_counter++ > 128)
+                {
+                    std::cout << "wait scheduled routines" << std::endl;
+                    _vulkan->WaitScheduledRoutines();
+                    sync_counter = 0;
+                }
+            }
+        }
+    }
+}
+
 void LoadRegion(state_t* state, vktk::Context* vulkan)
 {
     RegionData const& region = state->region;
@@ -351,10 +374,12 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
     _state->region = DeserialiseRegion("../r.-1.6.mca");
     LoadRegion(_state, _vulkan);
-    LoadSection(_state, _vulkan, { 28, 6, 21 });
+    //LoadSection(_state, _vulkan, { 28, 6, 21 });
+    //LoadArea(_state, _vulkan, { 20, 0, 18 }, { 32, 13, 25 });
+    LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
 
     VkDescriptorPoolSize descpool_sizes[2] = {
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 130 },
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 32768 + 1 },
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}
     };
 
@@ -368,9 +393,11 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     CHECKCALL(vkCreateDescriptorPool, _vulkan->device,
               &descpool_create, nullptr, &_state->descriptor_pool);
 
-    VkDescriptorSetLayoutBinding bindings[4];
+    VkDescriptorSetLayoutBinding bindings[3];
+    VkDescriptorBindingFlags binding_flags[3];
     {
         VkDescriptorSetLayoutBinding& binding = bindings[0];
+        binding_flags[0] = 0;
         binding.binding = 0;
         binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         binding.descriptorCount = 1;
@@ -379,6 +406,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     }
     {
         VkDescriptorSetLayoutBinding& binding = bindings[1];
+        binding_flags[1] = 0;
         binding.binding = 1;
         binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         binding.descriptorCount = 1;
@@ -387,33 +415,39 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     }
     {
         VkDescriptorSetLayoutBinding& binding = bindings[2];
+        binding_flags[2] = VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
         binding.binding = 2;
         binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        binding.descriptorCount = 1;
-        binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        binding.pImmutableSamplers = nullptr;
-    }
-    {
-        VkDescriptorSetLayoutBinding& binding = bindings[3];
-        binding.binding = 3;
-        binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        binding.descriptorCount = 128;
+        binding.descriptorCount = 32 * 32 * 32;
         binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
         binding.pImmutableSamplers = nullptr;
     }
 
+    VkDescriptorSetLayoutBindingFlagsCreateInfo flags_info{};
+    flags_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+    flags_info.pNext = nullptr;
+    flags_info.bindingCount = 3;
+    flags_info.pBindingFlags = binding_flags;
+
     VkDescriptorSetLayoutCreateInfo descset_create{};
     descset_create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    descset_create.pNext = nullptr;
+    descset_create.pNext = &flags_info;
     descset_create.flags = 0u;
-    descset_create.bindingCount = 4;
+    descset_create.bindingCount = 3;
     descset_create.pBindings = bindings;
     CHECKCALL(vkCreateDescriptorSetLayout, _vulkan->device,
               &descset_create, nullptr, &_state->descset_layout);
 
+    uint32_t desc_count = _state->section_index;
+    VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc = {};
+    desc_count_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+    desc_count_alloc.pNext = nullptr;
+    desc_count_alloc.descriptorSetCount = 1;
+    desc_count_alloc.pDescriptorCounts = &desc_count;
+
     VkDescriptorSetAllocateInfo descset_allocate{};
     descset_allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    descset_allocate.pNext= nullptr;
+    descset_allocate.pNext= &desc_count_alloc;
     descset_allocate.descriptorPool = _state->descriptor_pool;
     descset_allocate.descriptorSetCount = 1u;
     descset_allocate.pSetLayouts = &_state->descset_layout;
@@ -581,7 +615,6 @@ void RenderResources(void* _pstate,
     {
         vec3 step_sign;
         vec3 exit_value;
-        vec3 edge_distance;
         vec3 delta_t;
         vec3 max_t;
         vec3 voxel_coords;
@@ -598,9 +631,9 @@ void RenderResources(void* _pstate,
 
         ctx.step_sign = sign(dir);
         ctx.exit_value = ctx.step_sign * 0.5 + vec3(0.5);
-        ctx.edge_distance = ctx.exit_value - (ctx.step_sign * fract(voxel_space_org));
+        vec3 edge_distance = ctx.exit_value - (ctx.step_sign * fract(voxel_space_org));
         ctx.delta_t = 1.0 / (abs(dir) * voxel_count);
-        ctx.max_t = abs(ctx.edge_distance) * ctx.delta_t;
+        ctx.max_t = abs(edge_distance) * ctx.delta_t;
         ctx.voxel_coords = (floor(voxel_space_org) + vec3(0.5)) / voxel_count;
         ctx.voxel_step = ctx.step_sign / voxel_count;
 
@@ -650,13 +683,13 @@ void RenderResources(void* _pstate,
     )";
 
     static char const region_fshader[] = R"(
+    #extension GL_EXT_nonuniform_qualifier: enable
+
     layout(location = 0) in vec3 iFS_volume_coords;
     layout(location = 1) in vec3 iFS_camera_position;
     layout(location = 0) out vec4 color;
     layout(set = 0, binding = 0) uniform usampler3D region;
-    layout(set = 0, binding = 2) uniform sampler3D chunk;
-
-    layout(set = 0, binding = 3) uniform sampler3D chunks[128];
+    layout(set = 0, binding = 2) uniform sampler3D chunks[];
 
     layout(std140, set = 0, binding = 1) uniform MatrixBlock {
         mat4 projection;
@@ -762,7 +795,9 @@ void RenderResources(void* _pstate,
         }
         else
         {
-            color = vec4(distance((root_org+dir*t) * 2.0 - vec3(1.0), iFS_camera_position).xxx, 1.0);
+            float dist = distance((root_org+dir*t) * 2.0 - vec3(1.0), iFS_camera_position);
+            float tone = 1.0 - (1.0 / (dist * 1.0 + 1.0));
+            color = vec4(tone.xxx, 1.0);
         }
     }
     )";
@@ -812,6 +847,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 {
     state_t* _state = (state_t*)_pstate;
 
+    //std::cout << _input->time_delta << std::endl;
     _state->time += _input->time_delta;
 
     if (_input->key_down[iotk::eKey::kEscape])
@@ -858,6 +894,8 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         next_section.y() = std::max(0, std::min(23, next_section.y()));
         next_section.z() = std::max(0, std::min(31, next_section.z()));
 
+        _state->current_section = next_section;
+#if 0
         if (next_section != _state->current_section)
         {
             LoadSection(_state, _vulkan, next_section);
@@ -870,6 +908,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
             _state->chunk_view = _vulkan->CreateImageView(_state->chunk_texture);
         }
+#endif
     }
 
     return true;
@@ -898,7 +937,7 @@ void Draw(void* _pstate,
     chunk_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     {
-        VkWriteDescriptorSet desc_writes[3];
+        VkWriteDescriptorSet desc_writes[2];
         {
             VkWriteDescriptorSet& desc_write = desc_writes[0];
             desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -927,20 +966,7 @@ void Draw(void* _pstate,
             desc_write.pTexelBufferView = nullptr;
         }
 
-        {
-            VkWriteDescriptorSet& desc_write = desc_writes[2];
-            desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            desc_write.pNext = nullptr;
-            desc_write.dstSet = _state->descriptor_set;
-            desc_write.dstBinding = 2u;
-            desc_write.dstArrayElement = 0u;
-            desc_write.descriptorCount = 1u;
-            desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            desc_write.pImageInfo = &chunk_image_info;
-            desc_write.pBufferInfo = nullptr;
-            desc_write.pTexelBufferView = nullptr;
-        }
-        vkUpdateDescriptorSets(_vulkan->device, 3u, desc_writes, 0u, nullptr);
+        vkUpdateDescriptorSets(_vulkan->device, 2u, desc_writes, 0u, nullptr);
     }
 
     {
@@ -957,7 +983,7 @@ void Draw(void* _pstate,
         desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         desc_write.pNext = nullptr;
         desc_write.dstSet = _state->descriptor_set;
-        desc_write.dstBinding = 3u;
+        desc_write.dstBinding = 2u;
         desc_write.dstArrayElement = 0u;
         desc_write.descriptorCount = _state->section_index;
         desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -1127,6 +1153,12 @@ void Shutdown(void* _pstate,
 
     _vulkan->DestroyBuffer(_state->matrix_buffer);
     _vulkan->DestroyBuffer(_state->staging_buffer);
+
+    for (uint32_t index = 0; index < _state->section_index; ++index)
+    {
+        _vulkan->DestroyTexture(_state->section_textures[index]);
+        vkDestroyImageView(_vulkan->device, _state->section_views[index], nullptr);
+    }
 
     if (_state->last_submit != VK_NULL_HANDLE)
     {
