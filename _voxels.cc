@@ -192,28 +192,31 @@ void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<int32_t> con
     RegionData::ChunkData const& chunk = state->region.chunks[chunk_index];
     RegionData::SectionData const& section = chunk.sections[coords[1]];
 
-    state->section_textures.push_back(
-        vulkan->CreateTexture(
-            16, 16, 16,
-            VK_IMAGE_TYPE_3D, VK_FORMAT_R8_UNORM,
-            VK_IMAGE_USAGE_TRANSFER_DST_BIT
-            | VK_IMAGE_USAGE_SAMPLED_BIT,
-            [&section](void* mapped_data) {
-                uint8_t* blocks = (uint8_t*)mapped_data;
-                for (uint32_t index = 0u; index < 4096; ++index)
-                {
-                    blocks[index] =
-                        (!section.palette.empty()
-                         && (section.palette[section.block_ids[index]] != "air")
-                         && (section.palette[section.block_ids[index]] != "glow_lichen"))
-                        ? 255
-                        : 0;
-                }
-            }));
+    if (section.palette.size() > 1)
+    {
+        state->section_textures.push_back(
+            vulkan->CreateTexture(
+                16, 16, 16,
+                VK_IMAGE_TYPE_3D, VK_FORMAT_R8_UNORM,
+                VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                | VK_IMAGE_USAGE_SAMPLED_BIT,
+                [&section](void* mapped_data) {
+                    uint8_t* blocks = (uint8_t*)mapped_data;
+                    for (uint32_t index = 0u; index < 4096; ++index)
+                    {
+                        blocks[index] =
+                            (!section.palette.empty()
+                             && (section.palette[section.block_ids[index]] != "air")
+                             && (section.palette[section.block_ids[index]] != "glow_lichen"))
+                            ? 255
+                            : 0;
+                    }
+                }));
 
-    state->section_views.push_back(
-        vulkan->CreateImageView(state->section_textures[state->section_index])
-    );
+        state->section_views.push_back(
+            vulkan->CreateImageView(state->section_textures[state->section_index])
+        );
+    }
 
     vktk::CommandBuffer update_commands = vulkan->CreateCommandBuffer(vulkan->present_queue);
     update_commands.Begin();
@@ -232,14 +235,35 @@ void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<int32_t> con
             }
         });
 
-    update_commands.UpdateTexture(
-        state->region_texture,
-        VkOffset3D{ coords[0], coords[1], coords[2] },
-        VkExtent3D{ 1, 1, 1 },
-        [section_index = state->section_index](void* mapped_data) {
-            uint16_t* section_info = (uint16_t*)mapped_data;
-            section_info[1] = (uint16_t)section_index;
-        });
+    if (state->section_textures.size() > state->section_index)
+    {
+        update_commands.UpdateTexture(
+            state->region_texture,
+            VkOffset3D{ coords[0], coords[1], coords[2] },
+            VkExtent3D{ 1, 1, 1 },
+            [section_index = state->section_index](void* mapped_data) {
+                uint16_t* section_info = (uint16_t*)mapped_data;
+                section_info[1] = (uint16_t)section_index;
+            });
+
+        state->section_index++;
+    }
+    else
+    {
+        update_commands.UpdateTexture(
+            state->region_texture,
+            VkOffset3D{ coords[0], coords[1], coords[2] },
+            VkExtent3D{ 1, 1, 1 },
+            [&section](void* mapped_data) {
+                uint16_t* section_info = (uint16_t*)mapped_data;
+                if (section.palette.empty()
+                    || section.palette[0] != "air"
+                    || section.palette[0] != "glow_lichen")
+                    section_info[1] = 0x8000;
+                else
+                    section_info[1] = 0x80ff;
+            });
+    }
 
 #if 0
     update_commands.UpdateTexture(
@@ -270,7 +294,6 @@ void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<int32_t> con
     update_commands.Submit();
 
     state->current_section = coords;
-    state->section_index++;
 }
 
 void LoadArea(state_t* _state, vktk::Context* _vulkan,
@@ -346,8 +369,8 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->region = DeserialiseRegion("../r.-1.6.mca");
     LoadRegion(_state, _vulkan);
     //LoadSection(_state, _vulkan, { 28, 6, 21 });
-    LoadArea(_state, _vulkan, { 20, 0, 18 }, { 32, 13, 25 });
-    //LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
+    //LoadArea(_state, _vulkan, { 20, 0, 18 }, { 32, 13, 25 });
+    LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
 
     VkDescriptorPoolSize descpool_sizes[2] = {
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 32768 + 1 },
@@ -708,7 +731,7 @@ void RenderResources(void* _pstate,
         while (ctx.mask.w == 1.0)
         {
             uvec2 data = texture(region, ctx.voxel_coords).xy;
-            if (data.y != 0xffff)
+            if (data.y < 0x8000)
             {
                 ctx_cache = ctx;
                 org_cache = org;
@@ -726,6 +749,17 @@ void RenderResources(void* _pstate,
                 chunk_index = data.y;
 
                 break;
+            }
+
+            if ((data.y & 0xff00) == 0x8000)
+            {
+                float step = float(data.y & 0x00ff) / 255.0;
+                if (step > 0.0)
+                {
+                    chunk_rendered = true;
+                    voxel_rendered = true;
+                    break;
+                }
             }
 
             chunk_index = data.y;
