@@ -48,8 +48,6 @@ struct state_t
     vktk::Buffer staging_buffer;
     void* staging_area;
 
-    vktk::Texture chunk_texture;
-    VkImageView chunk_view;
     vktk::Texture region_texture;
     VkImageView region_view;
     RegionData region;
@@ -194,13 +192,6 @@ void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<int32_t> con
     RegionData::ChunkData const& chunk = state->region.chunks[chunk_index];
     RegionData::SectionData const& section = chunk.sections[coords[1]];
 
-    if (state->last_submit != VK_NULL_HANDLE
-        && state->chunk_texture.image != VK_NULL_HANDLE)
-        vulkan->ScheduleRoutine(state->last_submit,
-                                [texture = state->chunk_texture](vktk::Context& _context) {
-                                    _context.DestroyTexture(texture);
-                                });
-
     state->section_textures.push_back(
         vulkan->CreateTexture(
             16, 16, 16,
@@ -223,26 +214,6 @@ void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<int32_t> con
     state->section_views.push_back(
         vulkan->CreateImageView(state->section_textures[state->section_index])
     );
-
-#if 1
-    state->chunk_texture = vulkan->CreateTexture(
-        16, 16, 16,
-        VK_IMAGE_TYPE_3D, VK_FORMAT_R8_UNORM,
-        VK_IMAGE_USAGE_TRANSFER_DST_BIT
-        | VK_IMAGE_USAGE_SAMPLED_BIT,
-        [&section](void* mapped_data) {
-            uint8_t* blocks = (uint8_t*)mapped_data;
-            for (uint32_t index = 0u; index < 4096; ++index)
-            {
-                blocks[index] =
-                    (!section.palette.empty()
-                     && (section.palette[section.block_ids[index]] != "air")
-                     && (section.palette[section.block_ids[index]] != "glow_lichen"))
-                    ? 255
-                    : 0;
-            }
-        });
-#endif
 
     vktk::CommandBuffer update_commands = vulkan->CreateCommandBuffer(vulkan->present_queue);
     update_commands.Begin();
@@ -375,8 +346,8 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->region = DeserialiseRegion("../r.-1.6.mca");
     LoadRegion(_state, _vulkan);
     //LoadSection(_state, _vulkan, { 28, 6, 21 });
-    //LoadArea(_state, _vulkan, { 20, 0, 18 }, { 32, 13, 25 });
-    LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
+    LoadArea(_state, _vulkan, { 20, 0, 18 }, { 32, 13, 25 });
+    //LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
 
     VkDescriptorPoolSize descpool_sizes[2] = {
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 32768 + 1 },
@@ -478,7 +449,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     CHECKCALL(vkCreatePipelineLayout, _vulkan->device, &pipeline_create, nullptr,
               &_state->pipeline_layout);
 
-    _state->chunk_view = _vulkan->CreateImageView(_state->chunk_texture);
     _state->region_view = _vulkan->CreateImageView(_state->region_texture);
 
     _state->staging_buffer = _vulkan->CreateBuffer(
@@ -895,20 +865,6 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         next_section.z() = std::max(0, std::min(31, next_section.z()));
 
         _state->current_section = next_section;
-#if 0
-        if (next_section != _state->current_section)
-        {
-            LoadSection(_state, _vulkan, next_section);
-
-            _vulkan->ScheduleRoutine(
-                _state->last_submit,
-                [chunk_view = _state->chunk_view](vktk::Context& _context) {
-                    vkDestroyImageView(_context.device, chunk_view, nullptr);
-                });
-
-            _state->chunk_view = _vulkan->CreateImageView(_state->chunk_texture);
-        }
-#endif
     }
 
     return true;
@@ -930,11 +886,6 @@ void Draw(void* _pstate,
     buffer_info.buffer = _state->matrix_buffer;
     buffer_info.offset = 0;
     buffer_info.range = VK_WHOLE_SIZE;
-
-    VkDescriptorImageInfo chunk_image_info{};
-    chunk_image_info.sampler = _state->sampler;
-    chunk_image_info.imageView = _state->chunk_view;
-    chunk_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     {
         VkWriteDescriptorSet desc_writes[2];
@@ -1134,13 +1085,6 @@ void Shutdown(void* _pstate,
     _state->descriptor_pool = VK_NULL_HANDLE;
     vkDestroyDescriptorSetLayout(_vulkan->device, _state->descset_layout, nullptr);
     _state->descset_layout = VK_NULL_HANDLE;
-
-    vkDestroyImage(_vulkan->device, _state->chunk_texture.image, nullptr);
-    _state->chunk_texture.image = VK_NULL_HANDLE;
-    vkFreeMemory(_vulkan->device, _state->chunk_texture.memory, nullptr);
-    _state->chunk_texture.memory = VK_NULL_HANDLE;
-    vkDestroyImageView(_vulkan->device, _state->chunk_view, nullptr);
-    _state->chunk_view = VK_NULL_HANDLE;
 
     vkDestroyImage(_vulkan->device, _state->region_texture.image, nullptr);
     _state->region_texture.image = VK_NULL_HANDLE;
