@@ -371,6 +371,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     //LoadSection(_state, _vulkan, { 28, 6, 21 });
     //LoadArea(_state, _vulkan, { 20, 0, 18 }, { 32, 13, 25 });
     LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
+    _state->current_section = numtk::vec3<int32_t>{ 16, 8, 16 };
 
     VkDescriptorPoolSize descpool_sizes[2] = {
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 32768 + 1 },

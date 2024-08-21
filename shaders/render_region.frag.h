@@ -18,7 +18,7 @@ layout(std140, set = 0, binding = 1) uniform MatrixBlock {
 #define REGION_SIZE 32.0
 #define SECTION_SIZE 16.0
 
-vec3 RegionTraversal(vec3 org, vec3 dir)
+vec3 RegionTraversal(vec3 org, vec3 dir, out vec3 n)
 {
     float d = 0.0;
     float t = 0.0;
@@ -84,6 +84,7 @@ vec3 RegionTraversal(vec3 org, vec3 dir)
                 {
                     voxel_rendered = true;
                     t += ctx.t / REGION_SIZE;
+                    //n = ctx.mask.xyz;
                     break;
                 }
                 StepDDAContext(ctx);
@@ -98,6 +99,7 @@ vec3 RegionTraversal(vec3 org, vec3 dir)
         }
     }
 
+    n = ctx.mask.xyz * -ctx.step_sign;
     return vec3(voxel_rendered ? 1.0 : 0.0, d, t);
 }
 
@@ -120,7 +122,8 @@ void main() {
 
     vec3 org = root_org;
 
-    vec3 traversal_results = RegionTraversal(org, dir);
+    vec3 normal = vec3(0.0);
+    vec3 traversal_results = RegionTraversal(org, dir, normal);
     bool voxel_rendered = traversal_results.x > 0.0;
     float d = traversal_results.y;
     float t = traversal_results.z;
@@ -132,13 +135,15 @@ void main() {
     else
     {
         vec3 hit = root_org+dir*t;
-        vec3 sun_dir = normalize(vec3(1.0, 3.0, 1.0));
+        vec3 sun_dir = normalize(vec3(1.0, 3.0, 2.0));
 
-        float shadow = 1.0 - RegionTraversal(hit + sun_dir*0.0001, sun_dir).x;
+        vec3 dummy = vec3(0.0);
+        float shadow = 1.0 - RegionTraversal(hit + sun_dir*0.0001, sun_dir, dummy).x;
 
         float dist = distance(hit * 2.0 - vec3(1.0), iFS_camera_position);
         float tone = (1.0 - (1.0 / (dist * 0.5 + 1.0))) * 2.0;
-        color = vec4(tone.xxx * shadow, 1.0);
+        color = vec4(shadow.xxx * dot(normal, sun_dir), 1.0);
+        //color = vec4(normal, 1.0);
     }
 }
 
