@@ -885,7 +885,13 @@ void Draw(void* _pstate,
         numtk::mat4f::View({ 0.f, 0.f, -1.f }, { 0.f, 1.f, 0.f }, { 0.f, 0.f, _state->turntable.z() });
     matrix[1] =
         matrix[2]
-        * numtk::mat4f::View(forward, up, center);
+        * numtk::mat4f::View(forward, up, center)
+        * numtk::mat4f{
+        2.f, 0.f, 0.f, 0.f,
+        0.f, 2.f, 0.f, 0.f,
+        0.f, 0.f, 2.f, 0.f,
+        0.f, 0.f, 0.f, 1.f}
+        ;
     ((int32_t*)(matrix + 3))[0] = _swapchain.size.width;
     ((int32_t*)(matrix + 3))[1] = _swapchain.size.height;
 

@@ -51,6 +51,7 @@ vec3 RegionTraversal(vec3 org, vec3 dir, out vec3 n)
                 org = section_org;
 
                 ctx = InitDDAContext(org, dir, SECTION_SIZE);
+                ctx.mask.xyz = ctx_cache.mask.xyz;
                 chunk_rendered = true;
                 chunk_index = data.y;
 
@@ -84,7 +85,6 @@ vec3 RegionTraversal(vec3 org, vec3 dir, out vec3 n)
                 {
                     voxel_rendered = true;
                     t += ctx.t / REGION_SIZE;
-                    //n = ctx.mask.xyz;
                     break;
                 }
                 StepDDAContext(ctx);
@@ -135,15 +135,21 @@ void main() {
     else
     {
         vec3 hit = root_org+dir*t;
-        vec3 sun_dir = normalize(vec3(1.0, 3.0, 2.0));
+        vec3 sun_dir = normalize(vec3(-1.0, 2.0, 2.0));
 
         vec3 dummy = vec3(0.0);
-        float shadow = 1.0 - RegionTraversal(hit + sun_dir*0.0001, sun_dir, dummy).x;
+        float shadow = 1.2 - RegionTraversal(hit + sun_dir*0.0001, sun_dir, dummy).x;
 
         float dist = distance(hit * 2.0 - vec3(1.0), iFS_camera_position);
-        float tone = (1.0 - (1.0 / (dist * 0.5 + 1.0))) * 2.0;
-        color = vec4(shadow.xxx * dot(normal, sun_dir), 1.0);
-        //color = vec4(normal, 1.0);
+        //float tone = (1.0 - (1.0 / (dist * 0.5 + 1.0))) * 2.0;
+        float tone = 1.0 - exp(-dist);
+        //color = vec4(shadow.xxx * max(0.0, dot(normal, sun_dir)) + tone * vec3(0.2, 0.5, 0.5), 1.0);
+        color = vec4(mix(shadow.xxx * max(0.0, dot(normal, sun_dir)),
+                         vec3(0.3, 0.5, 0.5),
+                         tone),
+                     1.0);
+
+        //color = vec4(tone.xxx, 1.0);
     }
 }
 
