@@ -39,7 +39,7 @@ struct state_t
     VkPipelineLayout pipeline_layout;
     VkSampler sampler;
     VkDescriptorPool descriptor_pool;
-    VkDescriptorSet descriptor_set;
+    VkDescriptorSet descriptor_set[64];
     VkDescriptorSetLayout descset_layout;
 
     VkFence last_submit;
@@ -55,6 +55,15 @@ struct state_t
     uint32_t section_index = 0;
     std::vector<vktk::Texture> section_textures{};
     std::vector<VkImageView> section_views{};
+};
+
+struct MatrixBlock
+{
+    numtk::mat4f projection;
+    numtk::mat4f view_model;
+    numtk::mat4f view;
+    numtk::vec2<int32_t> screen_size;
+    float padding[14];
 };
 
 RegionData::ChunkData DecodeChunk(mctk::MCAChunkData const& chunk_data)
@@ -401,7 +410,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     descpool_create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     descpool_create.pNext = nullptr;
     descpool_create.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    descpool_create.maxSets = 1u;
+    descpool_create.maxSets = 64u;
     descpool_create.poolSizeCount = sizeof(descpool_sizes) / sizeof(descpool_sizes[0]);
     descpool_create.pPoolSizes = descpool_sizes;
     CHECKCALL(vkCreateDescriptorPool, _vulkan->device,
@@ -465,8 +474,9 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     descset_allocate.descriptorPool = _state->descriptor_pool;
     descset_allocate.descriptorSetCount = 1u;
     descset_allocate.pSetLayouts = &_state->descset_layout;
-    CHECKCALL(vkAllocateDescriptorSets, _vulkan->device,
-              &descset_allocate, &_state->descriptor_set);
+    for (uint32_t index = 0; index < 64; ++index)
+        CHECKCALL(vkAllocateDescriptorSets, _vulkan->device,
+                  &descset_allocate, &_state->descriptor_set[index]);
 
     VkSamplerCreateInfo sampler_create{};
     sampler_create.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -495,13 +505,15 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->region_view = _vulkan->CreateImageView(_state->region_texture);
 
     _state->staging_buffer = _vulkan->CreateBuffer(
-        sizeof(numtk::mat4f) * 3 + sizeof(numtk::vec2f),
+        //sizeof(numtk::mat4f) * 3 + sizeof(numtk::vec2f),
+        sizeof(MatrixBlock) * 64,
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
         | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
     _state->matrix_buffer = _vulkan->CreateBuffer(
-        sizeof(numtk::mat4f) * 3 + sizeof(numtk::vec2f),
+        //sizeof(numtk::mat4f) * 3 + sizeof(numtk::vec2f),
+        sizeof(MatrixBlock) * 64,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT
         | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
 
@@ -511,12 +523,94 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
               _state->staging_buffer.alloc.offset, _state->staging_buffer.alloc.size,
               0, &_state->staging_area);
 
+#if 0
     numtk::mat4f* matrix = (numtk::mat4f*)_state->staging_area;
     matrix[0] = numtk::mat4f::Constant(0.f);
     matrix[1] = numtk::mat4f::Constant(0.f);
     matrix[2] = numtk::mat4f::Constant(0.f);
     ((int32_t*)(matrix + 3))[0] = 1;
     ((int32_t*)(matrix + 3))[1] = 1;
+#endif
+    MatrixBlock* matrices = (MatrixBlock*)_state->staging_area;
+    for (uint32_t index = 0; index < 64; ++index)
+    {
+        matrices[index].projection = numtk::mat4f::Constant(0.f);
+        matrices[index].view_model = numtk::mat4f::Constant(0.f);
+        matrices[index].view = numtk::mat4f::Constant(0.f);
+        matrices[index].screen_size = numtk::vec2<int32_t>::Constant(1);
+    }
+
+    VkDescriptorImageInfo region_image_info{};
+    region_image_info.sampler = _state->sampler;
+    region_image_info.imageView = _state->region_view;
+    region_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    for (uint32_t index = 0; index < 64; ++index)
+    {
+        {
+            VkWriteDescriptorSet desc_writes[2];
+            {
+                VkWriteDescriptorSet& desc_write = desc_writes[0];
+                desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                desc_write.pNext = nullptr;
+                desc_write.dstSet = _state->descriptor_set[index];
+                desc_write.dstBinding = 0u;
+                desc_write.dstArrayElement = 0u;
+                desc_write.descriptorCount = 1u;
+                desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                desc_write.pImageInfo = &region_image_info;
+                desc_write.pBufferInfo = nullptr;
+                desc_write.pTexelBufferView = nullptr;
+            }
+
+
+            VkDescriptorBufferInfo buffer_info = {};
+            buffer_info.buffer = _state->matrix_buffer;
+            buffer_info.offset = sizeof(MatrixBlock) * index;
+            buffer_info.range = sizeof(MatrixBlock);
+
+            {
+                VkWriteDescriptorSet& desc_write = desc_writes[1];
+                desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                desc_write.pNext = nullptr;
+                desc_write.dstSet = _state->descriptor_set[index];
+                desc_write.dstBinding = 1u;
+                desc_write.dstArrayElement = 0u;
+                desc_write.descriptorCount = 1u;
+                desc_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                desc_write.pImageInfo = nullptr;
+                desc_write.pBufferInfo = &buffer_info;
+                desc_write.pTexelBufferView = nullptr;
+            }
+
+            vkUpdateDescriptorSets(_vulkan->device, 2u, desc_writes, 0u, nullptr);
+        }
+
+        {
+            std::vector<VkDescriptorImageInfo> section_images_info(_state->section_index);
+            for (uint32_t section_index = 0u; section_index < _state->section_index; ++section_index)
+            {
+                VkDescriptorImageInfo& image_info = section_images_info[section_index];
+                image_info.sampler = _state->sampler;
+                image_info.imageView = _state->section_views[section_index];
+                image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            }
+
+            VkWriteDescriptorSet desc_write = {};
+            desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            desc_write.pNext = nullptr;
+            desc_write.dstSet = _state->descriptor_set[index];
+            desc_write.dstBinding = 2u;
+            desc_write.dstArrayElement = 0u;
+            desc_write.descriptorCount = _state->section_index;
+            desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            desc_write.pImageInfo = section_images_info.data();
+            desc_write.pBufferInfo = nullptr;
+            desc_write.pTexelBufferView = nullptr;
+
+            vkUpdateDescriptorSets(_vulkan->device, 1u, &desc_write, 0u, nullptr);
+        }
+    }
 
     vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
     command_buffer.Begin();
@@ -531,7 +625,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         });
 
     command_buffer.BufferCopy(_state->matrix_buffer, 0, _state->staging_buffer, 0,
-                              sizeof(numtk::mat4f) * 3 + sizeof(numtk::vec2f));
+                              sizeof(MatrixBlock) * 64);
 
     command_buffer.BufferTransitions(
         VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -804,75 +898,6 @@ void Draw(void* _pstate,
 {
     state_t* _state = (state_t*)_pstate;
 
-    VkDescriptorImageInfo region_image_info{};
-    region_image_info.sampler = _state->sampler;
-    region_image_info.imageView = _state->region_view;
-    region_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-    VkDescriptorBufferInfo buffer_info = {};
-    buffer_info.buffer = _state->matrix_buffer;
-    buffer_info.offset = 0;
-    buffer_info.range = VK_WHOLE_SIZE;
-
-    {
-        VkWriteDescriptorSet desc_writes[2];
-        {
-            VkWriteDescriptorSet& desc_write = desc_writes[0];
-            desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            desc_write.pNext = nullptr;
-            desc_write.dstSet = _state->descriptor_set;
-            desc_write.dstBinding = 0u;
-            desc_write.dstArrayElement = 0u;
-            desc_write.descriptorCount = 1u;
-            desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            desc_write.pImageInfo = &region_image_info;
-            desc_write.pBufferInfo = nullptr;
-            desc_write.pTexelBufferView = nullptr;
-        }
-
-        {
-            VkWriteDescriptorSet& desc_write = desc_writes[1];
-            desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            desc_write.pNext = nullptr;
-            desc_write.dstSet = _state->descriptor_set;
-            desc_write.dstBinding = 1u;
-            desc_write.dstArrayElement = 0u;
-            desc_write.descriptorCount = 1u;
-            desc_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            desc_write.pImageInfo = nullptr;
-            desc_write.pBufferInfo = &buffer_info;
-            desc_write.pTexelBufferView = nullptr;
-        }
-
-        vkUpdateDescriptorSets(_vulkan->device, 2u, desc_writes, 0u, nullptr);
-    }
-
-    {
-        std::vector<VkDescriptorImageInfo> section_images_info(_state->section_index);
-        for (uint32_t section_index = 0u; section_index < _state->section_index; ++section_index)
-        {
-            VkDescriptorImageInfo& image_info = section_images_info[section_index];
-            image_info.sampler = _state->sampler;
-            image_info.imageView = _state->section_views[section_index];
-            image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        }
-
-        VkWriteDescriptorSet desc_write = {};
-        desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        desc_write.pNext = nullptr;
-        desc_write.dstSet = _state->descriptor_set;
-        desc_write.dstBinding = 2u;
-        desc_write.dstArrayElement = 0u;
-        desc_write.descriptorCount = _state->section_index;
-        desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        desc_write.pImageInfo = section_images_info.data();
-        desc_write.pBufferInfo = nullptr;
-        desc_write.pTexelBufferView = nullptr;
-
-        vkUpdateDescriptorSets(_vulkan->device, 1u, &desc_write, 0u, nullptr);
-    }
-
-    numtk::mat4f* matrix = (numtk::mat4f*)_state->staging_area;
     float how = (float)_swapchain.size.height / (float)_swapchain.size.width;
     numtk::vec3f forward = {
         std::cos(_state->turntable[1]) * std::cos(_state->turntable[0]),
@@ -898,6 +923,38 @@ void Draw(void* _pstate,
         (float)_state->current_section.z() + 0.5f
     } / 16.f) - numtk::vec3f{ 1.f, 1.f, 1.f } + numtk::vec3f{ 0.f, _state->y_offset, 0.f };
 
+
+    MatrixBlock* matrices = (MatrixBlock*)_state->staging_area;
+    for (uint32_t index = 0; index < 64; ++index)
+    {
+        matrices[index].projection =
+            numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how);
+        matrices[index].view =
+            numtk::mat4f::View({ 0.f, 0.f, -1.f },
+                               { 0.f, 1.f, 0.f },
+                               { 0.f, 0.f, _state->turntable.z() });
+        matrices[index].view_model =
+            matrices[index].view
+            * numtk::mat4f::View(forward, up, center)
+            * numtk::mat4f{
+            1.f, 0.f, 0.f, 0.f,
+            0.f, 1.f, 0.f, 0.f,
+            0.f, 0.f, 1.f, 0.f,
+            (float)index, 0.f, 0.f, 1.f}
+            * numtk::mat4f{
+            2.f, 0.f, 0.f, 0.f,
+            0.f, 2.f, 0.f, 0.f,
+            0.f, 0.f, 2.f, 0.f,
+            0.f, 0.f, 0.f, 1.f};
+        matrices[index].screen_size = {
+            (int32_t)_swapchain.size.width,
+            (int32_t)_swapchain.size.height
+        };
+    }
+
+#if 0
+    numtk::mat4f* matrix = (numtk::mat4f*)_state->staging_area;
+
     matrix[0] =
         numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how);
     matrix[2] =
@@ -913,6 +970,7 @@ void Draw(void* _pstate,
         ;
     ((int32_t*)(matrix + 3))[0] = _swapchain.size.width;
     ((int32_t*)(matrix + 3))[1] = _swapchain.size.height;
+#endif
 
     vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
     command_buffer.Begin();
@@ -926,7 +984,7 @@ void Draw(void* _pstate,
 
     command_buffer.BufferCopy(_state->matrix_buffer, 0,
                               _state->staging_buffer, 0,
-                              sizeof(numtk::mat4f) * 3 + sizeof(numtk::vec2f));
+                              sizeof(MatrixBlock) * 64);
 
     command_buffer.BufferTransitions(
         VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -945,11 +1003,22 @@ void Draw(void* _pstate,
     VkRect2D scissor{ VkOffset2D{ 0, 0 }, _swapchain.size };
     vkCmdSetScissor(command_buffer, 0, 1, &scissor);
 
-    VkClearValue clear_value{};
-    clear_value.color.float32[0] = 0.f; clear_value.color.float32[1] = 1.f;
-    clear_value.color.float32[2] = 1.f; clear_value.color.float32[3] = 0.f;
-    clear_value.depthStencil.depth = 0.f;
-    clear_value.depthStencil.stencil = 0;
+    VkClearValue clear_values[2];
+    {
+        VkClearValue& clear_value = clear_values[0];
+        clear_value.color.float32[0] = 0.f; clear_value.color.float32[1] = 1.f;
+        clear_value.color.float32[2] = 1.f; clear_value.color.float32[3] = 0.f;
+        clear_value.depthStencil.depth = 0.f;
+        clear_value.depthStencil.stencil = 0;
+    }
+    {
+        VkClearValue& clear_value = clear_values[1];
+        clear_value.color.float32[0] = 0.f; clear_value.color.float32[1] = 0.f;
+        clear_value.color.float32[2] = 0.f; clear_value.color.float32[3] = 0.f;
+        clear_value.depthStencil.depth = 1.f;
+        clear_value.depthStencil.stencil = 0;
+    }
+
     VkRenderPassBeginInfo rp_begin_info{};
     rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rp_begin_info.pNext = nullptr;
@@ -959,20 +1028,23 @@ void Draw(void* _pstate,
         VkOffset2D{ 0, 0 },
         _swapchain.size
     };
-    rp_begin_info.clearValueCount = 1;
-    rp_begin_info.pClearValues = &clear_value;
+    rp_begin_info.clearValueCount = 2;
+    rp_begin_info.pClearValues = clear_values;
 
     vkCmdBeginRenderPass(command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-
     vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->region_pipeline);
-    vkCmdBindDescriptorSets(command_buffer,
-                            VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            _state->pipeline_layout, 0u,
-                            1u, &_state->descriptor_set,
-                            0u, nullptr);
+    for (uint32_t index = 0; index < 64; ++index)
+    {
 
-    vkCmdDraw(command_buffer, 36u, 1u, 0u, 0u);
+        vkCmdBindDescriptorSets(command_buffer,
+                                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                _state->pipeline_layout, 0u,
+                                1u, &_state->descriptor_set[index],
+                                0u, nullptr);
 
+        vkCmdDraw(command_buffer, 36u, 1u, 0u, 0u);
+
+    }
     vkCmdEndRenderPass(command_buffer);
 
     command_buffer.End();
@@ -1012,8 +1084,9 @@ void Shutdown(void* _pstate,
     vkDestroySampler(_vulkan->device, _state->sampler, nullptr);
     _state->sampler = VK_NULL_HANDLE;
 
-    vkFreeDescriptorSets(_vulkan->device, _state->descriptor_pool, 1, &_state->descriptor_set);
-    _state->descriptor_set = VK_NULL_HANDLE;
+    vkFreeDescriptorSets(_vulkan->device, _state->descriptor_pool, 64, _state->descriptor_set);
+    for (uint32_t index = 0; index < 64; ++index)
+        _state->descriptor_set[index] = VK_NULL_HANDLE;
     vkDestroyDescriptorPool(_vulkan->device, _state->descriptor_pool, nullptr);
     _state->descriptor_pool = VK_NULL_HANDLE;
     vkDestroyDescriptorSetLayout(_vulkan->device, _state->descset_layout, nullptr);

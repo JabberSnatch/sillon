@@ -21,6 +21,8 @@ struct vec2 : public std::array<scalar, 2>
     scalar& x() { return this->operator[](0); }
     scalar& y() { return this->operator[](1); }
 
+    static vec2<scalar> Constant(scalar v) { return vec2<scalar>{ v, v }; }
+
     scalar const& x() const { return static_cast<scalar const&>(const_cast<vec2*>(this)->x()); }
     scalar const& y() const { return static_cast<scalar const&>(const_cast<vec2*>(this)->y()); }
 
@@ -44,6 +46,8 @@ struct vec3 : public std::array<scalar, 3>
     scalar& x() { return this->operator[](0); }
     scalar& y() { return this->operator[](1); }
     scalar& z() { return this->operator[](2); }
+
+    static vec3<scalar> Constant(scalar v) { return vec3<scalar>{ v, v, v }; }
 
     scalar const& x() const { return static_cast<scalar const&>(const_cast<vec3*>(this)->x()); }
     scalar const& y() const { return static_cast<scalar const&>(const_cast<vec3*>(this)->y()); }
@@ -79,6 +83,8 @@ struct vec4 : public std::array<scalar, 4>
     scalar& y() { return this->operator[](1); }
     scalar& z() { return this->operator[](2); }
     scalar& w() { return this->operator[](3); }
+
+    static vec4<scalar> Constant(scalar v) { return vec4<scalar>{ v, v, v, v }; }
 
     scalar const& x() const { return static_cast<scalar const&>(const_cast<vec4*>(this)->x()); }
     scalar const& y() const { return static_cast<scalar const&>(const_cast<vec4*>(this)->y()); }

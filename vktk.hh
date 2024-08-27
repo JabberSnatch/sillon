@@ -92,23 +92,6 @@ struct Allocator
     void Release();
 };
 
-struct Swapchain {
-    VkExtent2D size = { 0, 0 };
-    Context const* vulkan;
-
-    VkFormat format;
-    VkRenderPass render_pass;
-    VkSwapchainKHR handle = VK_NULL_HANDLE;
-    std::vector<VkImage> images;
-    std::vector<VkImageView> views;
-    std::vector<VkFramebuffer> framebuffers;
-
-    uint32_t index;
-
-    VkFramebuffer AcquireNext(VkSemaphore _signal);
-    void Release();
-};
-
 struct Buffer {
     VkBuffer buffer;
     Allocation alloc;
@@ -122,6 +105,24 @@ struct Texture {
     VkDeviceMemory memory;
     VkImageType image_type;
     VkFormat format;
+};
+
+struct Swapchain {
+    VkExtent2D size = { 0, 0 };
+    Context const* vulkan;
+
+    VkFormat format;
+    VkRenderPass render_pass;
+    VkSwapchainKHR handle = VK_NULL_HANDLE;
+    std::vector<VkImage> images;
+    std::vector<VkImageView> views;
+    std::vector<VkFramebuffer> framebuffers;
+    std::vector<Texture> depth_buffers;
+
+    uint32_t index;
+
+    VkFramebuffer AcquireNext(VkSemaphore _signal);
+    void Release();
 };
 
 struct BufferTransition {
@@ -221,7 +222,8 @@ struct Context
         VkImageLayout initialLayout;
         VkImageLayout finalLayout;
     };
-    VkRenderPass CreateRenderPass(std::vector<RenderPassAttachment> const& _attachments);
+    VkRenderPass CreateRenderPass(std::vector<RenderPassAttachment> const& _attachments,
+                                  RenderPassAttachment* _depth_attachment);
 
     struct PipelineStage {
         VkShaderModule module;

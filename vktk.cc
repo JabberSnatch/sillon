@@ -692,7 +692,8 @@ CommandBuffer Context::CreateCommandBuffer(Queue const& queue)
     return command_buffer;
 }
 
-VkRenderPass Context::CreateRenderPass(std::vector<RenderPassAttachment> const& _attachments)
+VkRenderPass Context::CreateRenderPass(std::vector<RenderPassAttachment> const& _attachments,
+                                       RenderPassAttachment* _depth_attachment)
 {
     std::vector<VkAttachmentDescription> descriptions{};
     descriptions.reserve(_attachments.size());
@@ -722,6 +723,25 @@ VkRenderPass Context::CreateRenderPass(std::vector<RenderPassAttachment> const& 
         references.push_back(reference);
     }
 
+    VkAttachmentReference depth_reference{};
+    if (_depth_attachment)
+    {
+        VkAttachmentDescription description{};
+        description.flags = 0u;
+        description.format = _depth_attachment->format;
+        description.samples = VK_SAMPLE_COUNT_1_BIT;
+        description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        description.initialLayout = _depth_attachment->initialLayout;
+        description.finalLayout = _depth_attachment->finalLayout;
+        descriptions.push_back(description);
+
+        depth_reference.attachment = (uint32_t)(descriptions.size()-1);
+        depth_reference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    }
+
     VkSubpassDescription renderSubpass{};
     renderSubpass.flags = 0u;
     renderSubpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
@@ -730,7 +750,7 @@ VkRenderPass Context::CreateRenderPass(std::vector<RenderPassAttachment> const& 
     renderSubpass.colorAttachmentCount = (uint32_t)references.size();
     renderSubpass.pColorAttachments = references.data();
     renderSubpass.pResolveAttachments = nullptr;
-    renderSubpass.pDepthStencilAttachment = nullptr;
+    renderSubpass.pDepthStencilAttachment = _depth_attachment ? &depth_reference : nullptr;
     renderSubpass.preserveAttachmentCount = 0u;
     renderSubpass.pPreserveAttachments = nullptr;
 
@@ -739,10 +759,16 @@ VkRenderPass Context::CreateRenderPass(std::vector<RenderPassAttachment> const& 
         VkSubpassDependency& dependency = dependencies[0];
         dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
         dependency.dstSubpass = 0;
-        dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependency.srcStageMask =
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+            | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+        dependency.dstStageMask =
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+            | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
         dependency.srcAccessMask = VK_ACCESS_NONE_KHR;
-        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        dependency.dstAccessMask =
+            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+            | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
         dependency.dependencyFlags = 0;
     }
 
@@ -765,7 +791,7 @@ VkRenderPass Context::CreateRenderPass(std::vector<RenderPassAttachment> const& 
     renderPass.pAttachments = descriptions.data();
     renderPass.subpassCount = 1u;
     renderPass.pSubpasses = &renderSubpass;
-    renderPass.dependencyCount = 0u;
+    renderPass.dependencyCount = 1u;
     renderPass.pDependencies = dependencies;
 
     VkRenderPass render_pass{};
@@ -917,6 +943,21 @@ VkPipeline Context::CreatePipeline(VkPipelineLayout _layout,
     multisampleState.alphaToCoverageEnable = VK_FALSE;
     multisampleState.alphaToOneEnable = VK_FALSE;
 
+    VkPipelineDepthStencilStateCreateInfo depthStencilState{};
+
+    depthStencilState.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthStencilState.pNext = nullptr;
+    depthStencilState.flags = 0;
+    depthStencilState.depthTestEnable = VK_TRUE;
+    depthStencilState.depthWriteEnable = VK_TRUE;
+    depthStencilState.depthCompareOp = VK_COMPARE_OP_LESS;
+    depthStencilState.depthBoundsTestEnable = VK_FALSE;
+    depthStencilState.stencilTestEnable = VK_FALSE;
+    depthStencilState.front = VkStencilOpState{};
+    depthStencilState.back = VkStencilOpState{};
+    depthStencilState.minDepthBounds = 0.f;
+    depthStencilState.maxDepthBounds = 1.f;
+
     VkGraphicsPipelineCreateInfo createPipeline{};
     createPipeline.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
     createPipeline.pNext = nullptr;
@@ -929,7 +970,7 @@ VkPipeline Context::CreatePipeline(VkPipelineLayout _layout,
     createPipeline.pViewportState = &viewportState;
     createPipeline.pRasterizationState = &rasterizationState;
     createPipeline.pMultisampleState = &multisampleState;
-    createPipeline.pDepthStencilState = nullptr;
+    createPipeline.pDepthStencilState = &depthStencilState;
     createPipeline.pColorBlendState = &blendState;
     createPipeline.pDynamicState = &dynamicState;
     createPipeline.layout = _layout;
@@ -967,12 +1008,19 @@ Swapchain Context::CreateSwapchain(uint32_t const _size[2])
         color_space = surface_format.colorSpace;
     }
 
+    RenderPassAttachment depth_attachment =
+        { VK_FORMAT_D32_SFLOAT,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+
     swapchain.render_pass = CreateRenderPass(
         {
             { swapchain.format,
               VK_IMAGE_LAYOUT_UNDEFINED,
               VK_IMAGE_LAYOUT_PRESENT_SRC_KHR }
-        } );
+        },
+        &depth_attachment
+        );
 
     VkSurfaceCapabilitiesKHR surface_capabilities{};
     fp.GetPhysicalDeviceSurfaceCapabilitiesKHR(physical_device,
@@ -1010,40 +1058,71 @@ Swapchain Context::CreateSwapchain(uint32_t const _size[2])
                              nullptr);
     swapchain.images.resize(image_count);
     swapchain.views.resize(image_count);
+    swapchain.depth_buffers.resize(image_count);
     swapchain.framebuffers.resize(image_count);
     fp.GetSwapchainImagesKHR(device, swapchain.handle, &image_count,
                              swapchain.images.data());
 
     for (uint32_t index = 0u; index < image_count; ++index)
     {
-        VkImageViewCreateInfo image_view_info{};
-        image_view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        image_view_info.pNext = nullptr;
-        image_view_info.flags = 0;
-        image_view_info.image = swapchain.images[index];
-        image_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        image_view_info.format = swapchain.format;
-        image_view_info.components = {
-            VK_COMPONENT_SWIZZLE_R,
-            VK_COMPONENT_SWIZZLE_G,
-            VK_COMPONENT_SWIZZLE_B,
-            VK_COMPONENT_SWIZZLE_A
-        };
-        image_view_info.subresourceRange = {
-            VK_IMAGE_ASPECT_COLOR_BIT,
-            0, 1, 0, 1
-        };
+        {
+            VkImageViewCreateInfo image_view_info{};
+            image_view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            image_view_info.pNext = nullptr;
+            image_view_info.flags = 0;
+            image_view_info.image = swapchain.images[index];
+            image_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            image_view_info.format = swapchain.format;
+            image_view_info.components = {
+                VK_COMPONENT_SWIZZLE_R,
+                VK_COMPONENT_SWIZZLE_G,
+                VK_COMPONENT_SWIZZLE_B,
+                VK_COMPONENT_SWIZZLE_A
+            };
+            image_view_info.subresourceRange = {
+                VK_IMAGE_ASPECT_COLOR_BIT,
+                0, 1, 0, 1
+            };
 
-        CHECKCALL(vkCreateImageView, device, &image_view_info, nullptr,
-                  &swapchain.views[index]);
+            CHECKCALL(vkCreateImageView, device, &image_view_info, nullptr,
+                      &swapchain.views[index * 2]);
+        }
+
+        swapchain.depth_buffers[index] =
+            CreateTexture(_size[0], _size[1], 1,
+                          VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
+                          VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+
+        {
+            VkImageViewCreateInfo image_view_info{};
+            image_view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            image_view_info.pNext = nullptr;
+            image_view_info.flags = 0;
+            image_view_info.image = swapchain.depth_buffers[index].image;
+            image_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            image_view_info.format = VK_FORMAT_D32_SFLOAT;
+            image_view_info.components = {
+                VK_COMPONENT_SWIZZLE_R,
+                VK_COMPONENT_SWIZZLE_G,
+                VK_COMPONENT_SWIZZLE_B,
+                VK_COMPONENT_SWIZZLE_A
+            };
+            image_view_info.subresourceRange = {
+                VK_IMAGE_ASPECT_DEPTH_BIT,
+                0, 1, 0, 1
+            };
+
+            CHECKCALL(vkCreateImageView, device, &image_view_info, nullptr,
+                      &swapchain.views[index*2 + 1]);
+        }
 
         VkFramebufferCreateInfo framebufferInfo{};
         framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         framebufferInfo.pNext = nullptr;
         framebufferInfo.flags = 0u;
         framebufferInfo.renderPass = swapchain.render_pass;
-        framebufferInfo.attachmentCount = 1u;
-        framebufferInfo.pAttachments = &swapchain.views[index];
+        framebufferInfo.attachmentCount = 2u;
+        framebufferInfo.pAttachments = &swapchain.views[index * 2];
         framebufferInfo.width = _size[0];
         framebufferInfo.height = _size[1];
         framebufferInfo.layers = 1;
@@ -1300,6 +1379,8 @@ void Swapchain::Release()
         vkDestroyImageView(vulkan->device, view, nullptr);
     for (VkFramebuffer framebuffer : framebuffers)
         vkDestroyFramebuffer(vulkan->device, framebuffer, nullptr);
+    for (Texture& texture : depth_buffers)
+        vulkan->DestroyTexture(texture);
     vkDestroyRenderPass(vulkan->device, render_pass, nullptr);
 
     vulkan->fp.DestroySwapchainKHR(vulkan->device, handle, nullptr);

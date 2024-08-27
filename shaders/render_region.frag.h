@@ -149,6 +149,7 @@ void main() {
                          tone),
                      1.0);
 
+        gl_FragDepth = dist / 1000.f;
         //color = vec4(tone.xxx, 1.0);
     }
 }
