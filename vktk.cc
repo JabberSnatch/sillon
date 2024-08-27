@@ -367,17 +367,21 @@ void CommandBuffer::Submit(VkSemaphore* _signal_semaphore,
                  _wait_semaphores, _wait_stages, _wait_count,
                  _signal_fence);
 
+#if 0
     for (Buffer const& buffer : pending_destroys)
         std::cout << "[CommandSubmit] scheduling staging buffer destruction " << std::hex
                   << buffer.buffer << std::dec << std::endl;
+#endif
 
     queue.context->ScheduleRoutine(
         *_signal_fence,
         [pending_destroys = std::move(pending_destroys)](Context& context) {
             for (Buffer const& buffer : pending_destroys)
             {
+#if 0
                 std::cout << "[ScheduledRoutine] destroying buffer " << std::hex
                           << buffer.buffer << std::dec << std::endl;
+#endif
                 context.DestroyBuffer(buffer);
             }
         });
@@ -462,8 +466,10 @@ void CommandBuffer::UpdateTexture(Texture _texture, VkOffset3D _offset, VkExtent
                            1,
                            &copy_region);
 
+#if 0
     std::cout << "[CommandUpdateTexture] scheduled staging buffer destruction "
               << std::hex << staging.buffer << std::dec << std::endl;
+#endif
     pending_destroys.emplace_back(staging);
 }
 

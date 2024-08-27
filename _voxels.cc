@@ -186,7 +186,8 @@ RegionData DeserialiseRegion(std::string const& file_path)
     return output;
 }
 
-void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<int32_t> const& coords)
+void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& update_commands,
+                 numtk::vec3<int32_t> const& coords)
 {
     uint32_t chunk_index = coords[0] + coords[2]*32;
     RegionData::ChunkData const& chunk = state->region.chunks[chunk_index];
@@ -195,31 +196,55 @@ void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<int32_t> con
     if (section.palette.size() > 1)
     {
         state->section_textures.push_back(
-            vulkan->CreateTexture(
-                16, 16, 16,
-                VK_IMAGE_TYPE_3D, VK_FORMAT_R8_UNORM,
-                VK_IMAGE_USAGE_TRANSFER_DST_BIT
-                | VK_IMAGE_USAGE_SAMPLED_BIT,
-                [&section](void* mapped_data) {
-                    uint8_t* blocks = (uint8_t*)mapped_data;
-                    for (uint32_t index = 0u; index < 4096; ++index)
-                    {
-                        blocks[index] =
-                            (!section.palette.empty()
-                             && (section.palette[section.block_ids[index]] != "air")
-                             && (section.palette[section.block_ids[index]] != "glow_lichen"))
-                            ? 255
-                            : 0;
-                    }
-                }));
+            vulkan->CreateTexture(16, 16, 16,
+                                  VK_IMAGE_TYPE_3D, VK_FORMAT_R8_UNORM,
+                                  VK_IMAGE_USAGE_TRANSFER_DST_BIT
+                                  | VK_IMAGE_USAGE_SAMPLED_BIT));
+
+        update_commands.ImageTransitions(
+            VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            {
+                {
+                    state->section_textures.back().image,
+                    VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT,
+                    VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                }
+            }
+        );
+
+        update_commands.UpdateTexture(
+            state->section_textures.back(), { 0, 0, 0 }, { 16, 16, 16 },
+            [&section](void* mapped_data) {
+                uint8_t* blocks = (uint8_t*)mapped_data;
+                for (uint32_t index = 0u; index < 4096; ++index)
+                {
+                    blocks[index] =
+                        (!section.palette.empty()
+                         && (section.palette[section.block_ids[index]] != "air")
+                         && (section.palette[section.block_ids[index]] != "glow_lichen"))
+                        ? 255
+                        : 0;
+                }
+            }
+        );
+
+        update_commands.ImageTransitions(
+            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            {
+                {
+                    state->section_textures.back().image,
+                    VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                }
+            }
+        );
 
         state->section_views.push_back(
             vulkan->CreateImageView(state->section_textures[state->section_index])
         );
     }
-
-    vktk::CommandBuffer update_commands = vulkan->CreateCommandBuffer(vulkan->present_queue);
-    update_commands.Begin();
 
     update_commands.ImageTransitions(
         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
@@ -227,10 +252,8 @@ void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<int32_t> con
         {
             {
                 state->region_texture.image,
-                VK_ACCESS_SHADER_READ_BIT,
-                VK_ACCESS_TRANSFER_WRITE_BIT,
-                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                 VK_IMAGE_ASPECT_COLOR_BIT,
             }
         });
@@ -265,33 +288,17 @@ void LoadSection(state_t* state, vktk::Context* vulkan, numtk::vec3<int32_t> con
             });
     }
 
-#if 0
-    update_commands.UpdateTexture(
-        state->region_texture,
-        VkOffset3D{ state->current_section[0], state->current_section[1], state->current_section[2] },
-        VkExtent3D{ 1, 1, 1 },
-        [](void* mapped_data) {
-            uint16_t* section_info = (uint16_t*)mapped_data;
-            section_info[1] = 0xffff;
-        });
-#endif
-
     update_commands.ImageTransitions(
         VK_PIPELINE_STAGE_TRANSFER_BIT,
         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
         {
             {
                 state->region_texture.image,
-                VK_ACCESS_TRANSFER_WRITE_BIT,
-                VK_ACCESS_SHADER_READ_BIT,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                 VK_IMAGE_ASPECT_COLOR_BIT,
             }
         });
-
-    update_commands.End();
-    update_commands.Submit();
 
     state->current_section = coords;
 }
@@ -300,6 +307,15 @@ void LoadArea(state_t* _state, vktk::Context* _vulkan,
               numtk::vec3<int32_t> const& _begin,
               numtk::vec3<int32_t> const& _end)
 {
+    systk::Timer scope_time{ "LoadArea",
+        [](std::string const& tag, float time) {
+            std::cout << "[" << tag << "] " << time << " s" << std::endl;
+        }
+    };
+
+    vktk::CommandBuffer update_commands = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
+    update_commands.Begin();
+
     uint32_t sync_counter = 0;
     for (int32_t x = _begin.x(); x < _end.x(); ++x)
     {
@@ -307,17 +323,22 @@ void LoadArea(state_t* _state, vktk::Context* _vulkan,
         {
             for (int32_t z = _begin.z(); z < _end.z(); ++z)
             {
-                LoadSection(_state, _vulkan, { x, y, z });
+                LoadSection(_state, _vulkan, update_commands, { x, y, z });
 
+#if 0
                 if (sync_counter++ > 128)
                 {
                     std::cout << "wait scheduled routines" << std::endl;
                     _vulkan->WaitScheduledRoutines();
                     sync_counter = 0;
                 }
+#endif
             }
         }
     }
+
+    update_commands.End();
+    update_commands.Submit();
 }
 
 void LoadRegion(state_t* state, vktk::Context* vulkan)
@@ -368,8 +389,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
     _state->region = DeserialiseRegion("../r.-1.6.mca");
     LoadRegion(_state, _vulkan);
-    //LoadSection(_state, _vulkan, { 28, 6, 21 });
-    //LoadArea(_state, _vulkan, { 20, 0, 18 }, { 32, 13, 25 });
     LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
     _state->current_section = numtk::vec3<int32_t>{ 16, 8, 16 };
 
