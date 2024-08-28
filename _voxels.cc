@@ -205,7 +205,7 @@ void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& upd
     if (section.palette.size() > 1)
     {
         state->section_textures.push_back(
-            vulkan->CreateTexture(16, 16, 16,
+            vulkan->CreateTexture(16, 16, 16, 2,
                                   VK_IMAGE_TYPE_3D, VK_FORMAT_R8_UNORM,
                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT
                                   | VK_IMAGE_USAGE_SAMPLED_BIT));
@@ -223,7 +223,7 @@ void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& upd
         );
 
         update_commands.UpdateTexture(
-            state->section_textures.back(), { 0, 0, 0 }, { 16, 16, 16 },
+            state->section_textures.back(), { 0, 0, 0 }, { 16, 16, 16 }, 0,
             [&section](void* mapped_data) {
                 uint8_t* blocks = (uint8_t*)mapped_data;
                 for (uint32_t index = 0u; index < 4096; ++index)
@@ -234,6 +234,32 @@ void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& upd
                          && (section.palette[section.block_ids[index]] != "glow_lichen"))
                         ? 255
                         : 0;
+                }
+            }
+        );
+
+        update_commands.UpdateTexture(
+            state->section_textures.back(), { 0, 0, 0 }, { 8, 8, 8 }, 1,
+            [&section](void* mapped_data) {
+                uint8_t* blocks = (uint8_t*)mapped_data;
+                for (uint32_t index = 0u; index < 512; ++index)
+                {
+                    uint8_t v = 0;
+                    for (uint32_t sample = 0u; sample < 8; ++sample)
+                    {
+                        uint32_t input_index = index*2
+                            + (sample&1)
+                            + ((sample>>1)&1)*16
+                            + ((sample>>2)&1)*256;
+
+                        uint8_t block = (!section.palette.empty()
+                         && (section.palette[section.block_ids[input_index]] != "air")
+                         && (section.palette[section.block_ids[input_index]] != "glow_lichen"))
+                            ? 255
+                            : 0;
+                        v = std::max(v, block);
+                    }
+                    blocks[index] = v;
                 }
             }
         );

@@ -181,6 +181,10 @@ struct CommandBuffer {
     void UpdateTexture(Texture _texture, VkOffset3D _offset, VkExtent3D _extent,
                        std::function<void(void*)> const& _upload_callback);
 
+    void UpdateTexture(Texture _texture, VkOffset3D _offset, VkExtent3D _extent,
+                       uint32_t _mip_level,
+                       std::function<void(void*)> const& _upload_callback);
+
     void BufferTransitions(VkPipelineStageFlags _src_stage,
                            VkPipelineStageFlags _dst_stage,
                            std::vector<BufferTransition> const& _transitions);
@@ -263,6 +267,10 @@ struct Context
     void DestroyBuffer(Buffer const& _buffer) const;
 
     Texture CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
+                          VkImageType _type, VkFormat _format, VkImageUsageFlags _usage);
+
+    Texture CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
+                          uint32_t _mip_count,
                           VkImageType _type, VkFormat _format, VkImageUsageFlags _usage);
 
     Texture CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,

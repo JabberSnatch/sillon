@@ -427,6 +427,13 @@ void CommandBuffer::BufferCopy(Buffer const& _dst, uint64_t _dst_offset,
 void CommandBuffer::UpdateTexture(Texture _texture, VkOffset3D _offset, VkExtent3D _extent,
                                   std::function<void(void*)> const& _upload_callback)
 {
+    UpdateTexture(_texture, _offset, _extent, 0, _upload_callback);
+}
+
+void CommandBuffer::UpdateTexture(Texture _texture, VkOffset3D _offset, VkExtent3D _extent,
+                                  uint32_t _mip_level,
+                                  std::function<void(void*)> const& _upload_callback)
+{
     uint64_t staging_size = VkFormatBytesPerUnit(_texture.format)
         * _extent.width
         * _extent.height
@@ -454,7 +461,7 @@ void CommandBuffer::UpdateTexture(Texture _texture, VkOffset3D _offset, VkExtent
     copy_region.bufferImageHeight = 0u;
     copy_region.imageSubresource = VkImageSubresourceLayers {
         VK_IMAGE_ASPECT_COLOR_BIT,
-        0u, 0u, 1u
+        _mip_level, 0u, 1u
     };
     copy_region.imageOffset = _offset;
     copy_region.imageExtent = _extent;
@@ -1168,6 +1175,13 @@ void Context::DestroyBuffer(Buffer const& _buffer) const
 Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
                                VkImageType _type, VkFormat _format, VkImageUsageFlags _usage)
 {
+    return CreateTexture(_width, _height, _depth, 1, _type, _format, _usage);
+}
+
+Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
+                               uint32_t _mip_count,
+                               VkImageType _type, VkFormat _format, VkImageUsageFlags _usage)
+{
     VkImageCreateInfo create_info{};
     create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     create_info.pNext = nullptr;
@@ -1175,7 +1189,7 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
     create_info.imageType = _type;
     create_info.format = _format;
     create_info.extent = VkExtent3D{ _width, _height, _depth };
-    create_info.mipLevels = 1;
+    create_info.mipLevels = _mip_count;
     create_info.arrayLayers = 1;
     create_info.samples = VK_SAMPLE_COUNT_1_BIT;
     create_info.tiling = VK_IMAGE_TILING_OPTIMAL;
@@ -1184,9 +1198,6 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
     create_info.queueFamilyIndexCount = 0;
     create_info.pQueueFamilyIndices = nullptr;
     create_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-    uint32_t bpp = VkFormatBytesPerUnit(_format);
-    uint32_t size = _width * _height * _depth * bpp;
 
     Texture texture{};
     texture.image_type = _type;
@@ -1351,7 +1362,7 @@ VkImageView Context::CreateImageView(Texture const& _texture) const
     image_view_create.components = VkComponentMapping{};
     image_view_create.subresourceRange = VkImageSubresourceRange{
         VK_IMAGE_ASPECT_COLOR_BIT,
-        0u, 1u, 0u, 1u
+        0u, VK_REMAINING_MIP_LEVELS, 0u, 1u
     };
 
     CHECKCALL(vkCreateImageView, device,
