@@ -131,6 +131,7 @@ void main() {
     if (!voxel_rendered)
     {
         color = vec4(vec3((d.x/16.0)), d.x/32.0);
+        gl_FragDepth = 1.f;
     }
     else
     {
@@ -142,7 +143,7 @@ void main() {
 
         float dist = distance(hit * 2.0 - vec3(1.0), iFS_camera_position);
         //float tone = (1.0 - (1.0 / (dist * 0.5 + 1.0))) * 2.0;
-        float tone = 1.0 - exp(-dist);
+        float tone = 1.0 - exp(-dist*0.3);
         //color = vec4(shadow.xxx * max(0.0, dot(normal, sun_dir)) + tone * vec3(0.2, 0.5, 0.5), 1.0);
         color = vec4(mix(shadow.xxx * max(0.0, dot(normal, sun_dir)),
                          vec3(0.3, 0.5, 0.5),

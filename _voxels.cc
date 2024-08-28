@@ -937,15 +937,15 @@ void Draw(void* _pstate,
             matrices[index].view
             * numtk::mat4f::View(forward, up, center)
             * numtk::mat4f{
-            1.f, 0.f, 0.f, 0.f,
-            0.f, 1.f, 0.f, 0.f,
-            0.f, 0.f, 1.f, 0.f,
-            (float)index, 0.f, 0.f, 1.f}
-            * numtk::mat4f{
             2.f, 0.f, 0.f, 0.f,
             0.f, 2.f, 0.f, 0.f,
             0.f, 0.f, 2.f, 0.f,
-            0.f, 0.f, 0.f, 1.f};
+            0.f, 0.f, 0.f, 1.f}
+            * numtk::mat4f{
+            1.f, 0.f, 0.f, 0.f,
+            0.f, 1.f, 0.f, 0.f,
+            0.f, 0.f, 1.f, 0.f,
+            (float)(index/8) * 2.f, 0.f, (float)(index%8) * 2.f, 1.f};
         matrices[index].screen_size = {
             (int32_t)_swapchain.size.width,
             (int32_t)_swapchain.size.height
