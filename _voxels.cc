@@ -205,7 +205,7 @@ void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& upd
     if (section.palette.size() > 1)
     {
         state->section_textures.push_back(
-            vulkan->CreateTexture(16, 16, 16, 2,
+            vulkan->CreateTexture(16, 16, 16, 3,
                                   VK_IMAGE_TYPE_3D, VK_FORMAT_R8_UNORM,
                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT
                                   | VK_IMAGE_USAGE_SAMPLED_BIT));
@@ -244,13 +244,47 @@ void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& upd
                 uint8_t* blocks = (uint8_t*)mapped_data;
                 for (uint32_t index = 0u; index < 512; ++index)
                 {
+                    uint32_t x = index % 8;
+                    uint32_t y = (index / 8) % 8;
+                    uint32_t z = (index / 64);
+
                     uint8_t v = 0;
                     for (uint32_t sample = 0u; sample < 8; ++sample)
                     {
-                        uint32_t input_index = index*2
-                            + (sample&1)
-                            + ((sample>>1)&1)*16
-                            + ((sample>>2)&1)*256;
+                        uint32_t sample_x = x*2 + (sample&1);
+                        uint32_t sample_y = y*2 + ((sample>>1)&1);
+                        uint32_t sample_z = z*2 + ((sample>>2)&1);
+                        uint32_t input_index = sample_x + sample_y * 16 + sample_z * 256;
+
+                        uint8_t block = (!section.palette.empty()
+                         && (section.palette[section.block_ids[input_index]] != "air")
+                         && (section.palette[section.block_ids[input_index]] != "glow_lichen"))
+                            ? 255
+                            : 0;
+                        v = std::max(v, block);
+                    }
+                    blocks[index] = v;
+                }
+            }
+        );
+
+        update_commands.UpdateTexture(
+            state->section_textures.back(), { 0, 0, 0 }, { 4, 4, 4 }, 2,
+            [&section](void* mapped_data) {
+                uint8_t* blocks = (uint8_t*)mapped_data;
+                for (uint32_t index = 0u; index < 64; ++index)
+                {
+                    uint32_t x = index % 4;
+                    uint32_t y = (index / 4) % 4;
+                    uint32_t z = (index / 16);
+
+                    uint8_t v = 0;
+                    for (uint32_t sample = 0u; sample < 64; ++sample)
+                    {
+                        uint32_t sample_x = x*2 + (sample&3);
+                        uint32_t sample_y = y*2 + ((sample>>2)&3);
+                        uint32_t sample_z = z*2 + ((sample>>4)&3);
+                        uint32_t input_index = sample_x + sample_y * 16 + sample_z * 256;
 
                         uint8_t block = (!section.palette.empty()
                          && (section.palette[section.block_ids[input_index]] != "air")
@@ -514,6 +548,8 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     sampler_create.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     sampler_create.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     sampler_create.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_create.minLod = 0.0;
+    sampler_create.maxLod = 2.0;
     CHECKCALL(vkCreateSampler, _vulkan->device,
               &sampler_create, nullptr, &_state->sampler);
 

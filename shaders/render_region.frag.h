@@ -16,7 +16,8 @@ layout(std140, set = 0, binding = 1) uniform MatrixBlock {
 };
 
 #define REGION_SIZE 32.0
-#define SECTION_SIZE 8.0
+#define SECTION_SIZE 4.0
+//8.0
 //16.0
 
 vec3 RegionTraversal(vec3 org, vec3 dir, out vec3 n)
@@ -82,7 +83,7 @@ vec3 RegionTraversal(vec3 org, vec3 dir, out vec3 n)
             while (!voxel_rendered && ctx.mask.w == 1.0)
             {
                 //float step = texture(chunks[chunk_index], ctx.voxel_coords).x;
-                float step = textureLod(chunks[chunk_index], ctx.voxel_coords, 1.0).x;
+                float step = textureLod(chunks[chunk_index], ctx.voxel_coords, 2.0).x;
                 if (step > 0.0)
                 {
                     voxel_rendered = true;
