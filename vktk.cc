@@ -1064,7 +1064,7 @@ Swapchain Context::CreateSwapchain(uint32_t const _size[2])
     fp.GetSwapchainImagesKHR(device, swapchain.handle, &image_count,
                              nullptr);
     swapchain.images.resize(image_count);
-    swapchain.views.resize(image_count);
+    swapchain.views.resize(image_count*2);
     swapchain.depth_buffers.resize(image_count);
     swapchain.framebuffers.resize(image_count);
     fp.GetSwapchainImagesKHR(device, swapchain.handle, &image_count,
