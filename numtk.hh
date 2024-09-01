@@ -29,6 +29,7 @@ struct vec2 : public std::array<scalar, 2>
     vec2 operator+(vec2 const& o) const { return { x()+o.x(), y()+o.y() }; }
     vec2 operator+=(vec2 const& o) { x()+=o.x(); y()+=o.y(); return *this; }
     vec2 operator-(vec2 const& o) const { return { x()-o.x(), y()-o.y() }; }
+    vec2 operator-=(vec2 const& o) { x()-=o.x(); y()-=o.y(); return *this; }
     vec2 operator*(vec2 const& o) const { return { x()*o.x(), y()*o.y() }; }
     vec2 operator*(scalar s) const { return { x()*s, y()*s }; }
     vec2 operator/(vec2 const& o) const { return { x()/o.x(), y()/o.y() }; }
@@ -56,6 +57,7 @@ struct vec3 : public std::array<scalar, 3>
     vec3 operator+(vec3 const& o) const { return { x()+o.x(), y()+o.y(), z()+o.z() }; }
     vec3 operator+=(vec3 const& o) { x()+=o.x(); y()+=o.y(); z()+=o.z(); return *this; }
     vec3 operator-(vec3 const& o) const { return { x()-o.x(), y()-o.y(), z()-o.z() }; }
+    vec3 operator-=(vec3 const& o) { x()-=o.x(); y()-=o.y(); z()-=o.z(); return *this; }
     vec3 operator*(vec3 const& o) const { return { x()*o.x(), y()*o.y(), z()*o.z() }; }
     vec3 operator*(scalar s) const { return { x()*s, y()*s, z()*s }; }
     vec3 operator/(vec3 const& o) const { return { x()/o.x(), y()/o.y(), z()/o.z() }; }

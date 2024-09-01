@@ -33,7 +33,18 @@ struct TurntableCamera
 {
     numtk::vec3f spherical_coordinates = { 0.f, 0.f, 3.f };
     float y_offset = 0.f;
-    numtk::vec3<int32_t> current_section;
+    numtk::vec3<int32_t> current_section = { 16, 8, 16 };
+
+    void Update(iotk::input_t const* _input,
+                iotk::input_t const* _past_input);
+    numtk::mat4f Matrix() const;
+};
+
+struct FlightCamera
+{
+    numtk::vec2f forward_spherical = { 0.f, 0.f };
+    numtk::vec3f position = { 0.f, 0.f, -3.f };
+    float velocity = 5.f;
 
     void Update(iotk::input_t const* _input,
                 iotk::input_t const* _past_input);
@@ -44,7 +55,8 @@ struct state_t
 {
     float time = 0.f;
 
-    TurntableCamera camera;
+    //TurntableCamera camera;
+    FlightCamera camera;
 
     VkPipeline region_pipeline;
     VkPipelineLayout pipeline_layout;
@@ -540,7 +552,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->region = DeserialiseRegion("../r.-1.6.mca");
     LoadRegion(_state, _vulkan);
     LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
-    _state->camera.current_section = numtk::vec3<int32_t>{ 16, 8, 16 };
+    //_state->camera.current_section = numtk::vec3<int32_t>{ 16, 8, 16 };
 
     VkDescriptorPoolSize descpool_sizes[2] = {
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 32768 + 1 },
@@ -1238,6 +1250,79 @@ numtk::mat4f TurntableCamera::Matrix() const
                            { 0.f, 0.f, spherical_coordinates.z() })
         * numtk::mat4f::View(forward, up, center);
 
+}
+
+void FlightCamera::Update(iotk::input_t const* _input,
+                          iotk::input_t const* _past_input)
+{
+    {
+        velocity *= (1.f + 0.005f * (float)_input->wheel_delta);
+        if (velocity < 0.01f)
+            velocity = 0.01f;
+    }
+
+    if (_input->button_down & iotk::fMouseButton::kLeftBtn)
+    {
+        numtk::vec2<int32_t> last_position{ _past_input->cursor[0], _past_input->cursor[1] };
+        numtk::vec2<int32_t> position{ _input->cursor[0], _input->cursor[1] };
+        numtk::vec2<int32_t> delta = position - last_position;
+        forward_spherical += numtk::vec2f{
+            0.01f * (float)delta.x(),
+            -0.01f * (float)delta.y(),
+        };
+
+        forward_spherical.y() =
+            std::min(std::max(forward_spherical.y(), -numtk::kPi*0.4999f), numtk::kPi*0.4999f);
+    }
+
+    numtk::vec3f forward = {
+        std::cos(forward_spherical[1]) * std::cos(forward_spherical[0]),
+        std::sin(forward_spherical[1]),
+        std::cos(forward_spherical[1]) * std::sin(forward_spherical[0])
+    };
+    forward = forward.normalise();
+
+    numtk::vec3f left = numtk::vec3f{ 0.f, 1.f, 0.f }.cross({
+        std::cos(forward_spherical[0]),
+        0.f,
+        std::sin(forward_spherical[0])
+    });
+
+    numtk::vec3f movement = { 0.f, 0.f, 0.f };
+    if (_input->key_down['w'])
+        movement.z() += 1.f;
+    if (_input->key_down['s'])
+        movement.z() -= 1.f;
+    if (_input->key_down['a'])
+        movement.x() += 1.f;
+    if (_input->key_down['d'])
+        movement.x() -= 1.f;
+    if (_input->key_down[' '])
+        movement.y() += 1.f;
+    if (_input->mod_down & iotk::fKeyMod::kShift)
+        movement.y() -= 1.f;
+    movement.normalise();
+
+    position += (forward*movement.z() + left*movement.x() + numtk::vec3f{ 0.f, movement.y(), 0.f })
+        * velocity * _input->time_delta;
+}
+
+numtk::mat4f FlightCamera::Matrix() const
+{
+    numtk::vec3f forward = {
+        std::cos(forward_spherical[1]) * std::cos(forward_spherical[0]),
+        std::sin(forward_spherical[1]),
+        std::cos(forward_spherical[1]) * std::sin(forward_spherical[0])
+    };
+    forward = forward.normalise();
+
+    numtk::vec3f up = { 0.f, 1.f, 0.f };
+    if (std::abs(1.f - forward.dot(numtk::vec3f{ 0.f, 1.f, 0.f })) > 1e-3f)
+        up = forward.cross(numtk::vec3f{ 0.f, 1.f, 0.f }).cross(forward).normalise();
+    else
+        up = forward.cross(numtk::vec3f{ 0.f, 0.f, 1.f }).cross(forward).normalise();
+
+    return numtk::mat4f::View(forward, up, position);
 }
 
 
