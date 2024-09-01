@@ -393,15 +393,6 @@ void LoadArea(state_t* _state, vktk::Context* _vulkan,
             for (int32_t z = _begin.z(); z < _end.z(); ++z)
             {
                 LoadSection(_state, _vulkan, update_commands, { x, y, z });
-
-#if 0
-                if (sync_counter++ > 128)
-                {
-                    std::cout << "wait scheduled routines" << std::endl;
-                    _vulkan->WaitScheduledRoutines();
-                    sync_counter = 0;
-                }
-#endif
             }
         }
     }
@@ -567,14 +558,12 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->region_view = _vulkan->CreateImageView(_state->region_texture);
 
     _state->staging_buffer = _vulkan->CreateBuffer(
-        //sizeof(numtk::mat4f) * 3 + sizeof(numtk::vec2f),
         sizeof(MatrixBlock) * 64,
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
         | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
     _state->matrix_buffer = _vulkan->CreateBuffer(
-        //sizeof(numtk::mat4f) * 3 + sizeof(numtk::vec2f),
         sizeof(MatrixBlock) * 64,
         VK_BUFFER_USAGE_TRANSFER_DST_BIT
         | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
@@ -585,14 +574,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
               _state->staging_buffer.alloc.offset, _state->staging_buffer.alloc.size,
               0, &_state->staging_area);
 
-#if 0
-    numtk::mat4f* matrix = (numtk::mat4f*)_state->staging_area;
-    matrix[0] = numtk::mat4f::Constant(0.f);
-    matrix[1] = numtk::mat4f::Constant(0.f);
-    matrix[2] = numtk::mat4f::Constant(0.f);
-    ((int32_t*)(matrix + 3))[0] = 1;
-    ((int32_t*)(matrix + 3))[1] = 1;
-#endif
     MatrixBlock* matrices = (MatrixBlock*)_state->staging_area;
     for (uint32_t index = 0; index < 64; ++index)
     {
@@ -870,7 +851,6 @@ void RenderResources(void* _pstate,
                                         "region_fshader",
                                         {
                                             "#version 450",
-                                            "#define CHUNK_VOXEL_COUNT 32.0",
                                             voxel_traversal_func,
                                             region_fshader
                                         });
@@ -1013,26 +993,6 @@ void Draw(void* _pstate,
             (int32_t)_swapchain.size.height
         };
     }
-
-#if 0
-    numtk::mat4f* matrix = (numtk::mat4f*)_state->staging_area;
-
-    matrix[0] =
-        numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how);
-    matrix[2] =
-        numtk::mat4f::View({ 0.f, 0.f, -1.f }, { 0.f, 1.f, 0.f }, { 0.f, 0.f, _state->turntable.z() });
-    matrix[1] =
-        matrix[2]
-        * numtk::mat4f::View(forward, up, center)
-        * numtk::mat4f{
-        2.f, 0.f, 0.f, 0.f,
-        0.f, 2.f, 0.f, 0.f,
-        0.f, 0.f, 2.f, 0.f,
-        0.f, 0.f, 0.f, 1.f}
-        ;
-    ((int32_t*)(matrix + 3))[0] = _swapchain.size.width;
-    ((int32_t*)(matrix + 3))[1] = _swapchain.size.height;
-#endif
 
     vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
     command_buffer.Begin();

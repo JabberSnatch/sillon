@@ -951,7 +951,6 @@ VkPipeline Context::CreatePipeline(VkPipelineLayout _layout,
     multisampleState.alphaToOneEnable = VK_FALSE;
 
     VkPipelineDepthStencilStateCreateInfo depthStencilState{};
-
     depthStencilState.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     depthStencilState.pNext = nullptr;
     depthStencilState.flags = 0;

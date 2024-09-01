@@ -16,13 +16,9 @@ layout(std140, set = 0, binding = 1) uniform MatrixBlock {
 };
 
 #define REGION_SIZE 32.0
-#define SECTION_SIZE 4.0
-//8.0
-//16.0
-
 float SectionSize[3] = { 16.0, 8.0, 4.0 };
 
-vec3 RegionTraversal(vec3 org, vec3 dir, out vec3 n, float df)
+vec3 RegionTraversal(vec3 org, vec3 dir, out vec3 n, float depth)
 {
     float d = 0.0;
     float t = 0.0;
@@ -33,9 +29,7 @@ vec3 RegionTraversal(vec3 org, vec3 dir, out vec3 n, float df)
     DDAContext ctx_cache;
     vec3 org_cache;
 
-    //float df = floor(length(fwidth(iFS_volume_coords)) * 10.0);
-    //float df = min(floor(length(fwidth(iFS_volume_coords)) * 100.0), 2.0);
-    //df = 1.0;
+    float section_lod = 0.0;
     while (!voxel_rendered && ctx.mask.w == 1.0)
     {
 
@@ -50,6 +44,7 @@ vec3 RegionTraversal(vec3 org, vec3 dir, out vec3 n, float df)
                 org_cache = org;
 
                 t = ctx.t;
+                section_lod = clamp(floor((depth + (ctx.t*2.0) + 0.0) * 0.8), 0.0, 2.0);
 
                 vec3 hit_pos = (org + dir*ctx.t);
                 vec3 section_org =
@@ -57,7 +52,7 @@ vec3 RegionTraversal(vec3 org, vec3 dir, out vec3 n, float df)
                     - floor(ctx.voxel_coords * REGION_SIZE);
                 org = section_org;
 
-                ctx = InitDDAContext(org, dir, SectionSize[uint(df)]);
+                ctx = InitDDAContext(org, dir, SectionSize[uint(section_lod)]);
                 ctx.mask.xyz = ctx_cache.mask.xyz;
                 chunk_rendered = true;
                 chunk_index = data.y;
@@ -88,7 +83,7 @@ vec3 RegionTraversal(vec3 org, vec3 dir, out vec3 n, float df)
             while (!voxel_rendered && ctx.mask.w == 1.0)
             {
                 //float step = texture(chunks[chunk_index], ctx.voxel_coords).x;
-                float step = textureLod(chunks[chunk_index], ctx.voxel_coords, df).x;
+                float step = textureLod(chunks[chunk_index], ctx.voxel_coords, section_lod).x;
                 if (step > 0.0)
                 {
                     voxel_rendered = true;
@@ -134,25 +129,11 @@ void main() {
     vec3 org = root_org;
 
     vec3 normal = vec3(0.0);
-    //float df = min(floor(length(fwidth(iFS_volume_coords)) * 500.0), 2.0);
-    float df = clamp(floor(depth * 2.0), 0.0, 2.0);
-    vec3 traversal_results = RegionTraversal(org, dir, normal, df);
+    vec3 traversal_results = RegionTraversal(org, dir, normal, depth);
     bool voxel_rendered = traversal_results.x > 0.0;
     float d = traversal_results.y;
     float t = traversal_results.z;
 
-    //vec3 dx = dFdx(iFS_volume_coords);
-    //vec3 dy = dFdy(iFS_volume_coords);
-    //vec3 df = fwidth(iFS_volume_coords);
-
-    //color = vec4(vec2(dot(dx, dx), dot(dy, dy)) * 1000.0, 0.0, 1.0);
-    //color = vec4(df.xxx * 1.0, 1.0);
-    //color = vec4(length(df).xxx * 10.0, 1.0);
-    //color = vec4(dFdx(depth) * 100.0, dFdy(depth) * 100.0, 0.0, 1.0);
-    //float df = min(floor(length(fwidth(iFS_volume_coords)) * 100.0), 2.0);
-    //color = vec4(df.xxx / 2.0, 1.0);
-
-#if 1
     if (!voxel_rendered)
     {
         color = vec4(vec3((d.x/16.0)), d.x/32.0);
@@ -164,21 +145,17 @@ void main() {
         vec3 sun_dir = normalize(vec3(-1.0, 2.0, 2.0));
 
         vec3 dummy = vec3(0.0);
-        float shadow = 1.2 - RegionTraversal(hit + sun_dir*0.0001, sun_dir, dummy, df).x;
+        float shadow = 1.2 - RegionTraversal(hit + sun_dir*0.0001, sun_dir, dummy, depth+t).x;
 
         float dist = distance(hit * 2.0 - vec3(1.0), iFS_camera_position);
-        //float tone = (1.0 - (1.0 / (dist * 0.5 + 1.0))) * 2.0;
         float tone = 1.0 - exp(-dist*0.3);
-        //color = vec4(shadow.xxx * max(0.0, dot(normal, sun_dir)) + tone * vec3(0.2, 0.5, 0.5), 1.0);
         color = vec4(mix(shadow.xxx * max(0.0, dot(normal, sun_dir)),
                          vec3(0.3, 0.5, 0.5),
                          tone),
                      1.0);
 
         gl_FragDepth = dist / 1000.f;
-        //color = vec4(tone.xxx, 1.0);
     }
-#endif
 }
 
 )"
