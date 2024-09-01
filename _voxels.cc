@@ -8,6 +8,8 @@
 #include "numtk.hh"
 #include "vktk.hh"
 
+#include <memory>
+
 namespace {
 
 struct RegionData
@@ -184,6 +186,12 @@ RegionData::ChunkData DecodeChunk(mctk::MCAChunkData const& chunk_data)
 
 RegionData DeserialiseRegion(std::string const& file_path)
 {
+    systk::Timer scope_time{ "DeserialiseRegion",
+        [](std::string const& tag, float time) {
+            std::cout << "[" << tag << "] " << time << " s" << std::endl;
+        }
+    };
+
     std::vector<uint8_t> region_file = systk::LoadFile(file_path.c_str());
     mctk::MCAFileData mca_data = mctk::MCADecode(region_file.data(), region_file.size());
     RegionData output = {};
@@ -205,7 +213,7 @@ void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& upd
     if (section.palette.size() > 1)
     {
         state->section_textures.push_back(
-            vulkan->CreateTexture(16, 16, 16, 3,
+            vulkan->CreateTexture(16, 16, 16, 5,
                                   VK_IMAGE_TYPE_3D, VK_FORMAT_R8_UNORM,
                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT
                                   | VK_IMAGE_USAGE_SAMPLED_BIT));
@@ -221,6 +229,75 @@ void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& upd
                 }
             }
         );
+
+#if 1
+        std::vector<std::unique_ptr<uint8_t[]>> mip_levels = {};
+
+        mip_levels.emplace_back(new uint8_t[4096]);
+        {
+            uint8_t* blocks = mip_levels.back().get();
+            for (uint32_t index = 0u; index < 4096; ++index)
+            {
+                blocks[index] =
+                    (!section.palette.empty()
+                     && (section.palette[section.block_ids[index]] != "air")
+                     && (section.palette[section.block_ids[index]] != "glow_lichen"))
+                    ? 255
+                    : 0;
+            }
+
+            update_commands.UpdateTexture(
+                state->section_textures.back(), { 0, 0, 0 }, { 16, 16, 16 }, 0,
+                [blocks](void* mapped_data) {
+                    std::memcpy(mapped_data, blocks, 4096);
+                }
+            );
+        }
+
+        for (uint32_t mip_index = 0; mip_index < 4; ++mip_index)
+        {
+            uint32_t src_mip_size = 16 >> mip_index;
+            uint32_t dst_mip_size = 8 >> mip_index;
+            uint32_t block_count = 4096 / (8 << (3*mip_index));
+            mip_levels.emplace_back(new uint8_t[block_count]);
+
+            uint8_t* src = mip_levels[mip_index].get();
+            uint8_t* dst = mip_levels[mip_index+1].get();
+            for (uint32_t index = 0u; index < block_count; ++index)
+            {
+                uint32_t x = index % dst_mip_size;
+                uint32_t y = (index / dst_mip_size) % dst_mip_size;
+                uint32_t z = (index / (dst_mip_size*dst_mip_size));
+
+                uint8_t v = 0;
+                for (uint32_t sample = 0u; sample < 8; ++sample)
+                {
+                    uint32_t sample_x = x*2 + (sample&1);
+                    uint32_t sample_y = y*2 + ((sample>>1)&1);
+                    uint32_t sample_z = z*2 + ((sample>>2)&1);
+                    //uint32_t input_index = sample_x + sample_y * 16 + sample_z * 256;
+                    uint32_t input_index =
+                        sample_x
+                        + sample_y * src_mip_size
+                        + sample_z * src_mip_size * src_mip_size;
+
+                    uint8_t block = src[input_index];
+                    v = std::max(v, block);
+                }
+                dst[index] = v;
+            }
+
+            update_commands.UpdateTexture(
+                state->section_textures.back(),
+                { 0, 0, 0 }, { dst_mip_size, dst_mip_size, dst_mip_size },
+                mip_index + 1,
+                [dst, block_count](void* mapped_data) {
+                    std::memcpy(mapped_data, dst, block_count);
+                }
+            );
+        }
+
+#else
 
         update_commands.UpdateTexture(
             state->section_textures.back(), { 0, 0, 0 }, { 16, 16, 16 }, 0,
@@ -281,9 +358,9 @@ void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& upd
                     uint8_t v = 0;
                     for (uint32_t sample = 0u; sample < 64; ++sample)
                     {
-                        uint32_t sample_x = x*2 + (sample&3);
-                        uint32_t sample_y = y*2 + ((sample>>2)&3);
-                        uint32_t sample_z = z*2 + ((sample>>4)&3);
+                        uint32_t sample_x = x*4 + (sample&3);
+                        uint32_t sample_y = y*4 + ((sample>>2)&3);
+                        uint32_t sample_z = z*4 + ((sample>>4)&3);
                         uint32_t input_index = sample_x + sample_y * 16 + sample_z * 256;
 
                         uint8_t block = (!section.palette.empty()
@@ -297,6 +374,7 @@ void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& upd
                 }
             }
         );
+#endif
 
         update_commands.ImageTransitions(
             VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
@@ -540,7 +618,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     sampler_create.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     sampler_create.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     sampler_create.minLod = 0.0;
-    sampler_create.maxLod = 2.0;
+    sampler_create.maxLod = 4.0;
     CHECKCALL(vkCreateSampler, _vulkan->device,
               &sampler_create, nullptr, &_state->sampler);
 

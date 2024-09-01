@@ -16,7 +16,7 @@ layout(std140, set = 0, binding = 1) uniform MatrixBlock {
 };
 
 #define REGION_SIZE 32.0
-float SectionSize[3] = { 16.0, 8.0, 4.0 };
+float SectionSize[5] = { 16.0, 8.0, 4.0, 2.0, 1.0 };
 
 vec3 RegionTraversal(vec3 org, vec3 dir, out vec3 n, float depth)
 {
@@ -44,7 +44,7 @@ vec3 RegionTraversal(vec3 org, vec3 dir, out vec3 n, float depth)
                 org_cache = org;
 
                 t = ctx.t;
-                section_lod = clamp(floor((depth + (ctx.t*2.0) + 0.0) * 0.8), 0.0, 2.0);
+                section_lod = clamp(floor((depth + ctx.t + 0.0) * 0.8), 0.0, 4.0);
 
                 vec3 hit_pos = (org + dir*ctx.t);
                 vec3 section_org =
@@ -82,7 +82,6 @@ vec3 RegionTraversal(vec3 org, vec3 dir, out vec3 n, float depth)
         {
             while (!voxel_rendered && ctx.mask.w == 1.0)
             {
-                //float step = texture(chunks[chunk_index], ctx.voxel_coords).x;
                 float step = textureLod(chunks[chunk_index], ctx.voxel_coords, section_lod).x;
                 if (step > 0.0)
                 {
@@ -147,8 +146,10 @@ void main() {
         vec3 dummy = vec3(0.0);
         float shadow = 1.2 - RegionTraversal(hit + sun_dir*0.0001, sun_dir, dummy, depth+t).x;
 
-        float dist = distance(hit * 2.0 - vec3(1.0), iFS_camera_position);
-        float tone = 1.0 - exp(-dist*0.3);
+        //float dist = distance(hit * 2.0 - vec3(1.0), iFS_camera_position);
+        float dist = (depth + t) * 2.0;
+        float tone = 1.0 - exp(-dist*0.2);
+
         color = vec4(mix(shadow.xxx * max(0.0, dot(normal, sun_dir)),
                          vec3(0.3, 0.5, 0.5),
                          tone),

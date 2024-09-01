@@ -18,6 +18,7 @@
 #include <iostream>
 #include <numeric>
 #include <vector>
+#include <string>
 
 namespace
 {
