@@ -29,13 +29,22 @@ struct RegionData
     std::vector<ChunkData> chunks;
 };
 
+struct TurntableCamera
+{
+    numtk::vec3f spherical_coordinates = { 0.f, 0.f, 3.f };
+    float y_offset = 0.f;
+    numtk::vec3<int32_t> current_section;
+
+    void Update(iotk::input_t const* _input,
+                iotk::input_t const* _past_input);
+    numtk::mat4f Matrix() const;
+};
+
 struct state_t
 {
     float time = 0.f;
-    numtk::vec3f turntable = { 0.f, 0.f, 3.f };
-    float y_offset = 0.f;
-    bool updating_orientation = false;
-    numtk::vec3<int32_t> current_section;
+
+    TurntableCamera camera;
 
     VkPipeline region_pipeline;
     VkPipelineLayout pipeline_layout;
@@ -275,7 +284,6 @@ void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& upd
                     uint32_t sample_x = x*2 + (sample&1);
                     uint32_t sample_y = y*2 + ((sample>>1)&1);
                     uint32_t sample_z = z*2 + ((sample>>2)&1);
-                    //uint32_t input_index = sample_x + sample_y * 16 + sample_z * 256;
                     uint32_t input_index =
                         sample_x
                         + sample_y * src_mip_size
@@ -446,8 +454,6 @@ void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& upd
                 VK_IMAGE_ASPECT_COLOR_BIT,
             }
         });
-
-    state->current_section = coords;
 }
 
 void LoadArea(state_t* _state, vktk::Context* _vulkan,
@@ -481,6 +487,12 @@ void LoadArea(state_t* _state, vktk::Context* _vulkan,
 
 void LoadRegion(state_t* state, vktk::Context* vulkan)
 {
+    systk::Timer scope_time{ "LoadRegion",
+        [](std::string const& tag, float time) {
+            std::cout << "[" << tag << "] " << time << " s" << std::endl;
+        }
+    };
+
     RegionData const& region = state->region;
     state->region_texture = vulkan->CreateTexture(
         32, 32, 32,
@@ -528,7 +540,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->region = DeserialiseRegion("../r.-1.6.mca");
     LoadRegion(_state, _vulkan);
     LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
-    _state->current_section = numtk::vec3<int32_t>{ 16, 8, 16 };
+    _state->camera.current_section = numtk::vec3<int32_t>{ 16, 8, 16 };
 
     VkDescriptorPoolSize descpool_sizes[2] = {
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 32768 + 1 },
@@ -958,55 +970,13 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 {
     state_t* _state = (state_t*)_pstate;
 
-    //std::cout << _input->time_delta << std::endl;
+    std::cout << _input->time_delta << std::endl;
     _state->time += _input->time_delta;
 
     if (_input->key_down[iotk::eKey::kEscape])
         return false;
 
-    if (_input->button_down & iotk::fMouseButton::kLeftBtn)
-    {
-        numtk::vec2<int32_t> last_position{ _past_input->cursor[0], _past_input->cursor[1] };
-        numtk::vec2<int32_t> position{ _input->cursor[0], _input->cursor[1] };
-        numtk::vec2<int32_t> delta = position - last_position;
-        _state->turntable += numtk::vec3f{ 0.01f * (float)delta.x(), 0.01f * (float)delta.y(), 0.f };
-    }
-
-    if (_input->button_down & iotk::fMouseButton::kRightBtn)
-    {
-        _state->y_offset += 0.01f * (float)(_input->cursor[1] -  _past_input->cursor[1]);
-    }
-
-    {
-        //_state->turntable.z() += (float)_input->wheel_delta * 0.001f;
-        _state->turntable.z() *= (1.f + 0.0005f * (float)_input->wheel_delta);
-        if (_state->turntable.z() < 0.01f)
-            _state->turntable.z() = 0.01f;
-    }
-
-    {
-        numtk::vec3<int32_t> next_section = _state->current_section;
-        #define KEY_PRESSED(key) _input->key_down[key] && !_past_input->key_down[key]
-        if (KEY_PRESSED('w'))
-            ++next_section[0];
-        if (KEY_PRESSED('s'))
-            --next_section[0];
-        if (KEY_PRESSED('d'))
-            ++next_section[2];
-        if (KEY_PRESSED('a'))
-            --next_section[2];
-        if (KEY_PRESSED('q'))
-            --next_section[1];
-        if (KEY_PRESSED('e'))
-            ++next_section[1];
-        #undef KEY_PRESSED
-
-        next_section.x() = std::max(0, std::min(31, next_section.x()));
-        next_section.y() = std::max(0, std::min(23, next_section.y()));
-        next_section.z() = std::max(0, std::min(31, next_section.z()));
-
-        _state->current_section = next_section;
-    }
+    _state->camera.Update(_input, _past_input);
 
     return true;
 }
@@ -1019,43 +989,15 @@ void Draw(void* _pstate,
     state_t* _state = (state_t*)_pstate;
 
     float how = (float)_swapchain.size.height / (float)_swapchain.size.width;
-    numtk::vec3f forward = {
-        std::cos(_state->turntable[1]) * std::cos(_state->turntable[0]),
-        std::sin(_state->turntable[1]),
-        std::cos(_state->turntable[1]) * std::sin(_state->turntable[0])
-    };
-    forward = forward.normalise();
-    numtk::vec3f up = { 0.f, 1.f, 0.f };
-    if (std::abs(1.f - forward.dot(numtk::vec3f{ 0.f, 1.f, 0.f })) > 1e-3f)
-        up = forward.cross(numtk::vec3f{ 0.f, 1.f, 0.f }).cross(forward).normalise();
-    else
-        up = forward.cross(numtk::vec3f{ 0.f, 0.f, 1.f }).cross(forward).normalise();
-
-#if 0
-    std::cout << forward.norm() << std::endl;
-    std::cout << _state->turntable.x() << " " << _state->turntable.y() << std::endl;
-    std::cout << forward.x() << " " << forward.y() << " " << forward.z() << std::endl;
-#endif
-
-    numtk::vec3f center = (numtk::vec3f{
-        (float)_state->current_section.x() + 0.5f,
-        (float)_state->current_section.y() + 0.5f,
-        (float)_state->current_section.z() + 0.5f
-    } / 16.f) - numtk::vec3f{ 1.f, 1.f, 1.f } + numtk::vec3f{ 0.f, _state->y_offset, 0.f };
-
 
     MatrixBlock* matrices = (MatrixBlock*)_state->staging_area;
     for (uint32_t index = 0; index < 64; ++index)
     {
         matrices[index].projection =
             numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how);
-        matrices[index].view =
-            numtk::mat4f::View({ 0.f, 0.f, -1.f },
-                               { 0.f, 1.f, 0.f },
-                               { 0.f, 0.f, _state->turntable.z() });
+        matrices[index].view = _state->camera.Matrix();
         matrices[index].view_model =
             matrices[index].view
-            * numtk::mat4f::View(forward, up, center)
             * numtk::mat4f{
             2.f, 0.f, 0.f, 0.f,
             0.f, 2.f, 0.f, 0.f,
@@ -1066,6 +1008,7 @@ void Draw(void* _pstate,
             0.f, 1.f, 0.f, 0.f,
             0.f, 0.f, 1.f, 0.f,
             (float)(index/8) * 2.f, 0.f, (float)(index%8) * 2.f, 1.f};
+
         matrices[index].screen_size = {
             (int32_t)_swapchain.size.width,
             (int32_t)_swapchain.size.height
@@ -1216,6 +1159,87 @@ void Shutdown(void* _pstate,
         _state->last_submit = VK_NULL_HANDLE;
     }
 }
+
+void TurntableCamera::Update(iotk::input_t const* _input,
+                             iotk::input_t const* _past_input)
+{
+    if (_input->button_down & iotk::fMouseButton::kLeftBtn)
+    {
+        numtk::vec2<int32_t> last_position{ _past_input->cursor[0], _past_input->cursor[1] };
+        numtk::vec2<int32_t> position{ _input->cursor[0], _input->cursor[1] };
+        numtk::vec2<int32_t> delta = position - last_position;
+        spherical_coordinates += numtk::vec3f{
+            0.01f * (float)delta.x(),
+            0.01f * (float)delta.y(),
+            0.f
+        };
+    }
+
+    {
+        spherical_coordinates.z() *= (1.f + 0.0005f * (float)_input->wheel_delta);
+        if (spherical_coordinates.z() < 0.01f)
+            spherical_coordinates.z() = 0.01f;
+    }
+
+    if (_input->button_down & iotk::fMouseButton::kRightBtn)
+    {
+        y_offset += 0.01f * (float)(_input->cursor[1] -  _past_input->cursor[1]);
+    }
+
+    {
+        numtk::vec3<int32_t> next_section = current_section;
+        #define KEY_PRESSED(key) _input->key_down[key] && !_past_input->key_down[key]
+        if (KEY_PRESSED('w'))
+            ++next_section[0];
+        if (KEY_PRESSED('s'))
+            --next_section[0];
+        if (KEY_PRESSED('d'))
+            ++next_section[2];
+        if (KEY_PRESSED('a'))
+            --next_section[2];
+        if (KEY_PRESSED('q'))
+            --next_section[1];
+        if (KEY_PRESSED('e'))
+            ++next_section[1];
+        #undef KEY_PRESSED
+
+        next_section.x() = std::max(0, std::min(31, next_section.x()));
+        next_section.y() = std::max(0, std::min(23, next_section.y()));
+        next_section.z() = std::max(0, std::min(31, next_section.z()));
+
+        current_section = next_section;
+    }
+}
+
+numtk::mat4f TurntableCamera::Matrix() const
+{
+    numtk::vec3f forward = {
+        std::cos(spherical_coordinates[1]) * std::cos(spherical_coordinates[0]),
+        std::sin(spherical_coordinates[1]),
+        std::cos(spherical_coordinates[1]) * std::sin(spherical_coordinates[0])
+    };
+    forward = forward.normalise();
+
+    numtk::vec3f up = { 0.f, 1.f, 0.f };
+    if (std::abs(1.f - forward.dot(numtk::vec3f{ 0.f, 1.f, 0.f })) > 1e-3f)
+        up = forward.cross(numtk::vec3f{ 0.f, 1.f, 0.f }).cross(forward).normalise();
+    else
+        up = forward.cross(numtk::vec3f{ 0.f, 0.f, 1.f }).cross(forward).normalise();
+
+    numtk::vec3f center = (numtk::vec3f{
+        (float)current_section.x() + 0.5f,
+        (float)current_section.y() + 0.5f,
+        (float)current_section.z() + 0.5f
+    } / 16.f) - numtk::vec3f{ 1.f, 1.f, 1.f } + numtk::vec3f{ 0.f, y_offset, 0.f };
+
+    return
+        numtk::mat4f::View({ 0.f, 0.f, -1.f },
+                           { 0.f, 1.f, 0.f },
+                           { 0.f, 0.f, spherical_coordinates.z() })
+        * numtk::mat4f::View(forward, up, center);
+
+}
+
 
 }
 
