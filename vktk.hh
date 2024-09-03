@@ -125,6 +125,11 @@ struct Swapchain {
     void Release();
 };
 
+struct DescriptorPool {
+    VkDescriptorPool pool;
+    VkDescriptorSetLayout layout;
+};
+
 struct BufferTransition {
     VkBuffer buffer = VK_NULL_HANDLE;
     VkAccessFlags src_access = VK_ACCESS_NONE;
@@ -253,6 +258,17 @@ struct Context
 
     Swapchain CreateSwapchain(uint32_t const _size[2]);
 
+    struct DescriptorSetBindingPoint {
+        VkDescriptorType type;
+        VkDescriptorBindingFlags flags;
+        VkShaderStageFlags shader_stages;
+        uint32_t count;
+    };
+    DescriptorPool CreateDescriptorPool(
+        uint32_t _max_sets,
+        std::vector<DescriptorSetBindingPoint> const& _bindings);
+    void DestroyDescriptorPool(DescriptorPool const& _pool) const;
+
     Buffer CreateBuffer(uint32_t _size,
                         VkBufferUsageFlags _usage,
                         VkMemoryPropertyFlags _memory_flags =
@@ -277,6 +293,7 @@ struct Context
                           VkImageType _type, VkFormat _format, VkImageUsageFlags _usage,
                           std::function<void(void*)> const& _upload_callback);
     void DestroyTexture(Texture const& _texture) const;
+
     VkImageView CreateImageView(Texture const& _texture) const;
 
     FPTable fp = {};

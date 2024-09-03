@@ -61,9 +61,8 @@ struct state_t
     VkPipeline region_pipeline;
     VkPipelineLayout pipeline_layout;
     VkSampler sampler;
-    VkDescriptorPool descriptor_pool;
+    vktk::DescriptorPool descriptor_pool;
     VkDescriptorSet descriptor_set[64];
-    VkDescriptorSetLayout descset_layout;
 
     VkFence last_submit;
 
@@ -554,65 +553,15 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
     //_state->camera.current_section = numtk::vec3<int32_t>{ 16, 8, 16 };
 
-    VkDescriptorPoolSize descpool_sizes[2] = {
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 32768 + 1 },
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}
-    };
-
-    VkDescriptorPoolCreateInfo descpool_create{};
-    descpool_create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    descpool_create.pNext = nullptr;
-    descpool_create.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    descpool_create.maxSets = 64u;
-    descpool_create.poolSizeCount = sizeof(descpool_sizes) / sizeof(descpool_sizes[0]);
-    descpool_create.pPoolSizes = descpool_sizes;
-    CHECKCALL(vkCreateDescriptorPool, _vulkan->device,
-              &descpool_create, nullptr, &_state->descriptor_pool);
-
-    VkDescriptorSetLayoutBinding bindings[3];
-    VkDescriptorBindingFlags binding_flags[3];
-    {
-        VkDescriptorSetLayoutBinding& binding = bindings[0];
-        binding_flags[0] = 0;
-        binding.binding = 0;
-        binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        binding.descriptorCount = 1;
-        binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        binding.pImmutableSamplers = nullptr;
-    }
-    {
-        VkDescriptorSetLayoutBinding& binding = bindings[1];
-        binding_flags[1] = 0;
-        binding.binding = 1;
-        binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        binding.descriptorCount = 1;
-        binding.stageFlags = VK_SHADER_STAGE_ALL;
-        binding.pImmutableSamplers = nullptr;
-    }
-    {
-        VkDescriptorSetLayoutBinding& binding = bindings[2];
-        binding_flags[2] = VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
-        binding.binding = 2;
-        binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        binding.descriptorCount = 32 * 32 * 32;
-        binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        binding.pImmutableSamplers = nullptr;
-    }
-
-    VkDescriptorSetLayoutBindingFlagsCreateInfo flags_info{};
-    flags_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
-    flags_info.pNext = nullptr;
-    flags_info.bindingCount = 3;
-    flags_info.pBindingFlags = binding_flags;
-
-    VkDescriptorSetLayoutCreateInfo descset_create{};
-    descset_create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    descset_create.pNext = &flags_info;
-    descset_create.flags = 0u;
-    descset_create.bindingCount = 3;
-    descset_create.pBindings = bindings;
-    CHECKCALL(vkCreateDescriptorSetLayout, _vulkan->device,
-              &descset_create, nullptr, &_state->descset_layout);
+    _state->descriptor_pool = _vulkan->CreateDescriptorPool(64u, {
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          0, VK_SHADER_STAGE_FRAGMENT_BIT, 1 },
+        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+          0, VK_SHADER_STAGE_ALL, 1 },
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT,
+          VK_SHADER_STAGE_FRAGMENT_BIT, 32 * 32 * 32 }
+    });
 
     uint32_t desc_count = _state->section_index;
     VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc = {};
@@ -624,9 +573,9 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     VkDescriptorSetAllocateInfo descset_allocate{};
     descset_allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     descset_allocate.pNext= &desc_count_alloc;
-    descset_allocate.descriptorPool = _state->descriptor_pool;
+    descset_allocate.descriptorPool = _state->descriptor_pool.pool;
     descset_allocate.descriptorSetCount = 1u;
-    descset_allocate.pSetLayouts = &_state->descset_layout;
+    descset_allocate.pSetLayouts = &_state->descriptor_pool.layout;
     for (uint32_t index = 0; index < 64; ++index)
         CHECKCALL(vkAllocateDescriptorSets, _vulkan->device,
                   &descset_allocate, &_state->descriptor_set[index]);
@@ -651,7 +600,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     pipeline_create.pNext = nullptr;
     pipeline_create.flags = 0u;
     pipeline_create.setLayoutCount = 1u;
-    pipeline_create.pSetLayouts = &_state->descset_layout;
+    pipeline_create.pSetLayouts = &_state->descriptor_pool.layout;
     pipeline_create.pushConstantRangeCount = 0;
     pipeline_create.pPushConstantRanges = nullptr;
     CHECKCALL(vkCreatePipelineLayout, _vulkan->device, &pipeline_create, nullptr,
@@ -1139,13 +1088,10 @@ void Shutdown(void* _pstate,
     vkDestroySampler(_vulkan->device, _state->sampler, nullptr);
     _state->sampler = VK_NULL_HANDLE;
 
-    vkFreeDescriptorSets(_vulkan->device, _state->descriptor_pool, 64, _state->descriptor_set);
+    vkFreeDescriptorSets(_vulkan->device, _state->descriptor_pool.pool, 64, _state->descriptor_set);
     for (uint32_t index = 0; index < 64; ++index)
         _state->descriptor_set[index] = VK_NULL_HANDLE;
-    vkDestroyDescriptorPool(_vulkan->device, _state->descriptor_pool, nullptr);
-    _state->descriptor_pool = VK_NULL_HANDLE;
-    vkDestroyDescriptorSetLayout(_vulkan->device, _state->descset_layout, nullptr);
-    _state->descset_layout = VK_NULL_HANDLE;
+    _vulkan->DestroyDescriptorPool(_state->descriptor_pool);
 
     vkDestroyImage(_vulkan->device, _state->region_texture.image, nullptr);
     _state->region_texture.image = VK_NULL_HANDLE;

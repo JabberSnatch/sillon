@@ -1141,6 +1141,70 @@ Swapchain Context::CreateSwapchain(uint32_t const _size[2])
     return swapchain;
 }
 
+DescriptorPool Context::CreateDescriptorPool(
+    uint32_t _max_sets,
+    std::vector<DescriptorSetBindingPoint> const& _bindings)
+{
+    DescriptorPool output = {};
+
+    std::unordered_map<VkDescriptorType, uint32_t> counts = {};
+    std::vector<VkDescriptorSetLayoutBinding> bindings = {};
+    std::vector<VkDescriptorBindingFlags> flags = {};
+
+    for (DescriptorSetBindingPoint const& binding : _bindings)
+    {
+        if (counts.count(binding.type) == 0)
+            counts.emplace(binding.type, 0u);
+        counts[binding.type] += binding.count;
+
+        VkDescriptorSetLayoutBinding layout_binding = {};
+        layout_binding.binding = bindings.size();
+        layout_binding.descriptorType = binding.type;
+        layout_binding.descriptorCount = binding.count;
+        layout_binding.stageFlags = binding.shader_stages;
+        layout_binding.pImmutableSamplers = nullptr;
+        bindings.emplace_back(layout_binding);
+        flags.emplace_back(binding.flags);
+    }
+
+    std::vector<VkDescriptorPoolSize> descpool_sizes = {};
+    for (auto const& count : counts)
+        descpool_sizes.emplace_back(VkDescriptorPoolSize{ count.first, count.second });
+
+    VkDescriptorPoolCreateInfo descpool_create = {};
+    descpool_create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    descpool_create.pNext = nullptr;
+    descpool_create.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    descpool_create.maxSets = _max_sets;
+    descpool_create.poolSizeCount = (uint32_t)descpool_sizes.size();
+    descpool_create.pPoolSizes = descpool_sizes.data();
+    CHECKCALL(vkCreateDescriptorPool, device,
+              &descpool_create, nullptr, &output.pool);
+
+    VkDescriptorSetLayoutBindingFlagsCreateInfo flags_info{};
+    flags_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+    flags_info.pNext = nullptr;
+    flags_info.bindingCount = (uint32_t)flags.size();
+    flags_info.pBindingFlags = flags.data();
+
+    VkDescriptorSetLayoutCreateInfo descset_create{};
+    descset_create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    descset_create.pNext = &flags_info;
+    descset_create.flags = 0u;
+    descset_create.bindingCount = (uint32_t)bindings.size();
+    descset_create.pBindings = bindings.data();
+    CHECKCALL(vkCreateDescriptorSetLayout, device,
+              &descset_create, nullptr, &output.layout);
+
+    return output;
+}
+
+void Context::DestroyDescriptorPool(DescriptorPool const& _pool) const
+{
+    vkDestroyDescriptorPool(device, _pool.pool, nullptr);
+    vkDestroyDescriptorSetLayout(device, _pool.layout, nullptr);
+}
+
 Buffer Context::CreateBuffer(uint32_t _size,
                              VkBufferUsageFlags _usage,
                              VkMemoryPropertyFlags _memory_flags)
