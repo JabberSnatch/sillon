@@ -59,8 +59,7 @@ struct state_t
     FlightCamera camera;
 
     VkPipeline region_pipeline;
-    VkPipelineLayout pipeline_layout;
-    VkSampler sampler;
+    VkPipelineLayout region_pipeline_layout;
     vktk::DescriptorPool descriptor_pool;
     VkDescriptorSet descriptor_set[64];
 
@@ -70,6 +69,7 @@ struct state_t
     vktk::Buffer staging_buffer;
     void* staging_area;
 
+    VkSampler sampler;
     vktk::Texture region_texture;
     VkImageView region_view;
     RegionData region;
@@ -563,7 +563,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
           VK_SHADER_STAGE_FRAGMENT_BIT, 32 * 32 * 32 }
     });
 
-    uint32_t desc_count = _state->section_index;
+    uint32_t desc_count = (uint32_t)_state->section_textures.size();
     VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc = {};
     desc_count_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
     desc_count_alloc.pNext = nullptr;
@@ -580,21 +580,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         CHECKCALL(vkAllocateDescriptorSets, _vulkan->device,
                   &descset_allocate, &_state->descriptor_set[index]);
 
-    VkSamplerCreateInfo sampler_create{};
-    sampler_create.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    sampler_create.pNext = nullptr;
-    sampler_create.flags = 0u;
-    sampler_create.magFilter = VK_FILTER_NEAREST;
-    sampler_create.minFilter = VK_FILTER_NEAREST;
-    sampler_create.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    sampler_create.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    sampler_create.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    sampler_create.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    sampler_create.minLod = 0.0;
-    sampler_create.maxLod = 4.0;
-    CHECKCALL(vkCreateSampler, _vulkan->device,
-              &sampler_create, nullptr, &_state->sampler);
-
     VkPipelineLayoutCreateInfo pipeline_create{};
     pipeline_create.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipeline_create.pNext = nullptr;
@@ -604,7 +589,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     pipeline_create.pushConstantRangeCount = 0;
     pipeline_create.pPushConstantRanges = nullptr;
     CHECKCALL(vkCreatePipelineLayout, _vulkan->device, &pipeline_create, nullptr,
-              &_state->pipeline_layout);
+              &_state->region_pipeline_layout);
 
     _state->region_view = _vulkan->CreateImageView(_state->region_texture);
 
@@ -633,6 +618,21 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         matrices[index].view = numtk::mat4f::Constant(0.f);
         matrices[index].screen_size = numtk::vec2<int32_t>::Constant(1);
     }
+
+    VkSamplerCreateInfo sampler_create{};
+    sampler_create.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    sampler_create.pNext = nullptr;
+    sampler_create.flags = 0u;
+    sampler_create.magFilter = VK_FILTER_NEAREST;
+    sampler_create.minFilter = VK_FILTER_NEAREST;
+    sampler_create.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    sampler_create.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_create.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_create.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_create.minLod = 0.0;
+    sampler_create.maxLod = 4.0;
+    CHECKCALL(vkCreateSampler, _vulkan->device,
+              &sampler_create, nullptr, &_state->sampler);
 
     VkDescriptorImageInfo region_image_info{};
     region_image_info.sampler = _state->sampler;
@@ -681,8 +681,10 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         }
 
         {
-            std::vector<VkDescriptorImageInfo> section_images_info(_state->section_index);
-            for (uint32_t section_index = 0u; section_index < _state->section_index; ++section_index)
+            std::vector<VkDescriptorImageInfo> section_images_info(_state->section_textures.size());
+            for (uint32_t section_index = 0u;
+                 section_index < _state->section_textures.size();
+                 ++section_index)
             {
                 VkDescriptorImageInfo& image_info = section_images_info[section_index];
                 image_info.sampler = _state->sampler;
@@ -696,7 +698,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
             desc_write.dstSet = _state->descriptor_set[index];
             desc_write.dstBinding = 2u;
             desc_write.dstArrayElement = 0u;
-            desc_write.descriptorCount = _state->section_index;
+            desc_write.descriptorCount = (uint32_t)_state->section_textures.size();
             desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             desc_write.pImageInfo = section_images_info.data();
             desc_write.pBufferInfo = nullptr;
@@ -910,7 +912,7 @@ void RenderResources(void* _pstate,
             vkDestroyPipeline(_vulkan->device, _state->region_pipeline, nullptr);
 
         _state->region_pipeline = _vulkan->CreatePipeline(
-            _state->pipeline_layout,
+            _state->region_pipeline_layout,
             _swapchain.render_pass,
             {
                 { vmodule, VK_SHADER_STAGE_VERTEX_BIT },
@@ -1042,7 +1044,7 @@ void Draw(void* _pstate,
 
         vkCmdBindDescriptorSets(command_buffer,
                                 VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                _state->pipeline_layout, 0u,
+                                _state->region_pipeline_layout, 0u,
                                 1u, &_state->descriptor_set[index],
                                 0u, nullptr);
 
@@ -1083,8 +1085,8 @@ void Shutdown(void* _pstate,
     state_t* _state = (state_t*)_pstate;
     vkDestroyPipeline(_vulkan->device, _state->region_pipeline, nullptr);
     _state->region_pipeline = VK_NULL_HANDLE;
-    vkDestroyPipelineLayout(_vulkan->device, _state->pipeline_layout, nullptr);
-    _state->pipeline_layout = VK_NULL_HANDLE;
+    vkDestroyPipelineLayout(_vulkan->device, _state->region_pipeline_layout, nullptr);
+    _state->region_pipeline_layout = VK_NULL_HANDLE;
     vkDestroySampler(_vulkan->device, _state->sampler, nullptr);
     _state->sampler = VK_NULL_HANDLE;
 
@@ -1105,7 +1107,7 @@ void Shutdown(void* _pstate,
     _vulkan->DestroyBuffer(_state->matrix_buffer);
     _vulkan->DestroyBuffer(_state->staging_buffer);
 
-    for (uint32_t index = 0; index < _state->section_index; ++index)
+    for (uint32_t index = 0; index < _state->section_textures.size(); ++index)
     {
         _vulkan->DestroyTexture(_state->section_textures[index]);
         vkDestroyImageView(_vulkan->device, _state->section_views[index], nullptr);
