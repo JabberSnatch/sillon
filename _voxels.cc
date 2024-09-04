@@ -71,12 +71,10 @@ struct state_t
 
     VkSampler sampler;
     vktk::Texture region_texture;
-    VkImageView region_view;
     RegionData region;
 
     uint32_t section_index = 0;
     std::vector<vktk::Texture> section_textures{};
-    std::vector<VkImageView> section_views{};
 };
 
 struct MatrixBlock
@@ -250,7 +248,6 @@ void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& upd
             }
         );
 
-#if 1
         std::vector<std::unique_ptr<uint8_t[]>> mip_levels = {};
 
         mip_levels.emplace_back(new uint8_t[4096]);
@@ -316,85 +313,6 @@ void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& upd
             );
         }
 
-#else
-
-        update_commands.UpdateTexture(
-            state->section_textures.back(), { 0, 0, 0 }, { 16, 16, 16 }, 0,
-            [&section](void* mapped_data) {
-                uint8_t* blocks = (uint8_t*)mapped_data;
-                for (uint32_t index = 0u; index < 4096; ++index)
-                {
-                    blocks[index] =
-                        (!section.palette.empty()
-                         && (section.palette[section.block_ids[index]] != "air")
-                         && (section.palette[section.block_ids[index]] != "glow_lichen"))
-                        ? 255
-                        : 0;
-                }
-            }
-        );
-
-        update_commands.UpdateTexture(
-            state->section_textures.back(), { 0, 0, 0 }, { 8, 8, 8 }, 1,
-            [&section](void* mapped_data) {
-                uint8_t* blocks = (uint8_t*)mapped_data;
-                for (uint32_t index = 0u; index < 512; ++index)
-                {
-                    uint32_t x = index % 8;
-                    uint32_t y = (index / 8) % 8;
-                    uint32_t z = (index / 64);
-
-                    uint8_t v = 0;
-                    for (uint32_t sample = 0u; sample < 8; ++sample)
-                    {
-                        uint32_t sample_x = x*2 + (sample&1);
-                        uint32_t sample_y = y*2 + ((sample>>1)&1);
-                        uint32_t sample_z = z*2 + ((sample>>2)&1);
-                        uint32_t input_index = sample_x + sample_y * 16 + sample_z * 256;
-
-                        uint8_t block = (!section.palette.empty()
-                         && (section.palette[section.block_ids[input_index]] != "air")
-                         && (section.palette[section.block_ids[input_index]] != "glow_lichen"))
-                            ? 255
-                            : 0;
-                        v = std::max(v, block);
-                    }
-                    blocks[index] = v;
-                }
-            }
-        );
-
-        update_commands.UpdateTexture(
-            state->section_textures.back(), { 0, 0, 0 }, { 4, 4, 4 }, 2,
-            [&section](void* mapped_data) {
-                uint8_t* blocks = (uint8_t*)mapped_data;
-                for (uint32_t index = 0u; index < 64; ++index)
-                {
-                    uint32_t x = index % 4;
-                    uint32_t y = (index / 4) % 4;
-                    uint32_t z = (index / 16);
-
-                    uint8_t v = 0;
-                    for (uint32_t sample = 0u; sample < 64; ++sample)
-                    {
-                        uint32_t sample_x = x*4 + (sample&3);
-                        uint32_t sample_y = y*4 + ((sample>>2)&3);
-                        uint32_t sample_z = z*4 + ((sample>>4)&3);
-                        uint32_t input_index = sample_x + sample_y * 16 + sample_z * 256;
-
-                        uint8_t block = (!section.palette.empty()
-                         && (section.palette[section.block_ids[input_index]] != "air")
-                         && (section.palette[section.block_ids[input_index]] != "glow_lichen"))
-                            ? 255
-                            : 0;
-                        v = std::max(v, block);
-                    }
-                    blocks[index] = v;
-                }
-            }
-        );
-#endif
-
         update_commands.ImageTransitions(
             VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
             {
@@ -405,10 +323,6 @@ void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& upd
                     VK_IMAGE_ASPECT_COLOR_BIT,
                 }
             }
-        );
-
-        state->section_views.push_back(
-            vulkan->CreateImageView(state->section_textures[state->section_index])
         );
     }
 
@@ -591,8 +505,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     CHECKCALL(vkCreatePipelineLayout, _vulkan->device, &pipeline_create, nullptr,
               &_state->region_pipeline_layout);
 
-    _state->region_view = _vulkan->CreateImageView(_state->region_texture);
-
     _state->staging_buffer = _vulkan->CreateBuffer(
         sizeof(MatrixBlock) * 64,
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
@@ -636,7 +548,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
     VkDescriptorImageInfo region_image_info{};
     region_image_info.sampler = _state->sampler;
-    region_image_info.imageView = _state->region_view;
+    region_image_info.imageView = _state->region_texture.view;
     region_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     for (uint32_t index = 0; index < 64; ++index)
@@ -688,7 +600,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
             {
                 VkDescriptorImageInfo& image_info = section_images_info[section_index];
                 image_info.sampler = _state->sampler;
-                image_info.imageView = _state->section_views[section_index];
+                image_info.imageView = _state->section_textures[section_index].view;
                 image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
             }
 
@@ -1099,8 +1011,6 @@ void Shutdown(void* _pstate,
     _state->region_texture.image = VK_NULL_HANDLE;
     vkFreeMemory(_vulkan->device, _state->region_texture.memory, nullptr);
     _state->region_texture.memory = VK_NULL_HANDLE;
-    vkDestroyImageView(_vulkan->device, _state->region_view, nullptr);
-    _state->region_view = VK_NULL_HANDLE;
 
     vkUnmapMemory(_vulkan->device, _state->staging_buffer.alloc.memory);
 
@@ -1108,10 +1018,7 @@ void Shutdown(void* _pstate,
     _vulkan->DestroyBuffer(_state->staging_buffer);
 
     for (uint32_t index = 0; index < _state->section_textures.size(); ++index)
-    {
         _vulkan->DestroyTexture(_state->section_textures[index]);
-        vkDestroyImageView(_vulkan->device, _state->section_views[index], nullptr);
-    }
 
     if (_state->last_submit != VK_NULL_HANDLE)
     {

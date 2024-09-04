@@ -105,6 +105,7 @@ struct Texture {
     VkDeviceMemory memory;
     VkImageType image_type;
     VkFormat format;
+    VkImageView view;
 };
 
 struct Swapchain {

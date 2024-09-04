@@ -1280,6 +1280,8 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
 
     CHECKCALL(vkAllocateMemory, device, &allocate_info, nullptr, &texture.memory);
     CHECKCALL(vkBindImageMemory, device, texture.image, texture.memory, 0);
+
+    texture.view = CreateImageView(texture);
     return texture;
 }
 
@@ -1409,6 +1411,7 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
 
 void Context::DestroyTexture(Texture const& _texture) const
 {
+    vkDestroyImageView(device, _texture.view, nullptr);
     vkDestroyImage(device, _texture.image, nullptr);
     vkFreeMemory(device, _texture.memory, nullptr);
 }
