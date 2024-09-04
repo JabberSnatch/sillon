@@ -58,6 +58,8 @@ struct state_t
     //TurntableCamera camera;
     FlightCamera camera;
 
+    vktk::Texture visibility_texture;
+
     VkPipeline region_pipeline;
     VkPipelineLayout region_pipeline_layout;
     vktk::DescriptorPool descriptor_pool;
@@ -75,6 +77,7 @@ struct state_t
 
     uint32_t section_index = 0;
     std::vector<vktk::Texture> section_textures{};
+    vktk::Texture culling_volume{};
 };
 
 struct MatrixBlock
@@ -396,15 +399,9 @@ void LoadArea(state_t* _state, vktk::Context* _vulkan,
 
     uint32_t sync_counter = 0;
     for (int32_t x = _begin.x(); x < _end.x(); ++x)
-    {
         for (int32_t y = _begin.y(); y < _end.y(); ++y)
-        {
             for (int32_t z = _begin.z(); z < _end.z(); ++z)
-            {
                 LoadSection(_state, _vulkan, update_commands, { x, y, z });
-            }
-        }
-    }
 
     update_commands.End();
     update_commands.Submit();
@@ -465,7 +462,27 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->region = DeserialiseRegion("../r.-1.6.mca");
     LoadRegion(_state, _vulkan);
     LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
-    //_state->camera.current_section = numtk::vec3<int32_t>{ 16, 8, 16 };
+
+    // 8 * 32 * 16 = 4096
+    // 8 * 32 * 4 = 1024
+    // r32g32 = 64b
+    // 16^3 = 4096
+    // 64^3 = 262144
+    // 64^3 * 4096 = 1073741824
+    // 1024^3 = 1073741824
+    _state->culling_volume = vulkan->CreateTexture(
+        8, 8, 8,
+        VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
+        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+
+    // +--+--+--+
+    // |OO|XX|  |
+    // +--+--+--+
+    // |  |XX|XX|>
+    // +--+--+--+
+    // |  |  |  |
+    // +--+--+--+
+    // 110 011 000
 
     _state->descriptor_pool = _vulkan->CreateDescriptorPool(64u, {
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -837,6 +854,16 @@ void RenderResources(void* _pstate,
         vkDestroyShaderModule(_vulkan->device, vmodule, nullptr);
         vkDestroyShaderModule(_vulkan->device, fmodule, nullptr);
     }
+
+    if (_state->visibility_texture.texture != VK_NULL_HANDLE)
+        _vulkan->DestroyTexture(_state->visibility_texture);
+
+    _vulkan->CreateTexture(_swapchain.size.height,
+                           _swapchain.size.width,
+                           1,
+                           VK_IMAGE_TYPE_2D, VK_FORMAT_D16_UNORM,
+                           VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
+                           | VK_IMAGE_USAGE_SAMPLED_BIT);
 }
 
 bool Update(void* _pstate, vktk::Context* _vulkan,
