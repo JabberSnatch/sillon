@@ -1418,6 +1418,25 @@ void Context::DestroyTexture(Texture const& _texture) const
 
 VkImageView Context::CreateImageView(Texture const& _texture) const
 {
+    VkImageAspectFlags view_aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+    switch (_texture.format)
+    {
+    case VK_FORMAT_D16_UNORM:
+    case VK_FORMAT_X8_D24_UNORM_PACK32:
+    case VK_FORMAT_D32_SFLOAT:
+        view_aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+        break;
+    case VK_FORMAT_S8_UINT:
+        view_aspect = VK_IMAGE_ASPECT_STENCIL_BIT;
+        break;
+    case VK_FORMAT_D16_UNORM_S8_UINT:
+    case VK_FORMAT_D24_UNORM_S8_UINT:
+    case VK_FORMAT_D32_SFLOAT_S8_UINT:
+        view_aspect = VK_IMAGE_ASPECT_STENCIL_BIT | VK_IMAGE_ASPECT_DEPTH_BIT;
+        break;
+    default: break;
+    }
+
     VkImageView output = {};
     VkImageViewCreateInfo image_view_create{};
     image_view_create.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -1428,7 +1447,7 @@ VkImageView Context::CreateImageView(Texture const& _texture) const
     image_view_create.format = _texture.format;
     image_view_create.components = VkComponentMapping{};
     image_view_create.subresourceRange = VkImageSubresourceRange{
-        VK_IMAGE_ASPECT_COLOR_BIT,
+        view_aspect,
         0u, VK_REMAINING_MIP_LEVELS, 0u, 1u
     };
 
