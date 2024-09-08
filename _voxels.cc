@@ -231,6 +231,8 @@ void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& upd
     RegionData::ChunkData const& chunk = state->region.chunks[chunk_index];
     RegionData::SectionData const& section = chunk.sections[coords[1]];
 
+    std::vector<std::unique_ptr<uint8_t[]>> mip_levels = {};
+
     if (section.palette.size() > 1)
     {
         state->section_textures.push_back(
@@ -250,8 +252,6 @@ void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& upd
                 }
             }
         );
-
-        std::vector<std::unique_ptr<uint8_t[]>> mip_levels = {};
 
         mip_levels.emplace_back(new uint8_t[4096]);
         {
@@ -290,6 +290,7 @@ void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& upd
                 uint32_t z = (index / (dst_mip_size*dst_mip_size));
 
                 uint8_t v = 0;
+                //uint8_t v = 255;
                 for (uint32_t sample = 0u; sample < 8; ++sample)
                 {
                     uint32_t sample_x = x*2 + (sample&1);
@@ -302,6 +303,7 @@ void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& upd
 
                     uint8_t block = src[input_index];
                     v = std::max(v, block);
+                    //v = std::min(v, block);
                 }
                 dst[index] = v;
             }
@@ -347,9 +349,17 @@ void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& upd
             state->region_texture,
             VkOffset3D{ coords[0], coords[1], coords[2] },
             VkExtent3D{ 1, 1, 1 },
-            [section_index = state->section_index](void* mapped_data) {
+            [section_index = state->section_index,
+             &mip_levels](void* mapped_data) {
                 uint16_t* section_info = (uint16_t*)mapped_data;
+#if 1
                 section_info[1] = (uint16_t)section_index;
+#else
+                if (mip_levels[4][0])
+                    section_info[1] = 0x80ff;
+                else
+                    section_info[1] = 0x8000;
+#endif
             });
 
         state->section_index++;
@@ -470,7 +480,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     // 64^3 = 262144
     // 64^3 * 4096 = 1073741824
     // 1024^3 = 1073741824
-    _state->culling_volume = vulkan->CreateTexture(
+    _state->culling_volume = _vulkan->CreateTexture(
         8, 8, 8,
         VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
         VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
@@ -786,10 +796,12 @@ void RenderResources(void* _pstate,
 
     void StepDDAContext(inout DDAContext ctx)
     {
+#if 0
         ctx.mask.w =
             (1.0 - step(ctx.exit_value.x, ctx.voxel_coords.x * ctx.step_sign.x))
             * (1.0 - step(ctx.exit_value.y, ctx.voxel_coords.y * ctx.step_sign.y))
             * (1.0 - step(ctx.exit_value.z, ctx.voxel_coords.z * ctx.step_sign.z));
+#endif
 
         vec3 order = vec3(
             // ctx.max_t.x < ctx.max_t.y
@@ -811,6 +823,11 @@ void RenderResources(void* _pstate,
         ctx.t = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
         ctx.voxel_coords += ctx.voxel_step * ctx.mask.xyz * ctx.mask.w;
         ctx.max_t += ctx.delta_t * ctx.mask.xyz * ctx.mask.w;
+
+        ctx.mask.w =
+            (1.0 - step(ctx.exit_value.x, ctx.voxel_coords.x * ctx.step_sign.x))
+            * (1.0 - step(ctx.exit_value.y, ctx.voxel_coords.y * ctx.step_sign.y))
+            * (1.0 - step(ctx.exit_value.z, ctx.voxel_coords.z * ctx.step_sign.z));
     }
     )";
 
@@ -855,7 +872,7 @@ void RenderResources(void* _pstate,
         vkDestroyShaderModule(_vulkan->device, fmodule, nullptr);
     }
 
-    if (_state->visibility_texture.texture != VK_NULL_HANDLE)
+    if (_state->visibility_texture.image != VK_NULL_HANDLE)
         _vulkan->DestroyTexture(_state->visibility_texture);
 
     _vulkan->CreateTexture(_swapchain.size.height,
