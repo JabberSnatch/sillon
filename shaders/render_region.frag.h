@@ -18,7 +18,7 @@ layout(std140, set = 0, binding = 1) uniform MatrixBlock {
 #define REGION_SIZE 32.0
 float SectionSize[5] = { 16.0, 8.0, 4.0, 2.0, 1.0 };
 
-#define OLD_VERSION
+#define ALT_VERSION
 
 vec3 RegionTraversal(vec3 org, vec3 dir, out vec3 n, float depth)
 {
@@ -28,20 +28,15 @@ vec3 RegionTraversal(vec3 org, vec3 dir, out vec3 n, float depth)
     DDAContext ctx = InitDDAContext(org, dir, REGION_SIZE);
 
     bool voxel_rendered = false;
-#ifdef OLD_VERSION
-    DDAContext ctx_cache;
-vec3 org_cache;
-#else
-    vec3 mask_cache;
+
+    DDAContextSave ctx_save;
     vec3 org_cache;
-    float t_cache;
-#endif
 
     float section_lod = 0.0;
-    float i = 0.0;
-    while (!voxel_rendered && ctx.mask.w == 1.0 && i++ < 32.0)
+    float safety_counter = 0.0;
+    float step_count = 0.0;
+    while (!voxel_rendered && ctx.mask.w == 1.0 && safety_counter++ < 32.0)
     {
-
         bool chunk_rendered = false;
         uint chunk_index = 0xffff;
         while (ctx.mask.w == 1.0)
@@ -49,14 +44,9 @@ vec3 org_cache;
             uvec2 data = texture(region, ctx.voxel_coords).xy;
             if (data.y < 0x8000)
             {
-#ifdef OLD_VERSION
-                ctx_cache = ctx;
+                ctx_save = SaveDDAContext(ctx);
                 org_cache = org;
                 t = ctx.t; // RECURSE_DOWN
-#else
-                vec3 local_mask = ctx.mask.xyz;
-                t += ctx.t; // RECURSE_DOWN
-#endif
 
                 section_lod = clamp(floor((depth + ctx.t + 0.0) * 0.8), 0.0, 4.0);
 
@@ -65,22 +55,11 @@ vec3 org_cache;
                     hit_pos * REGION_SIZE * (1.0 - 0.00001*ctx.step_sign)
                     - floor(ctx.voxel_coords * REGION_SIZE);
 
-#ifndef OLD_VERSION
-                //mask_cache.xyz = ctx_cache.mask.xyz;
-                StepDDAContext(ctx);
-                hit_pos = (org + dir*ctx.t*0.9999);
-                org_cache = hit_pos * REGION_SIZE * (1.0 - 0.00001*ctx.step_sign);
-                mask_cache.xyz = ctx.mask.xyz;
-#endif
-
                 org = section_org;
                 ctx = InitDDAContext(org, dir, SectionSize[uint(section_lod)]);
 
-#ifdef OLD_VERSION
-                ctx.mask.xyz = ctx_cache.mask.xyz;
-#else
-                ctx.mask.xyz = local_mask.xyz;
-#endif
+                ctx.mask.xyz = ctx_save.mask.xyz;
+
                 chunk_rendered = true;
                 chunk_index = data.y;
 
@@ -101,6 +80,7 @@ vec3 org_cache;
             chunk_index = data.y;
             float step = (float(data.x) / 65535.0) * ctx.mask.w;
             StepDDAContext(ctx);
+            step_count++;
 
             d += step;
         }
@@ -117,28 +97,23 @@ vec3 org_cache;
                     break;
                 }
                 StepDDAContext(ctx);
+                step_count++;
             }
         }
 
         if (chunk_rendered && !voxel_rendered)
         {
-#ifdef OLD_VERSION
-            ctx = ctx_cache;
-            ctx.mask.xyz = ctx_cache.mask.xyz;
+            ctx = RestoreDDAContext(ctx_save, dir, REGION_SIZE);
             org = org_cache;
-#else
-            org = org_cache / REGION_SIZE;
-            ctx = InitDDAContext(org, dir, REGION_SIZE);
-            ctx.mask.xyz = mask_cache.xyz;
-#endif
             StepDDAContext(ctx);
+            step_count++;
         }
     }
 
     //voxel_rendered = true;
 
     n = ctx.mask.xyz * -ctx.step_sign;
-    return vec3(voxel_rendered ? 1.0 : 0.0, i, t);
+    return vec3(voxel_rendered ? 1.0 : 0.0, step_count, t);
 }
 
 void main() {
@@ -187,12 +162,12 @@ void main() {
         float dist = (depth + t) * 2.0;
         float tone = 1.0 - exp(-dist*0.2);
 
-        color = vec4(mix(//shadow.xxx * max(0.0, dot(normal, sun_dir)),
-                         max(0.0, dot(normal, sun_dir)).xxx,
+        color = vec4(mix(shadow.xxx * max(0.0, dot(normal, sun_dir)),
+                         //max(0.0, dot(normal, sun_dir)).xxx,
                          vec3(0.3, 0.5, 0.5),
                          tone),
                      1.0);
-        //color = vec4(d.xxx/32.0, 1.0);
+        //color = vec4(d.xxx/128.0, 1.0);
         //color = vec4(d.xxx/2.0, 1.0);
 
         gl_FragDepth = dist / 1000.f;

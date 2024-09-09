@@ -812,6 +812,40 @@ void RenderResources(void* _pstate,
             * (1.0 - step(ctx.exit_value.y, ctx.voxel_coords.y * ctx.step_sign.y))
             * (1.0 - step(ctx.exit_value.z, ctx.voxel_coords.z * ctx.step_sign.z));
     }
+
+    struct DDAContextSave
+    {
+        vec4 mask;
+        vec3 voxel_coords;
+        vec3 max_t;
+    };
+
+    DDAContextSave SaveDDAContext(inout DDAContext ctx)
+    {
+        DDAContextSave save;
+        save.mask = ctx.mask;
+        save.voxel_coords = ctx.voxel_coords;
+        save.max_t = ctx.max_t;
+        return save;
+    }
+
+    DDAContext RestoreDDAContext(inout DDAContextSave save, vec3 dir, float voxel_count)
+    {
+        DDAContext ctx;
+
+        ctx.step_sign = sign(dir);
+        ctx.exit_value = ctx.step_sign * 0.5 + vec3(0.5);
+        ctx.delta_t = 1.0 / (abs(dir) * voxel_count);
+        ctx.voxel_step = ctx.step_sign / voxel_count;
+
+        ctx.max_t = save.max_t;
+        ctx.voxel_coords = save.voxel_coords;
+        ctx.mask = save.mask;
+        ctx.t = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
+
+        return ctx;
+    }
+
     )";
 
     static char const region_fshader[] =
