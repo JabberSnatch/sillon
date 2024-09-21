@@ -185,13 +185,20 @@ Context::Context(uint64_t _hinstance, uint64_t _hwindow)
             copy_queue_info.pQueuePriorities = &kQueuePriority;
         }
 
-        VkPhysicalDeviceVulkan12Features features = {};
-        features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-        features.runtimeDescriptorArray = VK_TRUE;
+        VkPhysicalDeviceVulkan12Features Vulkan12Features = {};
+        Vulkan12Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+        Vulkan12Features.runtimeDescriptorArray = VK_TRUE;
+        Vulkan12Features.descriptorBindingVariableDescriptorCount = VK_TRUE;
+
+        VkPhysicalDeviceFeatures2 Features2 = {};
+        Features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+
+        Features2.pNext = &Vulkan12Features;
+        vkGetPhysicalDeviceFeatures2(physical_device, &Features2);
 
         VkDeviceCreateInfo device_info{};
         device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-        device_info.pNext = &features;
+        device_info.pNext = &Features2;
         device_info.flags = 0;
         device_info.queueCreateInfoCount = 2;
         device_info.pQueueCreateInfos = queue_info;
@@ -1169,7 +1176,7 @@ DescriptorPool Context::CreateDescriptorPool(
 
     std::vector<VkDescriptorPoolSize> descpool_sizes = {};
     for (auto const& count : counts)
-        descpool_sizes.emplace_back(VkDescriptorPoolSize{ count.first, count.second });
+        descpool_sizes.emplace_back(VkDescriptorPoolSize{ count.first, count.second * _max_sets });
 
     VkDescriptorPoolCreateInfo descpool_create = {};
     descpool_create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;

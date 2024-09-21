@@ -444,10 +444,10 @@ void LoadRegion(state_t* state, vktk::Context* vulkan)
                     for (uint32_t yindex = 0; yindex < 32; ++yindex)
                     {
                         uint32_t index = xindex + yindex*32 + zindex*32*32;
-                        RegionData::SectionData const& section = chunk_data.sections[yindex];
                         sections[index * 2+1] = 0xffff;
                         if (yindex < 24)
                         {
+                            RegionData::SectionData const& section = chunk_data.sections[yindex];
                             float average = 0.f;
 
                             if (!section.palette.empty())
@@ -779,13 +779,6 @@ void RenderResources(void* _pstate,
 
     void StepDDAContext(inout DDAContext ctx)
     {
-#if 0
-        ctx.mask.w =
-            (1.0 - step(ctx.exit_value.x, ctx.voxel_coords.x * ctx.step_sign.x))
-            * (1.0 - step(ctx.exit_value.y, ctx.voxel_coords.y * ctx.step_sign.y))
-            * (1.0 - step(ctx.exit_value.z, ctx.voxel_coords.z * ctx.step_sign.z));
-#endif
-
         vec3 order = vec3(
             // ctx.max_t.x < ctx.max_t.y
             1.0 - step(ctx.max_t.y, ctx.max_t.x),
