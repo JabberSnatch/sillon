@@ -368,7 +368,7 @@ void CommandBuffer::Submit(VkSemaphore* _signal_semaphore,
                            VkFence* _signal_fence)
 {
     VkFence fallback_fence;
-    if (!pending_destroys.empty() && !_signal_fence)
+    if (!_signal_fence)
         _signal_fence = &fallback_fence;
 
     queue.Submit(&handle, 1, _signal_semaphore,
@@ -383,7 +383,9 @@ void CommandBuffer::Submit(VkSemaphore* _signal_semaphore,
 
     queue.context->ScheduleRoutine(
         *_signal_fence,
-        [pending_destroys = std::move(pending_destroys)](Context& context) {
+        [handle = this->handle,
+         command_pool = this->queue.command_pool,
+         pending_destroys = std::move(pending_destroys)](Context& context) {
             for (Buffer const& buffer : pending_destroys)
             {
 #if 0
@@ -392,6 +394,8 @@ void CommandBuffer::Submit(VkSemaphore* _signal_semaphore,
 #endif
                 context.DestroyBuffer(buffer);
             }
+
+            vkFreeCommandBuffers(context.device, command_pool, 1, &handle);
         });
 
     if (_signal_fence == &fallback_fence)

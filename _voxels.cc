@@ -655,10 +655,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         });
 
     command_buffer.End();
-
-    _vulkan->present_queue.Submit(
-        &command_buffer.handle, 1u
-    );
+    command_buffer.Submit();
 
     return;
 }
