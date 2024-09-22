@@ -5,6 +5,7 @@
 #include "_glyphs.hh"
 #include "_icosphere.hh"
 #include "_voxels.hh"
+#include "_editor.hh"
 
 #include <cstdio>
 #include <cstdint>
@@ -51,6 +52,7 @@ struct context_t
     std::unique_ptr<Glyphs::Interface> glyphs_plugin;
     std::unique_ptr<Icosphere::Interface> icosphere_plugin;
     std::unique_ptr<Voxels::Interface> voxels_plugin;
+    std::unique_ptr<Editor::Interface> editor_plugin;
     plugin_t plugin;
 };
 
@@ -81,6 +83,16 @@ static void LoadPlugins(context_t* context)
     context->plugin.Draw = context->voxels_plugin->Draw;
     context->plugin.Shutdown = context->voxels_plugin->Shutdown;
     context->plugin.state = context->voxels_plugin->state;
+#endif
+
+#if 0
+    context->editor_plugin->ReloadPointers();
+    context->plugin.ConstantResources = context->editor_plugin->ConstantResources;
+    context->plugin.RenderResources = context->editor_plugin->RenderResources;
+    context->plugin.Update = context->editor_plugin->Update;
+    context->plugin.Draw = context->editor_plugin->Draw;
+    context->plugin.Shutdown = context->editor_plugin->Shutdown;
+    context->plugin.state = context->editor_plugin->state;
 #endif
 
 #if 0
@@ -130,6 +142,7 @@ extern "C" {
         context->glyphs_plugin.reset(new Glyphs::Interface());
         context->icosphere_plugin.reset(new Icosphere::Interface());
         context->voxels_plugin.reset(new Voxels::Interface());
+        context->editor_plugin.reset(new Editor::Interface());
 
         LoadPlugins(context);
 

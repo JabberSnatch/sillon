@@ -682,37 +682,6 @@ void RenderResources(void* _pstate,
     // Z
 
     static char const draw_cube_vshader[] = R"_(
-    const uint kTriIndices[] = uint[36](
-#ifndef CW_CUBE
-// COUNTERCLOCKWISE FACES
-        0, 1, 2,  2, 1, 3,
-        0, 4, 1,  1, 4, 5,
-        3, 1, 7,  7, 1, 5,
-        7, 5, 6,  6, 5, 4,
-        2, 6, 0,  0, 6, 4,
-        2, 3, 6,  6, 3, 7
-#else
-// CLOCKWISE FACES
-        0, 2, 1,  1, 2, 3,
-        0, 1, 4,  4, 1, 5,
-        3, 7, 1,  1, 7, 5,
-        7, 6, 5,  5, 6, 4,
-        2, 0, 6,  6, 0, 4,
-        2, 6, 3,  3, 6, 7
-#endif
-    );
-
-    const vec3 kTriVertices[] = vec3[8](
-        vec3(-1.0, -1.0, -1.0),
-        vec3(-1.0, -1.0, 1.0),
-        vec3(-1.0, 1.0, -1.0),
-        vec3(-1.0, 1.0, 1.0),
-        vec3(1.0, -1.0, -1.0),
-        vec3(1.0, -1.0, 1.0),
-        vec3(1.0, 1.0, -1.0),
-        vec3(1.0, 1.0, 1.0)
-    );
-
     layout(std140, set = 0, binding = 1) uniform MatrixBlock {
         mat4 projection;
         mat4 view_model;
@@ -850,6 +819,8 @@ void RenderResources(void* _pstate,
                                         {
                                             "#version 450",
                                             "#define CW_CUBE",
+                                            #include "shaders/cube_vertices.vert.h"
+                                            ,
                                             draw_cube_vshader
                                         });
 
