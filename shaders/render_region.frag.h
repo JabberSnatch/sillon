@@ -89,7 +89,7 @@ vec3 RegionTraversal(vec3 org, vec3 dir, out vec3 n, float depth)
         {
             while (ctx.mask.w == 1.0 && !voxel_rendered)
             {
-                float step = textureLod(chunks[chunk_index], ctx.voxel_coords, section_lod).x;
+                float step = textureLod(chunks[nonuniformEXT(chunk_index)], ctx.voxel_coords, section_lod).x;
                 if (step > 0.0)
                 {
                     voxel_rendered = true;
