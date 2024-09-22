@@ -798,6 +798,7 @@ void RenderResources(void* _pstate,
         ctx.max_t += ctx.delta_t * ctx.mask.xyz * ctx.mask.w;
 
         ctx.mask.w =
+            abs(sign(dot(ctx.voxel_step, ctx.mask.xyz))) *
             (1.0 - step(ctx.exit_value.x, ctx.voxel_coords.x * ctx.step_sign.x))
             * (1.0 - step(ctx.exit_value.y, ctx.voxel_coords.y * ctx.step_sign.y))
             * (1.0 - step(ctx.exit_value.z, ctx.voxel_coords.z * ctx.step_sign.z));

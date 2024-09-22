@@ -18,8 +18,6 @@ layout(std140, set = 0, binding = 1) uniform MatrixBlock {
 #define REGION_SIZE 32.0
 float SectionSize[5] = { 16.0, 8.0, 4.0, 2.0, 1.0 };
 
-#define ALT_VERSION
-
 vec3 RegionTraversal(vec3 org, vec3 dir, out vec3 n, float depth)
 {
     float d = 0.0;
@@ -33,9 +31,8 @@ vec3 RegionTraversal(vec3 org, vec3 dir, out vec3 n, float depth)
     vec3 org_cache;
 
     float section_lod = 0.0;
-    float safety_counter = 0.0;
     float step_count = 0.0;
-    while (!voxel_rendered && ctx.mask.w == 1.0 && safety_counter++ < 32.0)
+    while (!voxel_rendered && ctx.mask.w == 1.0)
     {
         bool chunk_rendered = false;
         uint chunk_index = 0xffff;
@@ -81,7 +78,6 @@ vec3 RegionTraversal(vec3 org, vec3 dir, out vec3 n, float depth)
             float step = (float(data.x) / 65535.0) * ctx.mask.w;
             StepDDAContext(ctx);
             step_count++;
-
             d += step;
         }
 
