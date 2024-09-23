@@ -75,7 +75,7 @@ static bool UpdateSwapchain(context_t* _context, uint32_t const _size[2])
 
 static void LoadPlugins(context_t* context)
 {
-#if 1
+#if 0
     context->voxels_plugin->ReloadPointers();
     context->plugin.ConstantResources = context->voxels_plugin->ConstantResources;
     context->plugin.RenderResources = context->voxels_plugin->RenderResources;
@@ -85,7 +85,7 @@ static void LoadPlugins(context_t* context)
     context->plugin.state = context->voxels_plugin->state;
 #endif
 
-#if 0
+#if 1
     context->editor_plugin->ReloadPointers();
     context->plugin.ConstantResources = context->editor_plugin->ConstantResources;
     context->plugin.RenderResources = context->editor_plugin->RenderResources;

@@ -31,4 +31,9 @@ const vec3 kTriVertices[] = vec3[8](
     vec3(1.0, 1.0, 1.0)
     );
 
+vec3 CurrentVertex()
+{
+    return kTriVertices[kTriIndices[gl_VertexIndex]];
+}
+
 )_"

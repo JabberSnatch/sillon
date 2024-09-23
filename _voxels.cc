@@ -693,7 +693,7 @@ void RenderResources(void* _pstate,
     layout(location = 1) out vec3 iFS_camera_position;
 
     void main() {
-        vec3 vertex = kTriVertices[kTriIndices[gl_VertexIndex]];
+        vec3 vertex = CurrentVertex();
         gl_Position = projection * view_model * vec4(vertex, 1.0);
 
         iFS_camera_position = (inverse(view_model) * vec4(vec3(0.0), 1.0)).xyz;
