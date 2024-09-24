@@ -205,6 +205,11 @@ struct CommandBuffer {
                           VkPipelineStageFlags _dst_stage,
                           std::vector<ImageTransition> const& _transitions);
 
+    void BeginRenderPass(VkExtent2D _size,
+                         VkFramebuffer _target,
+                         VkRenderPass _render_pass,
+                         std::vector<VkClearValue> _clear_values);
+
     void End();
 };
 

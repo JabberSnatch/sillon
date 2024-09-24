@@ -587,6 +587,36 @@ void CommandBuffer::ImageTransitions(VkPipelineStageFlags _src_stage,
                          barriers.size(), barriers.data());
 }
 
+void CommandBuffer::BeginRenderPass(VkExtent2D _size,
+                                    VkFramebuffer _target,
+                                    VkRenderPass _render_pass,
+                                    std::vector<VkClearValue> _clear_values)
+{
+    VkViewport viewport{};
+    viewport.x = 0.f; viewport.y = 0.f;
+    viewport.width = (float)_size.width;
+    viewport.height = (float)_size.height;
+    viewport.minDepth = 0.f; viewport.maxDepth = 1.f;
+    vkCmdSetViewport(handle, 0, 1, &viewport);
+
+    VkRect2D scissor{ VkOffset2D{ 0, 0 }, _size };
+    vkCmdSetScissor(handle, 0, 1, &scissor);
+
+    VkRenderPassBeginInfo rp_begin_info{};
+    rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rp_begin_info.pNext = nullptr;
+    rp_begin_info.renderPass = _render_pass;
+    rp_begin_info.framebuffer = _target;
+    rp_begin_info.renderArea = VkRect2D{
+        VkOffset2D{ 0, 0 },
+        _size
+    };
+    rp_begin_info.clearValueCount = _clear_values.size();
+    rp_begin_info.pClearValues = _clear_values.data();
+    vkCmdBeginRenderPass(handle, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+}
+
+
 void CommandBuffer::End()
 {
     vkEndCommandBuffer(handle);

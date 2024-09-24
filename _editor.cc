@@ -88,47 +88,10 @@ void Draw(void* _pstate,
     vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
     command_buffer.Begin();
 
-    {
-        VkViewport viewport{};
-        viewport.x = 0.f; viewport.y = 0.f;
-        viewport.width = (float)_swapchain.size.width;
-        viewport.height = (float)_swapchain.size.height;
-        viewport.minDepth = 0.f; viewport.maxDepth = 1.f;
-        vkCmdSetViewport(command_buffer, 0, 1, &viewport);
-
-        VkRect2D scissor{ VkOffset2D{ 0, 0 }, _swapchain.size };
-        vkCmdSetScissor(command_buffer, 0, 1, &scissor);
-
-        VkClearValue clear_values[2];
-        {
-            VkClearValue& clear_value = clear_values[0];
-            clear_value.color.float32[0] = 0.f; clear_value.color.float32[1] = 1.f;
-            clear_value.color.float32[2] = 1.f; clear_value.color.float32[3] = 0.f;
-            clear_value.depthStencil.depth = 0.f;
-            clear_value.depthStencil.stencil = 0;
-        }
-
-        {
-            VkClearValue& clear_value = clear_values[1];
-            clear_value.color.float32[0] = 0.f; clear_value.color.float32[1] = 0.f;
-            clear_value.color.float32[2] = 0.f; clear_value.color.float32[3] = 0.f;
-            clear_value.depthStencil.depth = 1.f;
-            clear_value.depthStencil.stencil = 0;
-        }
-
-        VkRenderPassBeginInfo rp_begin_info{};
-        rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        rp_begin_info.pNext = nullptr;
-        rp_begin_info.renderPass = _swapchain.render_pass;
-        rp_begin_info.framebuffer = _swapchain.framebuffers[_swapchain.index];
-        rp_begin_info.renderArea = VkRect2D{
-            VkOffset2D{ 0, 0 },
-            _swapchain.size
-        };
-        rp_begin_info.clearValueCount = 2;
-        rp_begin_info.pClearValues = clear_values;
-        vkCmdBeginRenderPass(command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-    }
+    command_buffer.BeginRenderPass(_swapchain.size,
+                                   _swapchain.framebuffers[_swapchain.index],
+                                   _swapchain.render_pass,
+                                   { { 0.f, 1.f, 1.f, 0.f }, { 1.f, 0.f, 0.f, 0.f } });
 
     vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->grid_pipeline);
     vkCmdDraw(command_buffer, 36u, 1u, 0u, 0u);
