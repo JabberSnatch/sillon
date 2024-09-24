@@ -31,9 +31,30 @@ const vec3 kTriVertices[] = vec3[8](
     vec3(1.0, 1.0, 1.0)
     );
 
+const vec2 kVertexUV[] = vec2[4](
+    vec2(0.0, 0.0),
+    vec2(0.0, 1.0),
+    vec2(1.0, 0.0),
+    vec2(1.0, 1.0)
+    );
+
+const uint kUVIndices[] = uint[36](
+    0, 1, 2,  2, 1, 3,
+    0, 1, 2,  2, 1, 3,
+    0, 1, 2,  2, 1, 3,
+    0, 1, 2,  2, 1, 3,
+    0, 1, 2,  2, 1, 3,
+    0, 1, 2,  2, 1, 3
+    );
+
 vec3 CurrentVertex()
 {
     return kTriVertices[kTriIndices[gl_VertexIndex]];
+}
+
+vec2 CurrentUV()
+{
+    return kVertexUV[kUVIndices[gl_VertexIndex]];
 }
 
 )_"
