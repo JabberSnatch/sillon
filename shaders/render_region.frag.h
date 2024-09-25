@@ -142,8 +142,9 @@ void main() {
 
     if (!voxel_rendered)
     {
-        color = vec4(vec3((d.x/16.0)), d.x/32.0);
-        gl_FragDepth = 1.f;
+        discard;
+        //color = vec4(vec3((d.x/16.0)), d.x/32.0);
+        //gl_FragDepth = 1.f;
     }
     else
     {

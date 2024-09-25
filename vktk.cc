@@ -998,7 +998,7 @@ VkPipeline Context::CreatePipeline(VkPipelineLayout _layout,
     depthStencilState.flags = 0;
     depthStencilState.depthTestEnable = VK_TRUE;
     depthStencilState.depthWriteEnable = VK_TRUE;
-    depthStencilState.depthCompareOp = VK_COMPARE_OP_LESS;
+    depthStencilState.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
     depthStencilState.depthBoundsTestEnable = VK_FALSE;
     depthStencilState.stencilTestEnable = VK_FALSE;
     depthStencilState.front = VkStencilOpState{};

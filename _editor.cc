@@ -85,7 +85,7 @@ void RenderResources(void* _pstate,
             layout(location = 0) out vec4 oFS_color;
 
             void main() {
-                vec2 grid_distance = abs(fract((iFS_texCoords * 16.0)) - vec2(0.5));
+                vec2 grid_distance = abs(fract((iFS_texCoords * 10.0)) - vec2(0.5));
 
                 vec2 grid_value_0_split = max((grid_distance - 0.45), vec2(0.0)) * 10.0;
                 float grid_value_0 = min(dot(pow(grid_value_0_split, vec2(0.7)), vec2(1.0)), 1.0);

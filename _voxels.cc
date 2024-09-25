@@ -58,10 +58,13 @@ struct state_t
     //TurntableCamera camera;
     FlightCamera camera;
 
-    VkPipeline region_pipeline;
     VkPipelineLayout region_pipeline_layout;
+    VkPipeline region_pipeline;
     vktk::DescriptorPool descriptor_pool;
     VkDescriptorSet descriptor_set[64];
+
+    VkPipelineLayout skybox_pipeline_layout;
+    VkPipeline skybox_pipeline;
 
     VkFence last_submit;
 
@@ -515,6 +518,18 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     CHECKCALL(vkCreatePipelineLayout, _vulkan->device, &pipeline_create, nullptr,
               &_state->region_pipeline_layout);
 
+    VkPushConstantRange push_constant_range = {};
+    push_constant_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    push_constant_range.offset = 0;
+    push_constant_range.size = sizeof(numtk::mat4f) * 2;
+
+    pipeline_create.setLayoutCount = 0u;
+    pipeline_create.pSetLayouts = nullptr;
+    pipeline_create.pushConstantRangeCount = 1;
+    pipeline_create.pPushConstantRanges = &push_constant_range;
+    CHECKCALL(vkCreatePipelineLayout, _vulkan->device, &pipeline_create, nullptr,
+              &_state->skybox_pipeline_layout);
+
     _state->staging_buffer = _vulkan->CreateBuffer(
         sizeof(MatrixBlock) * 64,
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
@@ -666,8 +681,6 @@ void RenderResources(void* _pstate,
 {
     state_t* _state = (state_t*)_pstate;
 
-    constexpr uint32_t kStageCount = 2u;
-
     //   2---6
     //  /   /|
     // 3---7 |
@@ -681,7 +694,8 @@ void RenderResources(void* _pstate,
     //  /
     // Z
 
-    static char const draw_cube_vshader[] = R"_(
+    {
+        static char const draw_cube_vshader[] = R"_(
     layout(std140, set = 0, binding = 1) uniform MatrixBlock {
         mat4 projection;
         mat4 view_model;
@@ -701,7 +715,7 @@ void RenderResources(void* _pstate,
     }
     )_";
 
-    static char const voxel_traversal_func[] = R"(
+        static char const voxel_traversal_func[] = R"(
     struct DDAContext
     {
         vec3 step_sign;
@@ -808,47 +822,105 @@ void RenderResources(void* _pstate,
 
     )";
 
-    static char const region_fshader[] =
-        #include "shaders/render_region.frag.h"
-        ;
+        static char const region_fshader[] =
+            #include "shaders/render_region.frag.h"
+            ;
+
+        {
+            VkShaderModule vmodule =
+                _vulkan->CompileShader_GLSL(VK_SHADER_STAGE_VERTEX_BIT,
+                                            "draw_cube_vshader_cw",
+                                            {
+                                                "#version 450",
+                                                "#define CW_CUBE",
+                                                #include "shaders/cube_vertices.vert.h"
+                                                ,
+                                                draw_cube_vshader
+                                            });
+
+            VkShaderModule fmodule =
+                _vulkan->CompileShader_GLSL(VK_SHADER_STAGE_FRAGMENT_BIT,
+                                            "region_fshader",
+                                            {
+                                                "#version 450",
+                                                voxel_traversal_func,
+                                                region_fshader
+                                            });
+
+            if (_state->region_pipeline != VK_NULL_HANDLE)
+                vkDestroyPipeline(_vulkan->device, _state->region_pipeline, nullptr);
+
+            _state->region_pipeline = _vulkan->CreatePipeline(
+                _state->region_pipeline_layout,
+                _swapchain.render_pass,
+                {
+                    { vmodule, VK_SHADER_STAGE_VERTEX_BIT },
+                    { fmodule, VK_SHADER_STAGE_FRAGMENT_BIT }
+                },
+                VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+                {}
+                );
+
+            vkDestroyShaderModule(_vulkan->device, vmodule, nullptr);
+            vkDestroyShaderModule(_vulkan->device, fmodule, nullptr);
+        }
+    }
 
     {
-        VkShaderModule vmodule =
-            _vulkan->CompileShader_GLSL(VK_SHADER_STAGE_VERTEX_BIT,
-                                        "draw_cube_vshader_cw",
-                                        {
-                                            "#version 450",
-                                            "#define CW_CUBE",
-                                            #include "shaders/cube_vertices.vert.h"
-                                            ,
-                                            draw_cube_vshader
-                                        });
-
-        VkShaderModule fmodule =
-            _vulkan->CompileShader_GLSL(VK_SHADER_STAGE_FRAGMENT_BIT,
-                                        "region_fshader",
-                                        {
-                                            "#version 450",
-                                            voxel_traversal_func,
-                                            region_fshader
-                                        });
-
-        if (_state->region_pipeline != VK_NULL_HANDLE)
-            vkDestroyPipeline(_vulkan->device, _state->region_pipeline, nullptr);
-
-        _state->region_pipeline = _vulkan->CreatePipeline(
-            _state->region_pipeline_layout,
-            _swapchain.render_pass,
+        char const skybox_vertex_source[] = R"(
+            const vec3 kTriVertices[] = vec3[3](
+                vec3(-1.0, -1.0, 1.0),
+                vec3(-1.0, 4.0, 1.0),
+                vec3(4.0, -1.0, 1.0)
+            );
+            layout(location = 0) out vec3 iFS_csPosition;
+            void main()
             {
-                { vmodule, VK_SHADER_STAGE_VERTEX_BIT },
-                { fmodule, VK_SHADER_STAGE_FRAGMENT_BIT }
-            },
-            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-            {}
-        );
+                iFS_csPosition = kTriVertices[gl_VertexIndex];
+                gl_Position = vec4(kTriVertices[gl_VertexIndex], 1.0);
+            }
+        )";
 
-        vkDestroyShaderModule(_vulkan->device, vmodule, nullptr);
-        vkDestroyShaderModule(_vulkan->device, fmodule, nullptr);
+        char const skybox_fragment_source[] = R"(
+            layout(location = 0) in vec3 iFS_csPosition;
+            layout(location = 0) out vec4 oFS_color;
+            layout(push_constant, std430) uniform PushConstant {
+                mat4 projection;
+                mat4 view;
+            };
+
+            void main()
+            {
+                vec3 dir = inverse(mat3(view)) * inverse(mat3(projection)) * iFS_csPosition;
+                oFS_color = vec4(dir * 0.5 + vec3(0.5), 1.0);
+            }
+        )";
+
+        VkShaderModule skybox_vertex =
+            _vulkan->CompileShader_GLSL(VK_SHADER_STAGE_VERTEX_BIT,
+                                        "skybox_vertex",
+                                        {
+                                            "#version 450",
+                                            skybox_vertex_source
+                                        });
+
+        VkShaderModule skybox_fragment =
+            _vulkan->CompileShader_GLSL(VK_SHADER_STAGE_FRAGMENT_BIT,
+                                        "skybox_fragment",
+                                        {
+                                            "#version 450",
+                                            skybox_fragment_source
+                                        });
+
+        _state->skybox_pipeline = _vulkan->CreatePipeline(
+            _state->skybox_pipeline_layout,
+            _swapchain.render_pass,
+            { { skybox_vertex, VK_SHADER_STAGE_VERTEX_BIT },
+              { skybox_fragment, VK_SHADER_STAGE_FRAGMENT_BIT } },
+            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, {});
+
+        vkDestroyShaderModule(_vulkan->device, skybox_vertex, nullptr);
+        vkDestroyShaderModule(_vulkan->device, skybox_fragment, nullptr);
     }
 }
 
@@ -963,6 +1035,19 @@ void Draw(void* _pstate,
     rp_begin_info.pClearValues = clear_values;
 
     vkCmdBeginRenderPass(command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+
+    {
+        numtk::mat4f push_constants[2];
+        push_constants[0] = numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how);
+        push_constants[1] = _state->camera.Matrix();
+
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->skybox_pipeline);
+        vkCmdPushConstants(command_buffer, _state->skybox_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT,
+                           0, sizeof(numtk::mat4f) * 2, (void*)push_constants);
+        vkCmdDraw(command_buffer, 3u, 1u, 0u, 0u);
+    }
+
+#if 1
     vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->region_pipeline);
     for (uint32_t index = 0; index < 64; ++index)
     {
@@ -976,6 +1061,8 @@ void Draw(void* _pstate,
         vkCmdDraw(command_buffer, 36u, 1u, 0u, 0u);
 
     }
+#endif
+
     vkCmdEndRenderPass(command_buffer);
 
     command_buffer.End();
