@@ -897,15 +897,38 @@ void RenderResources(void* _pstate,
                 vec4 position;
             };
 
+#if 0
+            float RayleighPhase(float cos_th) {
+                return 3.0 * (1 + cos_th*cos_th);
+            }
+
+            float MiePhase(float cos_th) {
+                //const float g = 
+            }
+#endif
+
+#define STEP_COUNT 16.0
+#define STEP_COUNT_SECONDARY 8.0
             void main()
             {
-                vec3 dir = normalize(inverse(mat3(view)) * inverse(mat3(projection)) * iFS_csPosition);
+                const float base_radius = 6.371;
+                const float outer_radius = 6.453;
+                const float rayleigh_max_height = 0.008;
+                const vec3 rayleigh_scattering = vec3(5.5e-6, 1.3e-7, 2.2e-7);
+                const float mie_max_height = 0.001;
+                const vec3 mie_scattering = vec3(2.1e-7);
+#if 0
+                const float absorption_peak_height = 0.030;
+                const float absorption_falloff = 0.004;
+                const vec3 absorption = vec3(2.04e-5, 4.97e-5, 1.95e-6);
+#endif
 
-                float base_radius = 6.371;
-                float outer_radius = 6.383;
+                vec3 light_dir = normalize(vec3(-1.0, 2.0, 2.0));
+                vec3 dir = normalize(inverse(mat3(view)) * inverse(mat3(projection)) * iFS_csPosition);
+                float light_angle = dot(dir, light_dir);
+
                 float altitude = base_radius + position.y * 0.000001;
 
-                float alpha = acos(dir.y);
                 float b = 2.0*altitude*dir.y;
                 float det = b*b - (altitude*altitude - outer_radius*outer_radius);
 
@@ -916,6 +939,64 @@ void RenderResources(void* _pstate,
                 }
 
                 float hit_t = -b + sqrt(det);
+
+                float step_size = hit_t / STEP_COUNT;
+                vec3 origin = vec3(0.0, base_radius, 0.0) + position.xyz * 0.0000001;
+                vec3 optical_depth = vec3(0.0);
+
+                vec3 rayleigh_accum = vec3(0.0);
+                vec3 mie_accum = vec3(0.0);
+
+                for (float index_primary = 0.0; index_primary < STEP_COUNT; ++index_primary)
+                {
+                    vec3 step = origin + step_size * (index_primary + 0.5) * dir;
+                    float height = length(step) - base_radius;
+                    vec2 densities = exp(-height / vec2(rayleigh_max_height, mie_max_height)) * step_size;
+
+                    vec2 light_optical_depth = vec2(0.0);
+#if 0
+                    b = 2.0 * dot(light_dir, step);
+                    float c = dot(step, step) - (outer_radius*outer_radius);
+                    det = b*b - 4.0*c;
+
+                    float light_step_size = (-b + sqrt(det)) / (2.0 * STEP_COUNT_SECONDARY);
+                    for (float index_secondary = 0.0; index_secondary < STEP_COUNT_SECONDARY; ++index_secondary)
+                    {
+                        vec3 step_light = step + (index_secondary + 0.5) * light_step_size * light_dir;
+                        float height_light = length(step_light) - base_radius;
+                        vec2 densities_light =
+                            exp(-height_light / vec2(rayleigh_max_height, mie_max_height)) * light_step_size;
+                        light_optical_depth += densities_light;
+                    }
+#endif
+
+                    vec3 attenuation = exp(
+                        -rayleigh_scattering * (optical_depth.x + light_optical_depth.x)
+                        -mie_scattering * (optical_depth.y + light_optical_depth.y));
+
+                    rayleigh_accum += densities.x * attenuation;
+                    mie_accum += densities.y * attenuation;
+                }
+
+                vec3 opacity = exp(
+                    -rayleigh_scattering * optical_depth.x
+                    -mie_scattering * optical_depth.y);
+
+
+                const float g = 0.7;
+                float mu = dot(dir, light_dir);
+                float mumu = mu * mu;
+                float gg = g * g;
+                float phase_ray = 3.0 / (50.2654824574 /* (16 * pi) */) * (1.0 + mumu);
+                float phase_mie = 3.0 / (25.1327412287 /* (8 * pi) */) * ((1.0 - gg) * (mumu + 1.0)) / (pow(1.0 + gg - 2.0 * mu * g, 1.5) * (2.0 + gg));
+
+
+                vec3 color = (
+                    phase_ray * rayleigh_scattering * rayleigh_accum
+                    + phase_mie * mie_scattering * mie_accum
+                ) * 40.0;
+
+                //oFS_color = vec4(color, 1.0);
                 oFS_color = vec4(hit_t.xxx * 2.0, 1.0);
             }
         )";
