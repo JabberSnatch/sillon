@@ -89,6 +89,13 @@ struct MatrixBlock
     float padding[14];
 };
 
+struct SkyboxPushConstants
+{
+    numtk::mat4f projection;
+    numtk::mat4f view;
+    numtk::vec4f position;
+};
+
 RegionData::ChunkData DecodeChunk(mctk::MCAChunkData const& chunk_data)
 {
     using namespace mctk;
@@ -521,7 +528,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     VkPushConstantRange push_constant_range = {};
     push_constant_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     push_constant_range.offset = 0;
-    push_constant_range.size = sizeof(numtk::mat4f) * 2;
+    push_constant_range.size = sizeof(SkyboxPushConstants);
 
     pipeline_create.setLayoutCount = 0u;
     pipeline_create.pSetLayouts = nullptr;
@@ -887,12 +894,29 @@ void RenderResources(void* _pstate,
             layout(push_constant, std430) uniform PushConstant {
                 mat4 projection;
                 mat4 view;
+                vec4 position;
             };
 
             void main()
             {
-                vec3 dir = inverse(mat3(view)) * inverse(mat3(projection)) * iFS_csPosition;
-                oFS_color = vec4(dir * 0.5 + vec3(0.5), 1.0);
+                vec3 dir = normalize(inverse(mat3(view)) * inverse(mat3(projection)) * iFS_csPosition);
+
+                float base_radius = 6.371;
+                float outer_radius = 6.383;
+                float altitude = base_radius + position.y * 0.000001;
+
+                float alpha = acos(dir.y);
+                float b = 2.0*altitude*dir.y;
+                float det = b*b - (altitude*altitude - outer_radius*outer_radius);
+
+                if (det <= 0.0)
+                {
+                    oFS_color = vec4(dir * 0.5 + vec3(0.5), 1.0);
+                    return;
+                }
+
+                float hit_t = -b + sqrt(det);
+                oFS_color = vec4(hit_t.xxx * 2.0, 1.0);
             }
         )";
 
@@ -1037,17 +1061,17 @@ void Draw(void* _pstate,
     vkCmdBeginRenderPass(command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
     {
-        numtk::mat4f push_constants[2];
-        push_constants[0] = numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how);
-        push_constants[1] = _state->camera.Matrix();
+        SkyboxPushConstants push_constants = {};
+        push_constants.projection = numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how);
+        push_constants.view = _state->camera.Matrix();
+        push_constants.position = numtk::vec4f{ 0.f, 20.f, 0.f };
 
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->skybox_pipeline);
         vkCmdPushConstants(command_buffer, _state->skybox_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT,
-                           0, sizeof(numtk::mat4f) * 2, (void*)push_constants);
+                           0, sizeof(SkyboxPushConstants), (void*)&push_constants);
         vkCmdDraw(command_buffer, 3u, 1u, 0u, 0u);
     }
 
-#if 1
     vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->region_pipeline);
     for (uint32_t index = 0; index < 64; ++index)
     {
@@ -1061,7 +1085,6 @@ void Draw(void* _pstate,
         vkCmdDraw(command_buffer, 36u, 1u, 0u, 0u);
 
     }
-#endif
 
     vkCmdEndRenderPass(command_buffer);
 
