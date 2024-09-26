@@ -58,6 +58,8 @@ struct state_t
     //TurntableCamera camera;
     FlightCamera camera;
 
+    numtk::vec2f sun_spherical = { 0.f, 0.f };
+
     VkPipelineLayout region_pipeline_layout;
     VkPipeline region_pipeline;
     vktk::DescriptorPool descriptor_pool;
@@ -515,28 +517,41 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         CHECKCALL(vkAllocateDescriptorSets, _vulkan->device,
                   &descset_allocate, &_state->descriptor_set[index]);
 
-    VkPipelineLayoutCreateInfo pipeline_create{};
-    pipeline_create.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipeline_create.pNext = nullptr;
-    pipeline_create.flags = 0u;
-    pipeline_create.setLayoutCount = 1u;
-    pipeline_create.pSetLayouts = &_state->descriptor_pool.layout;
-    pipeline_create.pushConstantRangeCount = 0;
-    pipeline_create.pPushConstantRanges = nullptr;
-    CHECKCALL(vkCreatePipelineLayout, _vulkan->device, &pipeline_create, nullptr,
-              &_state->region_pipeline_layout);
+    {
+        VkPushConstantRange push_constant_range = {};
+        push_constant_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        push_constant_range.offset = 0;
+        push_constant_range.size = sizeof(numtk::vec3f);
 
-    VkPushConstantRange push_constant_range = {};
-    push_constant_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-    push_constant_range.offset = 0;
-    push_constant_range.size = sizeof(SkyboxPushConstants);
+        VkPipelineLayoutCreateInfo pipeline_create{};
+        pipeline_create.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipeline_create.pNext = nullptr;
+        pipeline_create.flags = 0u;
+        pipeline_create.setLayoutCount = 1u;
+        pipeline_create.pSetLayouts = &_state->descriptor_pool.layout;
+        pipeline_create.pushConstantRangeCount = 1;
+        pipeline_create.pPushConstantRanges = &push_constant_range;
+        CHECKCALL(vkCreatePipelineLayout, _vulkan->device, &pipeline_create, nullptr,
+                  &_state->region_pipeline_layout);
+    }
 
-    pipeline_create.setLayoutCount = 0u;
-    pipeline_create.pSetLayouts = nullptr;
-    pipeline_create.pushConstantRangeCount = 1;
-    pipeline_create.pPushConstantRanges = &push_constant_range;
-    CHECKCALL(vkCreatePipelineLayout, _vulkan->device, &pipeline_create, nullptr,
-              &_state->skybox_pipeline_layout);
+    {
+        VkPushConstantRange push_constant_range = {};
+        push_constant_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        push_constant_range.offset = 0;
+        push_constant_range.size = sizeof(SkyboxPushConstants);
+
+        VkPipelineLayoutCreateInfo pipeline_create{};
+        pipeline_create.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipeline_create.pNext = nullptr;
+        pipeline_create.flags = 0u;
+        pipeline_create.setLayoutCount = 0u;
+        pipeline_create.pSetLayouts = nullptr;
+        pipeline_create.pushConstantRangeCount = 1;
+        pipeline_create.pPushConstantRanges = &push_constant_range;
+        CHECKCALL(vkCreatePipelineLayout, _vulkan->device, &pipeline_create, nullptr,
+                  &_state->skybox_pipeline_layout);
+    }
 
     _state->staging_buffer = _vulkan->CreateBuffer(
         sizeof(MatrixBlock) * 64,
@@ -1056,6 +1071,20 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
     if (_input->key_down[iotk::eKey::kEscape])
         return false;
 
+    if (_input->button_down & iotk::fMouseButton::kRightBtn)
+    {
+        numtk::vec2<int32_t> last_position{ _past_input->cursor[0], _past_input->cursor[1] };
+        numtk::vec2<int32_t> position{ _input->cursor[0], _input->cursor[1] };
+        numtk::vec2<int32_t> delta = position - last_position;
+        _state->sun_spherical += numtk::vec2f{
+            0.01f * (float)delta.x(),
+            -0.01f * (float)delta.y(),
+        };
+
+        _state->sun_spherical.y() =
+            std::min(std::max(_state->sun_spherical.y(), -numtk::kPi*0.4999f), numtk::kPi*0.4999f);
+    }
+
     _state->camera.Update(_input, _past_input);
 
     return true;
@@ -1156,15 +1185,22 @@ void Draw(void* _pstate,
 
     vkCmdBeginRenderPass(command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
+    numtk::vec3f sun_dir{
+        std::cos(_state->sun_spherical[1]) * std::cos(_state->sun_spherical[0]),
+        std::sin(_state->sun_spherical[1]),
+        std::cos(_state->sun_spherical[1]) * std::sin(_state->sun_spherical[0])
+    };
+
     {
         SkyboxPushConstants push_constants = {};
         push_constants.projection = numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how);
         push_constants.view = _state->camera.Matrix();
         push_constants.position = numtk::vec4f{ 0.f, 20.f, 0.f };
-        push_constants.light_dir = numtk::vec3f{ -1.f, 2.f, 2.f }.normalise();
+        push_constants.light_dir = sun_dir;
 
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->skybox_pipeline);
-        vkCmdPushConstants(command_buffer, _state->skybox_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT,
+        vkCmdPushConstants(command_buffer, _state->skybox_pipeline_layout,
+                           VK_SHADER_STAGE_FRAGMENT_BIT,
                            0, sizeof(SkyboxPushConstants), (void*)&push_constants);
         vkCmdDraw(command_buffer, 3u, 1u, 0u, 0u);
     }
@@ -1172,12 +1208,14 @@ void Draw(void* _pstate,
     vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->region_pipeline);
     for (uint32_t index = 0; index < 64; ++index)
     {
-
         vkCmdBindDescriptorSets(command_buffer,
                                 VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 _state->region_pipeline_layout, 0u,
                                 1u, &_state->descriptor_set[index],
                                 0u, nullptr);
+        vkCmdPushConstants(command_buffer, _state->region_pipeline_layout,
+                           VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0, sizeof(numtk::vec3f), (void*)&sun_dir);
 
         vkCmdDraw(command_buffer, 36u, 1u, 0u, 0u);
 

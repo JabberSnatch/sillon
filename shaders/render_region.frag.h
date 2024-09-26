@@ -15,6 +15,10 @@ layout(std140, set = 0, binding = 1) uniform MatrixBlock {
     ivec2 screen_size;
 };
 
+layout(push_constant, std430) uniform PushConstants {
+    vec3 light_dir;
+};
+
 #define REGION_SIZE 32.0
 float SectionSize[5] = { 16.0, 8.0, 4.0, 2.0, 1.0 };
 
@@ -149,7 +153,7 @@ void main() {
     else
     {
         vec3 hit = root_org+dir*t; // UVW
-        vec3 sun_dir = normalize(vec3(-1.0, 2.0, 2.0));
+        vec3 sun_dir = light_dir;//normalize(vec3(-1.0, 2.0, 2.0));
 
         vec3 dummy = vec3(0.0);
 
