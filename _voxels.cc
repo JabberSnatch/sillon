@@ -94,6 +94,7 @@ struct SkyboxPushConstants
     numtk::mat4f projection;
     numtk::mat4f view;
     numtk::vec4f position;
+    numtk::vec3f light_dir;
 };
 
 RegionData::ChunkData DecodeChunk(mctk::MCAChunkData const& chunk_data)
@@ -895,42 +896,55 @@ void RenderResources(void* _pstate,
                 mat4 projection;
                 mat4 view;
                 vec4 position;
+                vec3 light_dir;
             };
 
-#if 0
             float RayleighPhase(float cos_th) {
-                return 3.0 * (1 + cos_th*cos_th);
+                return 3.0 * (1 + cos_th*cos_th) / (16.0 * 3.14159265);
+            }
+
+            float RayleighDensity(float h) {
+                return exp(-h/0.008);
             }
 
             float MiePhase(float cos_th) {
-                //const float g = 
+                const float g = 0.8;
+                // Henyey-Greenstein phase func
+                return (1 - g*g) / (pow(1 + g*g - 2*g*cos_th, 1.5) * 4 * 3.14159265);
             }
-#endif
+
+            float MieDensity(float h) {
+                return exp(-h/0.0012);
+            }
+
+            float OzonePhase() {
+                return 1 / (4.0 * 3.14159265);
+            }
+
+            float OzoneDensity(float h) {
+                return max(0.0, 1.0 - abs(h - 0.025)/0.015);
+            }
 
 #define STEP_COUNT 16.0
 #define STEP_COUNT_SECONDARY 8.0
             void main()
             {
-                const float base_radius = 6.371;
-                const float outer_radius = 6.453;
-                const float rayleigh_max_height = 0.008;
-                const vec3 rayleigh_scattering = vec3(5.5e-6, 1.3e-7, 2.2e-7);
-                const float mie_max_height = 0.001;
-                const vec3 mie_scattering = vec3(2.1e-7);
-#if 0
-                const float absorption_peak_height = 0.030;
-                const float absorption_falloff = 0.004;
-                const vec3 absorption = vec3(2.04e-5, 4.97e-5, 1.95e-6);
-#endif
+                const float base_radius = 6.360;
+                const float outer_radius = 6.460;
 
-                vec3 light_dir = normalize(vec3(-1.0, 2.0, 2.0));
+                const vec3 rayleigh_scattering = vec3(5.802e-6, 13.56e-6, 33.10e-6) * 1000000;
+                const float mie_scattering = 3.996e-6 * 1000000;
+                const float mie_absorption = 4.40e-6 * 1000000;
+                const vec3 ozone_absorption = vec3(0.65e-6, 1.881e-6, 0.085e-6) * 1000000;
+
+                //vec3 light_dir = normalize(vec3(-1.0, 2.0, 2.0));
                 vec3 dir = normalize(inverse(mat3(view)) * inverse(mat3(projection)) * iFS_csPosition);
                 float light_angle = dot(dir, light_dir);
 
                 float altitude = base_radius + position.y * 0.000001;
 
                 float b = 2.0*altitude*dir.y;
-                float det = b*b - (altitude*altitude - outer_radius*outer_radius);
+                float det = b*b - 4.0*(altitude*altitude - outer_radius*outer_radius);
 
                 if (det <= 0.0)
                 {
@@ -938,66 +952,67 @@ void RenderResources(void* _pstate,
                     return;
                 }
 
-                float hit_t = -b + sqrt(det);
+                float hit_t = (-b + sqrt(det)) / 2.0;
 
                 float step_size = hit_t / STEP_COUNT;
-                vec3 origin = vec3(0.0, base_radius, 0.0) + position.xyz * 0.0000001;
-                vec3 optical_depth = vec3(0.0);
+                vec3 origin = vec3(0.0, base_radius, 0.0) + position.xyz * 0.000001;
 
-                vec3 rayleigh_accum = vec3(0.0);
-                vec3 mie_accum = vec3(0.0);
+                vec3 rayleigh_extinction = vec3(0.0);
+                float mie_extinction = 0.0;
+                vec3 ozone_extinction = vec3(0.0);
+
+                vec3 inscattering = vec3(0.0);
 
                 for (float index_primary = 0.0; index_primary < STEP_COUNT; ++index_primary)
                 {
                     vec3 step = origin + step_size * (index_primary + 0.5) * dir;
-                    float height = length(step) - base_radius;
-                    vec2 densities = exp(-height / vec2(rayleigh_max_height, mie_max_height)) * step_size;
+                    float sample_height = length(step) - base_radius;
 
-                    vec2 light_optical_depth = vec2(0.0);
-#if 0
-                    b = 2.0 * dot(light_dir, step);
-                    float c = dot(step, step) - (outer_radius*outer_radius);
-                    det = b*b - 4.0*c;
+                    vec3 densities = vec3(
+                        RayleighDensity(sample_height),
+                        MieDensity(sample_height),
+                        OzoneDensity(sample_height)
+                    );
 
-                    float light_step_size = (-b + sqrt(det)) / (2.0 * STEP_COUNT_SECONDARY);
-                    for (float index_secondary = 0.0; index_secondary < STEP_COUNT_SECONDARY; ++index_secondary)
+                    vec3 sample_transmittance = exp(-rayleigh_extinction -mie_extinction.xxx -ozone_extinction);
+
+                    vec3 light_rayleigh_extinction = vec3(0.0);
+                    float light_mie_extinction = 0.0;
+                    vec3 light_ozone_extinction = vec3(0.0);
+
+                    b = 2.0*sample_height*dot(normalize(step), dir);
+                    det = b*b - 4.0*(sample_height*sample_height - outer_radius*outer_radius);
+                    hit_t = (-b + sqrt(det)) / 2.0;
+
+                    float light_step_size = hit_t / STEP_COUNT_SECONDARY;
+                    for (float index_light = 0.0; index_light < STEP_COUNT_SECONDARY; ++index_light)
                     {
-                        vec3 step_light = step + (index_secondary + 0.5) * light_step_size * light_dir;
-                        float height_light = length(step_light) - base_radius;
-                        vec2 densities_light =
-                            exp(-height_light / vec2(rayleigh_max_height, mie_max_height)) * light_step_size;
-                        light_optical_depth += densities_light;
+                        vec3 light_step = step + (index_light + 0.5) * light_step_size * light_dir;
+                        float light_height = length(light_step) - base_radius;
+
+                        vec3 light_densities = vec3(
+                            RayleighDensity(light_height),
+                            MieDensity(light_height),
+                            OzoneDensity(light_height)
+                        );
+
+                        light_rayleigh_extinction += densities.x * rayleigh_scattering * light_step_size;
+                        light_mie_extinction += densities.y * (mie_scattering + mie_absorption) * light_step_size;
+                        light_ozone_extinction += densities.z * ozone_absorption * light_step_size;
                     }
-#endif
 
-                    vec3 attenuation = exp(
-                        -rayleigh_scattering * (optical_depth.x + light_optical_depth.x)
-                        -mie_scattering * (optical_depth.y + light_optical_depth.y));
+                    inscattering += step_size * 900.0 *
+                        (densities.x * rayleigh_scattering * RayleighPhase(light_angle) * exp(-rayleigh_extinction) * exp(-light_rayleigh_extinction)
+                         + densities.y * mie_scattering.xxx * MiePhase(light_angle) * exp(-mie_extinction) * exp(-light_mie_extinction));
 
-                    rayleigh_accum += densities.x * attenuation;
-                    mie_accum += densities.y * attenuation;
+
+                    rayleigh_extinction += densities.x * rayleigh_scattering * step_size;
+                    mie_extinction += densities.y * (mie_scattering + mie_absorption) * step_size;
+                    ozone_extinction += densities.z * ozone_absorption * step_size;
                 }
 
-                vec3 opacity = exp(
-                    -rayleigh_scattering * optical_depth.x
-                    -mie_scattering * optical_depth.y);
-
-
-                const float g = 0.7;
-                float mu = dot(dir, light_dir);
-                float mumu = mu * mu;
-                float gg = g * g;
-                float phase_ray = 3.0 / (50.2654824574 /* (16 * pi) */) * (1.0 + mumu);
-                float phase_mie = 3.0 / (25.1327412287 /* (8 * pi) */) * ((1.0 - gg) * (mumu + 1.0)) / (pow(1.0 + gg - 2.0 * mu * g, 1.5) * (2.0 + gg));
-
-
-                vec3 color = (
-                    phase_ray * rayleigh_scattering * rayleigh_accum
-                    + phase_mie * mie_scattering * mie_accum
-                ) * 40.0;
-
-                //oFS_color = vec4(color, 1.0);
-                oFS_color = vec4(hit_t.xxx * 2.0, 1.0);
+                oFS_color = vec4(inscattering, 1.0);
+                //oFS_color = vec4(hit_t.xxx * 2.0, 1.0);
             }
         )";
 
@@ -1146,6 +1161,7 @@ void Draw(void* _pstate,
         push_constants.projection = numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how);
         push_constants.view = _state->camera.Matrix();
         push_constants.position = numtk::vec4f{ 0.f, 20.f, 0.f };
+        push_constants.light_dir = numtk::vec3f{ -1.f, 2.f, 2.f }.normalise();
 
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->skybox_pipeline);
         vkCmdPushConstants(command_buffer, _state->skybox_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT,
