@@ -968,16 +968,19 @@ void RenderResources(void* _pstate,
                 vec3 dir = normalize(inverse(mat3(view)) * inverse(mat3(projection)) * iFS_csPosition);
                 float light_angle = dot(dir, light_dir);
 
-                float altitude = base_radius + position.y * 0.000001;
+                vec3 origin = vec3(0.0, base_radius, 0.0) + position.xyz * 0.000001;
+                float altitude = origin.y;
 
-                vec3 primary_ground_hit = CircleIntersection(base_radius, altitude, dir.y);
+                vec3 primary_ground_hit =
+                    CircleIntersection(base_radius, altitude, dir.y);
                 if (primary_ground_hit.x > 0.0)
                 {
                     oFS_color = vec4(vec3(0.1), 1.0);
                     return;
                 }
 
-                vec3 primary_atmosphere_hit = CircleIntersection(outer_radius, altitude, dir.y);
+                vec3 primary_atmosphere_hit =
+                    CircleIntersection(outer_radius, altitude, dir.y);
                 if (primary_atmosphere_hit.x <= 0.0)
                 {
                     oFS_color = vec4(dir * 0.5 + vec3(0.5), 1.0);
@@ -985,7 +988,6 @@ void RenderResources(void* _pstate,
                 }
 
                 float step_size = primary_atmosphere_hit.z / STEP_COUNT;
-                vec3 origin = vec3(0.0, base_radius, 0.0) + position.xyz * 0.000001;
 
                 vec3 optical_depths = vec3(0.0);
                 vec3 inscattering = vec3(0.0);
@@ -1005,10 +1007,10 @@ void RenderResources(void* _pstate,
                     vec3 light_optical_depths = vec3(0.0);
 
                     vec3 secondary_atmosphere_hit =
-                        CircleIntersection(outer_radius, sample_height, dot(normalize(step), dir));
+                        CircleIntersection(outer_radius, sample_height, dot(normalize(step), light_dir));
 
                     vec3 secondary_ground_hit =
-                        CircleIntersection(base_radius, sample_height, dot(normalize(step), dir));
+                        CircleIntersection(base_radius, sample_height, dot(normalize(step), light_dir));
                     if (secondary_ground_hit.x <= 0.0)
                         continue;
 
@@ -1330,7 +1332,7 @@ void TurntableCamera::Update(iotk::input_t const* _input,
 
     if (_input->button_down & iotk::fMouseButton::kRightBtn)
     {
-        y_offset += 0.01f * (float)(_input->cursor[1] -  _past_input->cursor[1]);
+        y_offset += 0.0005f * (float)(_input->cursor[1] -  _past_input->cursor[1]);
     }
 
     {
