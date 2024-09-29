@@ -987,10 +987,7 @@ void RenderResources(void* _pstate,
                 float step_size = primary_atmosphere_hit.z / STEP_COUNT;
                 vec3 origin = vec3(0.0, base_radius, 0.0) + position.xyz * 0.000001;
 
-                vec3 rayleigh_extinction = vec3(0.0);
-                float mie_extinction = 0.0;
-                vec3 ozone_extinction = vec3(0.0);
-
+                vec3 optical_depths = vec3(0.0);
                 vec3 inscattering = vec3(0.0);
 
                 for (float index_primary = 0.0; index_primary < STEP_COUNT; ++index_primary)
@@ -1003,10 +1000,9 @@ void RenderResources(void* _pstate,
                         MieDensity(sample_height),
                         OzoneDensity(sample_height)
                     );
+                    vec3 optical_step = densities * step_size;
 
-                    vec3 light_rayleigh_extinction = vec3(0.0);
-                    float light_mie_extinction = 0.0;
-                    vec3 light_ozone_extinction = vec3(0.0);
+                    vec3 light_optical_depths = vec3(0.0);
 
                     vec3 secondary_atmosphere_hit =
                         CircleIntersection(outer_radius, sample_height, dot(normalize(step), dir));
@@ -1028,24 +1024,32 @@ void RenderResources(void* _pstate,
                             OzoneDensity(light_height)
                         );
 
-                        light_rayleigh_extinction += light_densities.x * rayleigh_scattering * light_step_size;
-                        light_mie_extinction += light_densities.y * (mie_scattering + mie_absorption) * light_step_size;
-                        light_ozone_extinction += light_densities.z * ozone_absorption * light_step_size;
+                        light_optical_depths += light_densities * light_step_size;
                     }
 
-                    inscattering += step_size * 40.0 *
-                        (densities.x*rayleigh_scattering * RayleighPhase(light_angle) * exp(-rayleigh_extinction) * exp(-light_rayleigh_extinction)
-                         + densities.y * mie_scattering.xxx * MiePhase(light_angle) * exp(-mie_extinction) * exp(-light_mie_extinction));
+                    vec3 current_depths = optical_depths + light_optical_depths;
+                    vec3 transmittance = exp(
+                        -rayleigh_scattering * current_depths.x
+                        -(mie_scattering+mie_absorption).xxx * current_depths.y
+                        -ozone_absorption * current_depths.z);
 
-                    rayleigh_extinction += densities.x * rayleigh_scattering * step_size;
-                    mie_extinction += densities.y * (mie_scattering + mie_absorption) * step_size;
-                    ozone_extinction += densities.z * ozone_absorption * step_size;
+                    vec3 rayleigh_transmittance = densities.x * transmittance;
+                    vec3 mie_transmittance = densities.y * transmittance;
+
+                    inscattering += 40.0 * step_size *
+                        (rayleigh_scattering * RayleighPhase(light_angle) * rayleigh_transmittance
+                         + mie_scattering * MiePhase(light_angle) * mie_transmittance);
+
+                    optical_depths += densities * step_size;
                 }
 
                 vec3 sky_color = vec3(1.0) - exp(-1.0 * inscattering);
                 oFS_color = vec4(sky_color, 1.0);
-                //oFS_color = vec4(MiePhase(light_angle).xxx * 0.5 + 0.5, 1.0);
+                if (sky_color != sky_color)
+                    oFS_color = vec4(1.0, 0.0, 1.0, 1.0);
+                //oFS_color = vec4(RayleighPhase(light_angle).xxx * 0.5 + 0.5, 1.0);
                 //oFS_color = vec4(dot(sky_color, vec3(1.0/3.0)).xxx, 1.0);
+                //oFS_color = vec4(inscattering, 1.0);
             }
         )";
 
