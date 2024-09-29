@@ -940,6 +940,17 @@ void RenderResources(void* _pstate,
                 return max(0.0, 1.0 - abs(h - 0.025)/0.015);
             }
 
+            vec3 CircleIntersection(float radius, float org_height, float ray_polar)
+            {
+                float b = org_height * ray_polar;
+                float det = b*b - (org_height*org_height - radius*radius);
+                float sqrt_det = sqrt(det);
+                vec3 result = vec3(det, -b - sqrt_det, -b + sqrt_det);
+                if (result.x > 0.0 && result.y < 0.0 && result.z < 0.0)
+                    result.x = -result.x;
+                return result;
+            }
+
 #define STEP_COUNT 16.0
 #define STEP_COUNT_SECONDARY 8.0
             void main()
@@ -947,29 +958,33 @@ void RenderResources(void* _pstate,
                 const float base_radius = 6.360;
                 const float outer_radius = 6.460;
 
-                const vec3 rayleigh_scattering = vec3(5.802e-6, 13.56e-6, 33.10e-6) * 1000000;
-                const float mie_scattering = 3.996e-6 * 1000000;
-                const float mie_absorption = 4.40e-6 * 1000000;
-                const vec3 ozone_absorption = vec3(0.65e-6, 1.881e-6, 0.085e-6) * 1000000;
+                const float scale_factor = 1000000;
 
-                //vec3 light_dir = normalize(vec3(-1.0, 2.0, 2.0));
+                const vec3 rayleigh_scattering = vec3(5.802e-6, 13.56e-6, 33.10e-6) * scale_factor;
+                const float mie_scattering = 3.996e-6 * scale_factor;
+                const float mie_absorption = 4.40e-6 * scale_factor;
+                const vec3 ozone_absorption = vec3(0.65e-6, 1.881e-6, 0.085e-6) * scale_factor;
+
                 vec3 dir = normalize(inverse(mat3(view)) * inverse(mat3(projection)) * iFS_csPosition);
                 float light_angle = dot(dir, light_dir);
 
                 float altitude = base_radius + position.y * 0.000001;
 
-                float b = 2.0*altitude*dir.y;
-                float det = b*b - 4.0*(altitude*altitude - outer_radius*outer_radius);
+                vec3 primary_ground_hit = CircleIntersection(base_radius, altitude, dir.y);
+                if (primary_ground_hit.x > 0.0)
+                {
+                    oFS_color = vec4(vec3(0.1), 1.0);
+                    return;
+                }
 
-                if (det <= 0.0)
+                vec3 primary_atmosphere_hit = CircleIntersection(outer_radius, altitude, dir.y);
+                if (primary_atmosphere_hit.x <= 0.0)
                 {
                     oFS_color = vec4(dir * 0.5 + vec3(0.5), 1.0);
                     return;
                 }
 
-                float hit_t = (-b + sqrt(det)) / 2.0;
-
-                float step_size = hit_t / STEP_COUNT;
+                float step_size = primary_atmosphere_hit.z / STEP_COUNT;
                 vec3 origin = vec3(0.0, base_radius, 0.0) + position.xyz * 0.000001;
 
                 vec3 rayleigh_extinction = vec3(0.0);
@@ -989,17 +1004,19 @@ void RenderResources(void* _pstate,
                         OzoneDensity(sample_height)
                     );
 
-                    vec3 sample_transmittance = exp(-rayleigh_extinction -mie_extinction.xxx -ozone_extinction);
-
                     vec3 light_rayleigh_extinction = vec3(0.0);
                     float light_mie_extinction = 0.0;
                     vec3 light_ozone_extinction = vec3(0.0);
 
-                    b = 2.0*sample_height*dot(normalize(step), dir);
-                    det = b*b - 4.0*(sample_height*sample_height - outer_radius*outer_radius);
-                    hit_t = (-b + sqrt(det)) / 2.0;
+                    vec3 secondary_atmosphere_hit =
+                        CircleIntersection(outer_radius, sample_height, dot(normalize(step), dir));
 
-                    float light_step_size = hit_t / STEP_COUNT_SECONDARY;
+                    vec3 secondary_ground_hit =
+                        CircleIntersection(base_radius, sample_height, dot(normalize(step), dir));
+                    if (secondary_ground_hit.x <= 0.0)
+                        continue;
+
+                    float light_step_size = secondary_atmosphere_hit.z / STEP_COUNT_SECONDARY;
                     for (float index_light = 0.0; index_light < STEP_COUNT_SECONDARY; ++index_light)
                     {
                         vec3 light_step = step + (index_light + 0.5) * light_step_size * light_dir;
@@ -1011,23 +1028,24 @@ void RenderResources(void* _pstate,
                             OzoneDensity(light_height)
                         );
 
-                        light_rayleigh_extinction += densities.x * rayleigh_scattering * light_step_size;
-                        light_mie_extinction += densities.y * (mie_scattering + mie_absorption) * light_step_size;
-                        light_ozone_extinction += densities.z * ozone_absorption * light_step_size;
+                        light_rayleigh_extinction += light_densities.x * rayleigh_scattering * light_step_size;
+                        light_mie_extinction += light_densities.y * (mie_scattering + mie_absorption) * light_step_size;
+                        light_ozone_extinction += light_densities.z * ozone_absorption * light_step_size;
                     }
 
-                    inscattering += step_size * 900.0 *
-                        (densities.x * rayleigh_scattering * RayleighPhase(light_angle) * exp(-rayleigh_extinction) * exp(-light_rayleigh_extinction)
+                    inscattering += step_size * 40.0 *
+                        (densities.x*rayleigh_scattering * RayleighPhase(light_angle) * exp(-rayleigh_extinction) * exp(-light_rayleigh_extinction)
                          + densities.y * mie_scattering.xxx * MiePhase(light_angle) * exp(-mie_extinction) * exp(-light_mie_extinction));
-
 
                     rayleigh_extinction += densities.x * rayleigh_scattering * step_size;
                     mie_extinction += densities.y * (mie_scattering + mie_absorption) * step_size;
                     ozone_extinction += densities.z * ozone_absorption * step_size;
                 }
 
-                oFS_color = vec4(inscattering, 1.0);
-                //oFS_color = vec4(hit_t.xxx * 2.0, 1.0);
+                vec3 sky_color = vec3(1.0) - exp(-1.0 * inscattering);
+                oFS_color = vec4(sky_color, 1.0);
+                //oFS_color = vec4(MiePhase(light_angle).xxx * 0.5 + 0.5, 1.0);
+                //oFS_color = vec4(dot(sky_color, vec3(1.0/3.0)).xxx, 1.0);
             }
         )";
 
