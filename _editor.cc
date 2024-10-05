@@ -208,6 +208,10 @@ void RenderResources(void* _pstate,
                 { cursor_vertex, VK_SHADER_STAGE_VERTEX_BIT },
                 { cursor_fragment, VK_SHADER_STAGE_FRAGMENT_BIT }
             },
+            {
+                { vktk::DepthTestEnable, VK_FALSE },
+                { vktk::DepthWriteEnable, VK_FALSE }
+            },
             VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
             {}
             );
@@ -324,6 +328,9 @@ void TurntableCamera::Update(iotk::input_t const* _input,
             0.01f * (float)delta.y(),
             0.f
         };
+
+        spherical_coordinates.y() =
+            std::min(std::max(spherical_coordinates.y(), -numtk::kPi*0.4999f), numtk::kPi*0.4999f);
     }
 
     {

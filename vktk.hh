@@ -213,6 +213,12 @@ struct CommandBuffer {
     void End();
 };
 
+enum StateOverrideTag {
+    CullMode,
+    DepthTestEnable,
+    DepthWriteEnable,
+};
+
 struct Context
 {
     Context(uint64_t _hinstance, uint64_t _hwindow);
@@ -260,6 +266,22 @@ struct Context
     VkPipeline CreatePipeline(VkPipelineLayout _layout,
                               VkRenderPass _renderPass,
                               std::vector<PipelineStage> const& _stages,
+                              VkPrimitiveTopology _topology,
+                              std::vector<VertexInput> const& _input);
+
+    struct StateOverride {
+        StateOverrideTag tag;
+        union DataUnion {
+            VkCullModeFlags cull_mode;
+            VkBool32 depth_test_enable;
+            VkBool32 depth_write_enable;
+        } state;
+    };
+
+    VkPipeline CreatePipeline(VkPipelineLayout _layout,
+                              VkRenderPass _renderPass,
+                              std::vector<PipelineStage> const& _stages,
+                              std::vector<StateOverride> const& _states,
                               VkPrimitiveTopology _topology,
                               std::vector<VertexInput> const& _input);
 

@@ -866,6 +866,59 @@ VkPipeline Context::CreatePipeline(VkPipelineLayout _layout,
                                    VkPrimitiveTopology _topology,
                                    std::vector<VertexInput> const& _input)
 {
+    return CreatePipeline(_layout, _renderPass, _stages, {}, _topology, _input);
+}
+
+#define VKTK_DYNAMIC_STATES(x)                                          \
+    x(StateOverrideTag::CullMode, cull_mode, VK_CULL_MODE_BACK_BIT) \
+    x(StateOverrideTag::DepthTestEnable, depth_test_enable, VK_TRUE)    \
+    x(StateOverrideTag::DepthWriteEnable, depth_write_enable, VK_TRUE)
+
+template <StateOverrideTag tag>
+struct StateOverrideTagTraits {
+    using ValueType = nullptr_t;
+    static constexpr ValueType DefaultValue = nullptr;
+    static inline ValueType Context::StateOverride::DataUnion::* MemberPointer = nullptr;
+};
+
+#define GENERATE_TRAITS(tag, member, default_value) \
+    template <> struct StateOverrideTagTraits<tag> {\
+        using ValueType = decltype(std::declval<Context::StateOverride>().state.##member); \
+        static constexpr ValueType DefaultValue = default_value;\
+        static inline ValueType Context::StateOverride::DataUnion::* const MemberPointer \
+        = &Context::StateOverride::DataUnion::##member;                 \
+    };                                                                  \
+
+VKTK_DYNAMIC_STATES(GENERATE_TRAITS)
+
+#undef GENERATE_TRAITS
+#undef VKTK_DYNAMIC_STATES
+
+template <StateOverrideTag tag>
+static StateOverrideTagTraits<tag>::ValueType
+DynamicStateLookup(std::unordered_map<StateOverrideTag, Context::StateOverride> const& states)
+{
+    if constexpr (std::is_same_v<typename StateOverrideTagTraits<tag>::ValueType, nullptr_t>)
+        return nullptr;
+    else
+        return (!states.count(tag)
+                ? StateOverrideTagTraits<tag>::DefaultValue
+                : states.at(tag).state.*StateOverrideTagTraits<tag>::MemberPointer);
+}
+
+VkPipeline Context::CreatePipeline(VkPipelineLayout _layout,
+                                   VkRenderPass _renderPass,
+                                   std::vector<PipelineStage> const& _stages,
+                                   std::vector<StateOverride> const& _states,
+                                   VkPrimitiveTopology _topology,
+                                   std::vector<VertexInput> const& _input)
+{
+
+    std::unordered_map<StateOverrideTag, StateOverride> states = {};
+    for (StateOverride const& state : _states)
+        states[state.tag] = state;
+#define STATE_OVERRIDE(key) DynamicStateLookup<key>(states)
+
     std::vector<VkPipelineShaderStageCreateInfo> shader_stages{};
     shader_stages.reserve(_stages.size());
 
@@ -889,7 +942,7 @@ VkPipeline Context::CreatePipeline(VkPipelineLayout _layout,
     rasterizationState.depthClampEnable = VK_FALSE;
     rasterizationState.rasterizerDiscardEnable = VK_FALSE;
     rasterizationState.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
+    rasterizationState.cullMode = STATE_OVERRIDE(StateOverrideTag::CullMode);
     rasterizationState.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizationState.depthBiasEnable = VK_FALSE;
     rasterizationState.depthBiasConstantFactor = 0.f;
@@ -940,13 +993,13 @@ VkPipeline Context::CreatePipeline(VkPipelineLayout _layout,
     inputAssemblyState.topology = _topology;
     inputAssemblyState.primitiveRestartEnable = VK_FALSE;
 
-    VkDynamicState states[2] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    VkDynamicState dynamic_states[2] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
     VkPipelineDynamicStateCreateInfo dynamicState{};
     dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
     dynamicState.pNext = nullptr;
     dynamicState.flags = 0u;
     dynamicState.dynamicStateCount = 2u;
-    dynamicState.pDynamicStates = states;
+    dynamicState.pDynamicStates = dynamic_states;
 
     VkPipelineColorBlendAttachmentState blendAttachmentState{};
     blendAttachmentState.blendEnable = VK_TRUE;
@@ -996,8 +1049,8 @@ VkPipeline Context::CreatePipeline(VkPipelineLayout _layout,
     depthStencilState.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     depthStencilState.pNext = nullptr;
     depthStencilState.flags = 0;
-    depthStencilState.depthTestEnable = VK_TRUE;
-    depthStencilState.depthWriteEnable = VK_TRUE;
+    depthStencilState.depthTestEnable = STATE_OVERRIDE(StateOverrideTag::DepthTestEnable);
+    depthStencilState.depthWriteEnable = STATE_OVERRIDE(StateOverrideTag::DepthWriteEnable);
     depthStencilState.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
     depthStencilState.depthBoundsTestEnable = VK_FALSE;
     depthStencilState.stencilTestEnable = VK_FALSE;
@@ -1032,6 +1085,8 @@ VkPipeline Context::CreatePipeline(VkPipelineLayout _layout,
               1u, &createPipeline, nullptr, &graphics_pipeline);
 
     return graphics_pipeline;
+
+#undef STATE_OVERRIDE
 }
 
 Swapchain Context::CreateSwapchain(uint32_t const _size[2])
