@@ -20,8 +20,9 @@ struct TurntableCamera
 
 struct state_t
 {
+    static constexpr int32_t kGridSize = 8;
     TurntableCamera camera;
-    numtk::vec3<int32_t> cursor_coordinates = { 0, 0, 0 };
+    numtk::vec3<int32_t> cursor_coordinates = { kGridSize/2, kGridSize/2, kGridSize/2 };
 
     VkPipelineLayout grid_pipeline_layout;
     VkPipeline grid_pipeline;
@@ -43,10 +44,20 @@ void ConstantResources(void* _pstate,
     state_t* _state = (state_t*)_pstate;
 
     {
-        VkPushConstantRange push_constant_range = {};
-        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-        push_constant_range.offset = 0;
-        push_constant_range.size = sizeof(numtk::mat4f) * 2;
+        VkPushConstantRange pc_ranges[2];
+        {
+            VkPushConstantRange& push_constant_range = pc_ranges[0];
+            push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+            push_constant_range.offset = 0;
+            push_constant_range.size = sizeof(numtk::mat4f) * 2;
+        }
+
+        {
+            VkPushConstantRange& push_constant_range = pc_ranges[1];
+            push_constant_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+            push_constant_range.offset = sizeof(numtk::mat4f) * 2;
+            push_constant_range.size = sizeof(float);
+        }
 
         VkPipelineLayoutCreateInfo pipeline_create{};
         pipeline_create.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -54,8 +65,8 @@ void ConstantResources(void* _pstate,
         pipeline_create.flags = 0u;
         pipeline_create.setLayoutCount = 0u;
         pipeline_create.pSetLayouts = nullptr;
-        pipeline_create.pushConstantRangeCount = 1;
-        pipeline_create.pPushConstantRanges = &push_constant_range;
+        pipeline_create.pushConstantRangeCount = 2;
+        pipeline_create.pPushConstantRanges = pc_ranges;
         CHECKCALL(vkCreatePipelineLayout, _vulkan->device, &pipeline_create, nullptr,
                   &_state->grid_pipeline_layout);
     }
@@ -117,8 +128,12 @@ void RenderResources(void* _pstate,
             layout(location = 0) in vec2 iFS_texCoords;
             layout(location = 0) out vec4 oFS_color;
 
+            layout(push_constant, std430) uniform PushConstants{
+                layout(offset = 128) float grid_size;
+            };
+
             void main() {
-                vec2 grid_distance = abs(fract((iFS_texCoords * 16.0)) - vec2(0.5));
+                vec2 grid_distance = abs(fract((iFS_texCoords * grid_size)) - vec2(0.5));
 
                 vec2 grid_value_0_split = max((grid_distance - 0.45), vec2(0.0)) * 10.0;
                 float grid_value_0 = min(dot(pow(grid_value_0_split, vec2(0.7)), vec2(1.0)), 1.0);
@@ -240,13 +255,17 @@ void Draw(void* _pstate,
     numtk::mat4f view = _state->camera.View();
 
     {
-        numtk::mat4f push_constants[2];
-        push_constants[0] = projection;
-        push_constants[1] = view;
+        numtk::mat4f pc_matrices[2];
+        pc_matrices[0] = projection;
+        pc_matrices[1] = view;
+
+        float pc_grid_size = (float)state_t::kGridSize;
 
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->grid_pipeline);
         vkCmdPushConstants(command_buffer, _state->grid_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT,
-                           0, sizeof(numtk::mat4f) * 2, (void*)push_constants);
+                           0, sizeof(numtk::mat4f) * 2, (void*)pc_matrices);
+        vkCmdPushConstants(command_buffer, _state->grid_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT,
+                           sizeof(numtk::mat4f) * 2, sizeof(float), (void*)&pc_grid_size);
         vkCmdDraw(command_buffer, 36u, 1u, 0u, 0u);
     }
 
@@ -258,7 +277,7 @@ void Draw(void* _pstate,
             (float)_state->cursor_coordinates.x(),
             (float)_state->cursor_coordinates.y(),
             (float)_state->cursor_coordinates.z(),
-            16.f };
+            (float)state_t::kGridSize };
 
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->cursor_pipeline);
         vkCmdPushConstants(command_buffer, _state->grid_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT,
@@ -339,9 +358,9 @@ bool Update(void* _pstate,
         cursor_delta -= cursor_forward;
 
     _state->cursor_coordinates += cursor_delta;
-    _state->cursor_coordinates.x() = std::min(std::max(_state->cursor_coordinates.x(), 0), 16);
-    _state->cursor_coordinates.y() = std::min(std::max(_state->cursor_coordinates.y(), 0), 16);
-    _state->cursor_coordinates.z() = std::min(std::max(_state->cursor_coordinates.z(), 0), 16);
+    _state->cursor_coordinates.x() = std::min(std::max(_state->cursor_coordinates.x(), 0), state_t::kGridSize);
+    _state->cursor_coordinates.y() = std::min(std::max(_state->cursor_coordinates.y(), 0), state_t::kGridSize);
+    _state->cursor_coordinates.z() = std::min(std::max(_state->cursor_coordinates.z(), 0), state_t::kGridSize);
 
     _state->camera.Update(_input, _past_input);
 
