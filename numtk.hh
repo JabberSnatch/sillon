@@ -27,9 +27,9 @@ struct vec2 : public std::array<scalar, 2>
     scalar const& y() const { return static_cast<scalar const&>(const_cast<vec2*>(this)->y()); }
 
     vec2 operator+(vec2 const& o) const { return { x()+o.x(), y()+o.y() }; }
-    vec2 operator+=(vec2 const& o) { x()+=o.x(); y()+=o.y(); return *this; }
+    vec2& operator+=(vec2 const& o) { x()+=o.x(); y()+=o.y(); return *this; }
     vec2 operator-(vec2 const& o) const { return { x()-o.x(), y()-o.y() }; }
-    vec2 operator-=(vec2 const& o) { x()-=o.x(); y()-=o.y(); return *this; }
+    vec2& operator-=(vec2 const& o) { x()-=o.x(); y()-=o.y(); return *this; }
     vec2 operator*(vec2 const& o) const { return { x()*o.x(), y()*o.y() }; }
     vec2 operator*(scalar s) const { return { x()*s, y()*s }; }
     vec2 operator/(vec2 const& o) const { return { x()/o.x(), y()/o.y() }; }
@@ -39,6 +39,7 @@ struct vec2 : public std::array<scalar, 2>
     float sqrnorm() const { return dot(*this); }
     float norm() const { return std::sqrt(sqrnorm()); }
     vec2 normalise() const { return *this / norm(); }
+    vec2 abs() const { return { std::abs(x()), std::abs(y()) }; }
 };
 
 template <typename scalar>
@@ -55,9 +56,9 @@ struct vec3 : public std::array<scalar, 3>
     scalar const& z() const { return static_cast<scalar const&>(const_cast<vec3*>(this)->z()); }
 
     vec3 operator+(vec3 const& o) const { return { x()+o.x(), y()+o.y(), z()+o.z() }; }
-    vec3 operator+=(vec3 const& o) { x()+=o.x(); y()+=o.y(); z()+=o.z(); return *this; }
+    vec3& operator+=(vec3 const& o) { x()+=o.x(); y()+=o.y(); z()+=o.z(); return *this; }
     vec3 operator-(vec3 const& o) const { return { x()-o.x(), y()-o.y(), z()-o.z() }; }
-    vec3 operator-=(vec3 const& o) { x()-=o.x(); y()-=o.y(); z()-=o.z(); return *this; }
+    vec3& operator-=(vec3 const& o) { x()-=o.x(); y()-=o.y(); z()-=o.z(); return *this; }
     vec3 operator*(vec3 const& o) const { return { x()*o.x(), y()*o.y(), z()*o.z() }; }
     vec3 operator*(scalar s) const { return { x()*s, y()*s, z()*s }; }
     vec3 operator/(vec3 const& o) const { return { x()/o.x(), y()/o.y(), z()/o.z() }; }
@@ -67,6 +68,7 @@ struct vec3 : public std::array<scalar, 3>
     float sqrnorm() const { return dot(*this); }
     float norm() const { return std::sqrt(sqrnorm()); }
     vec3 normalise() const { return *this / norm(); }
+    vec3 abs() const { return { std::abs(x()), std::abs(y()), std::abs(z()) }; }
 
     vec3 cross(vec3 const& o) const {
         std::array<scalar, 3> const& data = *(std::array<scalar, 3> const*)this;
@@ -104,6 +106,7 @@ struct vec4 : public std::array<scalar, 4>
     float sqrnorm() const { return dot(*this); }
     float norm() const { return std::sqrt(sqrnorm()); }
     vec4 normalise() const { return *this * norm(); }
+    vec4 abs() const { return { std::abs(x()), std::abs(y()), std::abs(z()), std::abs(w()) }; }
 };
 
 template <typename scalar>
@@ -195,6 +198,18 @@ struct mat4 : public std::array<scalar, 16>
 template <typename scalar>
 struct quat : public std::array<scalar, 4>
 {
+    scalar& real() { return this->operator[](0); }
+    scalar& i() { return this->operator[](1); }
+    scalar& j() { return this->operator[](2); }
+    scalar& k() { return this->operator[](3); }
+
+    scalar const& real() const { return static_cast<scalar const&>(const_cast<quat*>(this)->real()); }
+    scalar const& i() const { return static_cast<scalar const&>(const_cast<quat*>(this)->i()); }
+    scalar const& j() const { return static_cast<scalar const&>(const_cast<quat*>(this)->j()); }
+    scalar const& k() const { return static_cast<scalar const&>(const_cast<quat*>(this)->k()); }
+
+    static quat Identity() { return { 1.f, 0.f, 0.f, 0.f }; }
+
     static quat AngleAxis(scalar _angle, numtk::vec3<scalar> const& _axis)
     {
         scalar const half_angle = _angle / 2;
@@ -219,6 +234,19 @@ struct quat : public std::array<scalar, 4>
             data[0]*o[2] - data[1]*o[3] + data[2]*o[0] + data[3]*o[1],
             data[0]*o[3] + data[1]*o[2] - data[2]*o[1] + data[3]*o[0]
         };
+    }
+
+    quat& operator*=(quat const& o) {
+        *this = *this * o;
+        return *this;
+    }
+
+    template <typename vscalar>
+    vec3<vscalar> operator*(vec3<vscalar> const& v) const {
+        // https://blog.molecular-matters.com/2013/05/24/a-faster-quaternion-vector-multiplication/
+        vec3<vscalar> t = 2.f * ((vec3<scalar> const*)&(this->i()))->cross(v);
+        vec3<vscalar> r = v + real() * t + ((vec3<scalar> const*)&(this->i()))->cross(t);
+        return r;
     }
 };
 

@@ -14,7 +14,8 @@ struct TurntableCamera
 
     void Update(iotk::input_t const* _input,
                 iotk::input_t const* _past_input);
-    numtk::mat4f Matrix() const;
+    numtk::quatf Basis() const;
+    numtk::mat4f View() const;
 };
 
 struct state_t
@@ -166,11 +167,11 @@ void RenderResources(void* _pstate,
                 };
 
                 void main() {
-                    vec3 view_main = abs(inverse(mat3(view_model)) * inverse(mat3(projection)) * vec3(0.0, 0.0, 1.0));
+                    vec3 view_dir = abs(inverse(mat3(view_model)) * inverse(mat3(projection)) * vec3(0.0, 0.0, 1.0));
                     int index = 0;
-                    if (view_main[index] < view_main[1])
+                    if (view_dir[index] < view_dir[1])
                         index = 1;
-                    if (view_main[index] < view_main[2])
+                    if (view_dir[index] < view_dir[2])
                         index = 2;
 
                     vec3 selection = vec3(1.0);
@@ -212,9 +213,7 @@ void RenderResources(void* _pstate,
                 { vktk::DepthTestEnable, VK_FALSE },
                 { vktk::DepthWriteEnable, VK_FALSE }
             },
-            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-            {}
-            );
+            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, {} );
 
         vkDestroyShaderModule(_vulkan->device, cursor_vertex, nullptr);
         vkDestroyShaderModule(_vulkan->device, cursor_fragment, nullptr);
@@ -238,7 +237,7 @@ void Draw(void* _pstate,
                                    { { 0.13f, 0.18f, 0.24f, 0.f }, { 1.f, 0.f, 0.f, 0.f } });
 
     numtk::mat4f projection = numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how);
-    numtk::mat4f view = _state->camera.Matrix();
+    numtk::mat4f view = _state->camera.View();
 
     {
         numtk::mat4f push_constants[2];
@@ -299,18 +298,52 @@ bool Update(void* _pstate,
 {
     state_t* _state = (state_t*)_pstate;
 
-    _state->camera.Update(_input, _past_input);
+    numtk::quatf camera_basis = _state->camera.Basis();
+    numtk::vec3f camera_left = camera_basis * numtk::vec3f{ 1.f, 0.f, 0.f };
+    numtk::vec3f camera_up = camera_basis * numtk::vec3f{ 0.f, 1.f, 0.f };
+
+    numtk::vec3<int32_t> cursor_left = {};
+    {
+        int index = 0;
+        if (std::abs(camera_left[index]) < std::abs(camera_left[1]))
+            index = 1;
+        if (std::abs(camera_left[index]) < std::abs(camera_left[2]))
+            index = 2;
+        cursor_left[index] = camera_left[index] < 0.f ? -1 : 1;
+    }
+
+    numtk::vec3<int32_t> cursor_up = {};
+    {
+        int index = 0;
+        if (std::abs(camera_up[index]) < std::abs(camera_up[1]))
+            index = 1;
+        if (std::abs(camera_up[index]) < std::abs(camera_up[2]))
+            index = 2;
+        cursor_up[index] = camera_up[index] < 0.f ? -1 : 1;
+    }
+
+    numtk::vec3<int32_t> cursor_forward = cursor_left.cross(cursor_up);
 
     numtk::vec3<int32_t> cursor_delta = { 0, 0, 0 };
     if (!_input->key_down['w'] && _past_input->key_down['w'])
-        ++cursor_delta.y();
+        cursor_delta += cursor_up;
     if (!_input->key_down['s'] && _past_input->key_down['s'])
-        --cursor_delta.y();
-    if (!_input->key_down['d'] && _past_input->key_down['d'])
-        ++cursor_delta.x();
+        cursor_delta -= cursor_up;
     if (!_input->key_down['a'] && _past_input->key_down['a'])
-        --cursor_delta.x();
+        cursor_delta += cursor_left;
+    if (!_input->key_down['d'] && _past_input->key_down['d'])
+        cursor_delta -= cursor_left;
+    if (!_input->key_down['r'] && _past_input->key_down['r'])
+        cursor_delta += cursor_forward;
+    if (!_input->key_down['f'] && _past_input->key_down['f'])
+        cursor_delta -= cursor_forward;
+
     _state->cursor_coordinates += cursor_delta;
+    _state->cursor_coordinates.x() = std::min(std::max(_state->cursor_coordinates.x(), 0), 16);
+    _state->cursor_coordinates.y() = std::min(std::max(_state->cursor_coordinates.y(), 0), 16);
+    _state->cursor_coordinates.z() = std::min(std::max(_state->cursor_coordinates.z(), 0), 16);
+
+    _state->camera.Update(_input, _past_input);
 
     return true;
 }
@@ -340,21 +373,18 @@ void TurntableCamera::Update(iotk::input_t const* _input,
     }
 }
 
-numtk::mat4f TurntableCamera::Matrix() const
+numtk::quatf TurntableCamera::Basis() const
 {
-    numtk::vec3f forward = {
-        std::cos(spherical_coordinates[1]) * std::cos(spherical_coordinates[0]),
-        std::sin(spherical_coordinates[1]),
-        std::cos(spherical_coordinates[1]) * std::sin(spherical_coordinates[0])
-    };
-    forward = forward.normalise();
+    return
+        numtk::quatf::AngleAxis(spherical_coordinates[0], { 0.f, -1.f, 0.f })
+        * numtk::quatf::AngleAxis(spherical_coordinates[1], { 1.f, 0.f, 0.f });
+}
 
-    numtk::vec3f up = { 0.f, 1.f, 0.f };
-    if (std::abs(1.f - forward.dot(numtk::vec3f{ 0.f, 1.f, 0.f })) > 1e-3f)
-        up = forward.cross(numtk::vec3f{ 0.f, 1.f, 0.f }).cross(forward).normalise();
-    else
-        up = forward.cross(numtk::vec3f{ 0.f, 0.f, 1.f }).cross(forward).normalise();
-
+numtk::mat4f TurntableCamera::View() const
+{
+    numtk::quatf basis = Basis();
+    numtk::vec3f forward = basis * numtk::vec3f{ 0.f, 0.f, -1.f };
+    numtk::vec3f up = basis * numtk::vec3f{ 0.f, 1.f, 0.f };
     numtk::vec3f center = pivot;
 
     return
