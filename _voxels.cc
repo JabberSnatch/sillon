@@ -738,6 +738,7 @@ void RenderResources(void* _pstate,
     }
     )_";
 
+#if 0
         static char const voxel_traversal_func[] = R"(
     struct DDAContext
     {
@@ -844,10 +845,7 @@ void RenderResources(void* _pstate,
     }
 
     )";
-
-        static char const region_fshader[] =
-            #include "shaders/render_region.frag.h"
-            ;
+#endif
 
         {
             VkShaderModule vmodule =
@@ -866,8 +864,9 @@ void RenderResources(void* _pstate,
                                             "region_fshader",
                                             {
                                                 "#version 450",
-                                                voxel_traversal_func,
-                                                region_fshader
+                                                #include "shaders/voxel_traversal.h"
+                                                ,
+                                                #include "shaders/render_region.frag.h"
                                             });
 
             if (_state->region_pipeline != VK_NULL_HANDLE)
@@ -951,8 +950,8 @@ void RenderResources(void* _pstate,
                 return result;
             }
 
-#define STEP_COUNT 16.0
-#define STEP_COUNT_SECONDARY 8.0
+#define STEP_COUNT 64.0
+#define STEP_COUNT_SECONDARY 32.0
             void main()
             {
                 const float base_radius = 6.360;

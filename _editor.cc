@@ -21,8 +21,17 @@ struct TurntableCamera
 struct state_t
 {
     static constexpr int32_t kGridSize = 8;
+    static constexpr int32_t kGridVolume = kGridSize*kGridSize*kGridSize;
     TurntableCamera camera;
     numtk::vec3<int32_t> cursor_coordinates = { kGridSize/2, kGridSize/2, kGridSize/2 };
+
+    std::array<numtk::vec4<uint8_t>, kGridVolume> voxel_data = {};
+    VkSampler sampler;
+    vktk::Texture voxel_texture;
+    vktk::DescriptorPool voxel_desc_pool;
+    VkDescriptorSet voxel_desc_set;
+    VkPipelineLayout voxel_pipeline_layout;
+    VkPipeline voxel_pipeline;
 
     VkPipelineLayout grid_pipeline_layout;
     VkPipeline grid_pipeline;
@@ -38,10 +47,116 @@ struct CursorPushConstants
     numtk::vec4f coordinates;
 };
 
+struct VoxelsPushConstants
+{
+    numtk::mat4f projection;
+    numtk::mat4f view;
+    numtk::vec2<int32_t> screen_size;
+};
+
 void ConstantResources(void* _pstate,
                        vktk::Context* _vulkan)
 {
     state_t* _state = (state_t*)_pstate;
+
+    {
+        _state->voxel_texture = _vulkan->CreateTexture(
+            state_t::kGridSize, state_t::kGridSize, state_t::kGridSize,
+            VK_IMAGE_TYPE_3D, VK_FORMAT_R8G8B8A8_UNORM,
+            VK_IMAGE_USAGE_SAMPLED_BIT,
+            [_state](void* mapped_data) {
+                numtk::vec4<uint8_t>* pixels = (numtk::vec4<uint8_t>*)mapped_data;
+                for (uint32_t index = 0; index < state_t::kGridVolume; ++index) {
+                    pixels[index] = _state->voxel_data[index];
+                }
+            });
+
+        {
+            vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
+            command_buffer.Begin();
+
+            command_buffer.ImageTransitions(
+                VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                {
+                    {
+                        _state->voxel_texture.image,
+                        VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_NONE,
+                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                        VK_IMAGE_ASPECT_COLOR_BIT,
+                    }
+                });
+
+            command_buffer.End();
+            command_buffer.Submit();
+        }
+
+        VkSamplerCreateInfo sampler_create{};
+        sampler_create.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        sampler_create.pNext = nullptr;
+        sampler_create.flags = 0u;
+        sampler_create.magFilter = VK_FILTER_NEAREST;
+        sampler_create.minFilter = VK_FILTER_NEAREST;
+        sampler_create.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        sampler_create.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sampler_create.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sampler_create.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sampler_create.minLod = 0.0;
+        sampler_create.maxLod = 0.0;
+        CHECKCALL(vkCreateSampler, _vulkan->device,
+                  &sampler_create, nullptr, &_state->sampler);
+
+        _state->voxel_desc_pool = _vulkan->CreateDescriptorPool(1u, {
+            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 0,
+              VK_SHADER_STAGE_FRAGMENT_BIT, 1 }
+        });
+
+        VkDescriptorSetAllocateInfo descset_allocate{};
+        descset_allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        descset_allocate.pNext= nullptr;
+        descset_allocate.descriptorPool = _state->voxel_desc_pool.pool;
+        descset_allocate.descriptorSetCount = 1u;
+        descset_allocate.pSetLayouts = &_state->voxel_desc_pool.layout;
+        CHECKCALL(vkAllocateDescriptorSets, _vulkan->device,
+                  &descset_allocate, &_state->voxel_desc_set);
+
+        {
+            VkDescriptorImageInfo voxel_image_info{};
+            voxel_image_info.sampler = _state->sampler;
+            voxel_image_info.imageView = _state->voxel_texture.view;
+            voxel_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+            VkWriteDescriptorSet desc_write = {};
+            desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            desc_write.pNext = nullptr;
+            desc_write.dstSet = _state->voxel_desc_set;
+            desc_write.dstBinding = 0u;
+            desc_write.dstArrayElement = 0u;
+            desc_write.descriptorCount = 1u;
+            desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            desc_write.pImageInfo = &voxel_image_info;
+            desc_write.pBufferInfo = nullptr;
+            desc_write.pTexelBufferView = nullptr;
+
+            vkUpdateDescriptorSets(_vulkan->device, 1u, &desc_write, 0u, nullptr);
+        }
+
+        VkPushConstantRange push_constant_range = {};
+        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        push_constant_range.offset = 0;
+        push_constant_range.size = sizeof(numtk::mat4f) * 2 + sizeof(numtk::vec2<int32_t>);
+
+        VkPipelineLayoutCreateInfo pipeline_create{};
+        pipeline_create.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipeline_create.pNext = nullptr;
+        pipeline_create.flags = 0u;
+        pipeline_create.setLayoutCount = 1u;
+        pipeline_create.pSetLayouts = &_state->voxel_desc_pool.layout;
+        pipeline_create.pushConstantRangeCount = 1;
+        pipeline_create.pPushConstantRanges = &push_constant_range;
+        CHECKCALL(vkCreatePipelineLayout, _vulkan->device, &pipeline_create, nullptr,
+                  &_state->voxel_pipeline_layout);
+    }
 
     {
         VkPushConstantRange pc_ranges[2];
@@ -95,6 +210,127 @@ void RenderResources(void* _pstate,
                      vktk::Swapchain const& _swapchain)
 {
     state_t* _state = (state_t*)_pstate;
+
+    {
+        VkShaderModule voxel_vertex = _vulkan->CompileShader_GLSL(
+            VK_SHADER_STAGE_VERTEX_BIT,
+            "voxel_vertex",
+            {
+                "#version 450",
+                "#define CW_CUBE",
+#include "shaders/cube_vertices.vert.h"
+                ,
+                R"_(
+                layout(push_constant, std430) uniform PushConstant {
+                    mat4 projection;
+                    mat4 view;
+                    ivec2 screen_size;
+                };
+                layout(location = 0) out vec3 iFS_volume_coords;
+                layout(location = 1) out vec3 iFS_camera_position;
+
+                void main() {
+                    vec3 vertex = CurrentVertex();
+                    gl_Position = projection * view * vec4(vertex, 1.0);
+
+                    iFS_camera_position = (inverse(view) * vec4(vec3(0.0), 1.0)).xyz;
+                    iFS_volume_coords = vertex * 0.5 + vec3(0.5);
+                }
+                )_"
+            });
+
+        VkShaderModule voxel_fragment = _vulkan->CompileShader_GLSL(
+            VK_SHADER_STAGE_FRAGMENT_BIT,
+            "voxel_fragment",
+            {
+                "#version 450",
+                #include "shaders/voxel_traversal.h"
+                ,
+                R"_(
+                layout(location = 0) in vec3 iFS_volume_coords;
+                layout(location = 1) in vec3 iFS_camera_position;
+                layout(location = 0) out vec4 oFS_color;
+
+                layout(set = 0, binding = 0) uniform sampler3D voxels;
+
+                layout(push_constant, std430) uniform PushConstant {
+                    mat4 projection;
+                    mat4 view;
+                    ivec2 screen_size;
+                };
+
+                #define GRID_SIZE 8.0
+
+                float VoxelsTraversal(vec3 org, vec3 dir, out vec3 color, out vec3 normal, float depth)
+                {
+                    float d = 0.0;
+                    float t = 0.0;
+
+                    DDAContext ctx = InitDDAContext(org, dir, GRID_SIZE);
+                    while (ctx.mask.w == 1.0)
+                    {
+                        vec4 voxel = texture(voxels, ctx.voxel_coords);
+                        if (voxel.w != 0.0)
+                        {
+                            color = voxel.xyz;
+                            normal = ctx.mask.xyz * -ctx.step_sign;
+                            return ctx.t;
+                        }
+                        StepDDAContext(ctx);
+                    }
+
+                    return -1.0/0.0;
+                }
+
+                void main() {
+                    vec2 uv = vec2(gl_FragCoord.xy) / vec2(screen_size.xy);
+                    vec3 dir = normalize(
+                        inverse(mat3(view))
+                        * inverse(mat3(projection))
+                        * vec3(uv * 2.0 - vec2(1.0), 1.0));
+
+                    vec3 step_sign = sign(-dir);
+                    vec3 max_t = abs(((step_sign * 0.5 + vec3(0.5)) - (step_sign * iFS_volume_coords)) / dir);
+
+                    float depth = distance(iFS_camera_position * 0.5 + vec3(0.5), iFS_volume_coords);
+                    float region_begin = min(max_t.x, min(max_t.y, max_t.z));
+
+                    vec3 root_org = iFS_volume_coords
+                        - dir * 0.00001
+                        - (dir * min(depth, region_begin));
+
+                    depth = max(depth - region_begin, 0.0);
+
+                    vec3 org = root_org;
+                    oFS_color = vec4(org, 1.0);
+                    return;
+
+                    vec3 normal = vec3(0.0);
+                    vec3 color = vec3(0.0);
+                    float t_hit = VoxelsTraversal(org, dir, color, normal, depth);
+                    if (t_hit > 0.0)
+                    {
+                        oFS_color = vec4(color, 1.0);
+                        gl_FragDepth = t_hit / 1000.f;
+                    }
+                    else
+                        discard;
+                }
+                )_"
+            });
+
+        _state->voxel_pipeline = _vulkan->CreatePipeline(
+            _state->voxel_pipeline_layout,
+            _swapchain.render_pass,
+            {
+                { voxel_vertex, VK_SHADER_STAGE_VERTEX_BIT },
+                { voxel_fragment, VK_SHADER_STAGE_FRAGMENT_BIT }
+            },
+            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, {});
+
+        vkDestroyShaderModule(_vulkan->device, voxel_vertex, nullptr);
+        vkDestroyShaderModule(_vulkan->device, voxel_fragment, nullptr);
+    }
 
     {
         VkShaderModule grid_vertex = _vulkan->CompileShader_GLSL(
@@ -246,6 +482,40 @@ void Draw(void* _pstate,
     vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
     command_buffer.Begin();
 
+    command_buffer.ImageTransitions(
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        {
+            {
+                _state->voxel_texture.image,
+                VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_ASPECT_COLOR_BIT,
+            }
+        });
+
+    command_buffer.UpdateTexture(
+        _state->voxel_texture,
+        VkOffset3D{ 0, 0, 0 }, VkExtent3D{ state_t::kGridSize, state_t::kGridSize, state_t::kGridSize },
+        [_state](void* mapped_data) {
+            numtk::vec4<uint8_t>* pixels = (numtk::vec4<uint8_t>*)mapped_data;
+            for (uint32_t index = 0; index < state_t::kGridVolume; ++index) {
+                pixels[index] = _state->voxel_data[index];
+            }
+        });
+
+    command_buffer.ImageTransitions(
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        {
+            {
+                _state->voxel_texture.image,
+                VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_IMAGE_ASPECT_COLOR_BIT,
+            }
+        });
+
     command_buffer.BeginRenderPass(_swapchain.size,
                                    _swapchain.framebuffers[_swapchain.index],
                                    _swapchain.render_pass,
@@ -253,6 +523,27 @@ void Draw(void* _pstate,
 
     numtk::mat4f projection = numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how);
     numtk::mat4f view = _state->camera.View();
+
+    {
+        VoxelsPushConstants pc = {};
+        pc.projection = projection;
+        pc.view = view;
+        pc.screen_size = {
+            (int32_t)_swapchain.size.width,
+            (int32_t)_swapchain.size.height
+        };
+
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->grid_pipeline);
+        vkCmdBindDescriptorSets(command_buffer,
+                                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                _state->voxel_pipeline_layout, 0u,
+                                1u, &_state->voxel_desc_set,
+                                0u, nullptr);
+        vkCmdPushConstants(command_buffer, _state->grid_pipeline_layout,
+                           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0, sizeof(VoxelsPushConstants), (void*)&pc);
+        vkCmdDraw(command_buffer, 36u, 1u, 0u, 0u);
+    }
 
     {
         numtk::mat4f pc_matrices[2];
@@ -358,9 +649,18 @@ bool Update(void* _pstate,
         cursor_delta -= cursor_forward;
 
     _state->cursor_coordinates += cursor_delta;
-    _state->cursor_coordinates.x() = std::min(std::max(_state->cursor_coordinates.x(), 0), state_t::kGridSize);
-    _state->cursor_coordinates.y() = std::min(std::max(_state->cursor_coordinates.y(), 0), state_t::kGridSize);
-    _state->cursor_coordinates.z() = std::min(std::max(_state->cursor_coordinates.z(), 0), state_t::kGridSize);
+    _state->cursor_coordinates.x() = std::min(std::max(_state->cursor_coordinates.x(), 0), state_t::kGridSize-1);
+    _state->cursor_coordinates.y() = std::min(std::max(_state->cursor_coordinates.y(), 0), state_t::kGridSize-1);
+    _state->cursor_coordinates.z() = std::min(std::max(_state->cursor_coordinates.z(), 0), state_t::kGridSize-1);
+
+    if (!_input->key_down[' '] && _past_input->key_down[' '])
+    {
+        numtk::vec3<int32_t>& point = _state->cursor_coordinates;
+        _state->voxel_data[point.x()
+                           + point.y()*state_t::kGridSize
+                           + point.z()*state_t::kGridSize*state_t::kGridSize]
+            = numtk::vec4<uint8_t>{ 0, 255, 255, 255 };
+    }
 
     _state->camera.Update(_input, _past_input);
 
