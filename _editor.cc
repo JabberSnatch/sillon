@@ -20,7 +20,7 @@ struct TurntableCamera
 
 struct state_t
 {
-    static constexpr int32_t kGridSize = 8;
+    static constexpr int32_t kGridSize = 16;
     static constexpr int32_t kGridVolume = kGridSize*kGridSize*kGridSize;
     TurntableCamera camera;
     numtk::vec3<int32_t> cursor_coordinates = { kGridSize/2, kGridSize/2, kGridSize/2 };
@@ -259,13 +259,10 @@ void RenderResources(void* _pstate,
                     ivec2 screen_size;
                 };
 
-                #define GRID_SIZE 8.0
+                #define GRID_SIZE 16.0
 
                 float VoxelsTraversal(vec3 org, vec3 dir, out vec3 color, out vec3 normal, float depth)
                 {
-                    float d = 0.0;
-                    float t = 0.0;
-
                     DDAContext ctx = InitDDAContext(org, dir, GRID_SIZE);
                     while (ctx.mask.w == 1.0)
                     {
@@ -284,10 +281,15 @@ void RenderResources(void* _pstate,
 
                 void main() {
                     vec2 uv = vec2(gl_FragCoord.xy) / vec2(screen_size.xy);
-                    vec3 dir = normalize(
+                    mat3 inv_viewproj =
                         inverse(mat3(view))
-                        * inverse(mat3(projection))
+                        * inverse(mat3(projection));
+                    vec3 dir = normalize(
+                        inv_viewproj
                         * vec3(uv * 2.0 - vec2(1.0), 1.0));
+                    vec3 cam_forward = normalize(
+                        inv_viewproj
+                        * vec3(0.0, 0.0, 1.0));
 
                     vec3 step_sign = sign(-dir);
                     vec3 max_t = abs(((step_sign * 0.5 + vec3(0.5)) - (step_sign * iFS_volume_coords)) / dir);
@@ -302,16 +304,16 @@ void RenderResources(void* _pstate,
                     depth = max(depth - region_begin, 0.0);
 
                     vec3 org = root_org;
-                    oFS_color = vec4(org, 1.0);
-                    return;
 
                     vec3 normal = vec3(0.0);
                     vec3 color = vec3(0.0);
                     float t_hit = VoxelsTraversal(org, dir, color, normal, depth);
-                    if (t_hit > 0.0)
+                    if (t_hit >= 0.0)
                     {
-                        oFS_color = vec4(color, 1.0);
-                        gl_FragDepth = t_hit / 1000.f;
+                        float dist = (depth + t_hit) * 2.0;
+                        float diffuse = min(1.0, 0.2 + max(0.0, dot(normal, -cam_forward)));
+                        oFS_color = vec4(color * diffuse, 1.0);
+                        gl_FragDepth = dist / 1000.f;
                     }
                     else
                         discard;
@@ -461,7 +463,7 @@ void RenderResources(void* _pstate,
                 { cursor_fragment, VK_SHADER_STAGE_FRAGMENT_BIT }
             },
             {
-                { vktk::DepthTestEnable, VK_FALSE },
+                { vktk::DepthTestEnable, VK_TRUE },
                 { vktk::DepthWriteEnable, VK_FALSE }
             },
             VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, {} );
@@ -533,13 +535,13 @@ void Draw(void* _pstate,
             (int32_t)_swapchain.size.height
         };
 
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->grid_pipeline);
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->voxel_pipeline);
         vkCmdBindDescriptorSets(command_buffer,
                                 VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 _state->voxel_pipeline_layout, 0u,
                                 1u, &_state->voxel_desc_set,
                                 0u, nullptr);
-        vkCmdPushConstants(command_buffer, _state->grid_pipeline_layout,
+        vkCmdPushConstants(command_buffer, _state->voxel_pipeline_layout,
                            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                            0, sizeof(VoxelsPushConstants), (void*)&pc);
         vkCmdDraw(command_buffer, 36u, 1u, 0u, 0u);
@@ -656,10 +658,13 @@ bool Update(void* _pstate,
     if (!_input->key_down[' '] && _past_input->key_down[' '])
     {
         numtk::vec3<int32_t>& point = _state->cursor_coordinates;
-        _state->voxel_data[point.x()
-                           + point.y()*state_t::kGridSize
-                           + point.z()*state_t::kGridSize*state_t::kGridSize]
-            = numtk::vec4<uint8_t>{ 0, 255, 255, 255 };
+        uint32_t voxel_index = point.x()
+            + point.y()*state_t::kGridSize
+            + point.z()*state_t::kGridSize*state_t::kGridSize;
+        if (_state->voxel_data[voxel_index].w() == 0)
+            _state->voxel_data[voxel_index] = numtk::vec4<uint8_t>{ 0, 255, 255, 255 };
+        else
+            _state->voxel_data[voxel_index] = numtk::vec4<uint8_t>{ 0, 0, 0, 0 };
     }
 
     _state->camera.Update(_input, _past_input);

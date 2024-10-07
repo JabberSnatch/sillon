@@ -153,7 +153,7 @@ void main() {
     else
     {
         vec3 hit = root_org+dir*t; // UVW
-        vec3 sun_dir = light_dir;//normalize(vec3(-1.0, 2.0, 2.0));
+        vec3 sun_dir = light_dir;
 
         vec3 dummy = vec3(0.0);
 
