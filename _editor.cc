@@ -310,10 +310,11 @@ void RenderResources(void* _pstate,
                     float t_hit = VoxelsTraversal(org, dir, color, normal, depth);
                     if (t_hit >= 0.0)
                     {
-                        float dist = (depth + t_hit) * 2.0;
                         float diffuse = min(1.0, 0.2 + max(0.0, dot(normal, -cam_forward)));
                         oFS_color = vec4(color * diffuse, 1.0);
-                        gl_FragDepth = dist / 1000.f;
+                        vec3 hit_p = (org + dir * t_hit) * 2.0 - vec3(1.0);
+                        vec4 cs_p = projection * view * vec4(hit_p, 1.0);
+                        gl_FragDepth = cs_p.z / cs_p.w;
                     }
                     else
                         discard;
