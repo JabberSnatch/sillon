@@ -883,10 +883,10 @@ struct StateOverrideTagTraits {
 
 #define GENERATE_TRAITS(tag, member, default_value) \
     template <> struct StateOverrideTagTraits<tag> {\
-        using ValueType = decltype(std::declval<Context::StateOverride>().state.##member); \
+        using ValueType = decltype(std::declval<Context::StateOverride>().state.member); \
         static constexpr ValueType DefaultValue = default_value;\
         static inline ValueType Context::StateOverride::DataUnion::* const MemberPointer \
-        = &Context::StateOverride::DataUnion::##member;                 \
+        = &Context::StateOverride::DataUnion::member;                   \
     };                                                                  \
 
 VKTK_DYNAMIC_STATES(GENERATE_TRAITS)
