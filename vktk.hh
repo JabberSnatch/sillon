@@ -9,6 +9,8 @@
 
 #include <vulkan/vulkan.h>
 
+#include "numtk.hh"
+
 #define CHECKCALL(func, ...)                                            \
     {                                                                   \
         VkResult const vkr = func(__VA_ARGS__);                         \
@@ -208,7 +210,13 @@ struct CommandBuffer {
     void BeginRenderPass(VkExtent2D _size,
                          VkFramebuffer _target,
                          VkRenderPass _render_pass,
-                         std::vector<VkClearValue> _clear_values);
+                         std::vector<VkClearValue> const& _clear_values);
+
+    void BeginRenderPass(numtk::bounds2i const& _viewport,
+                         VkFramebuffer _target,
+                         VkExtent2D _target_size,
+                         VkRenderPass _render_pass,
+                         std::vector<VkClearValue> const& _clear_values);
 
     void End();
 };

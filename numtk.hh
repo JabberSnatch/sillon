@@ -250,13 +250,24 @@ struct quat : public std::array<scalar, 4>
     }
 };
 
+template <typename scalar>
+struct bounds2
+{
+    vec2<scalar> min;
+    vec2<scalar> extent;
+};
+
 using vec2f = vec2<float>;
 using vec3f = vec3<float>;
 using vec4f = vec4<float>;
 using vec2u = vec2<uint32_t>;
 using vec3u = vec3<uint32_t>;
+using vec2i = vec2<int32_t>;
+using vec3i = vec3<int32_t>;
 using mat4f = mat4<float>;
 using quatf = quat<float>;
+
+using bounds2i = bounds2<int32_t>;
 
 } // namespace numtk
 

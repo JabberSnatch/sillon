@@ -25,6 +25,9 @@ struct state_t
     TurntableCamera camera;
     numtk::vec3<int32_t> cursor_coordinates = { kGridSize/2, kGridSize/2, kGridSize/2 };
 
+    VkRenderPass viewport_render_pass;
+    VkRenderPass toolbar_render_pass;
+
     std::array<numtk::vec4<uint8_t>, kGridVolume> voxel_data = {};
     VkSampler sampler;
     vktk::Texture voxel_texture;
@@ -212,6 +215,31 @@ void RenderResources(void* _pstate,
     state_t* _state = (state_t*)_pstate;
 
     {
+        vktk::Context::RenderPassAttachment depth_attachment =
+            { VK_FORMAT_D32_SFLOAT,
+              VK_IMAGE_LAYOUT_UNDEFINED,
+              VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+
+        _state->viewport_render_pass = _vulkan->CreateRenderPass(
+            {
+                { _swapchain.format,
+                  VK_IMAGE_LAYOUT_UNDEFINED,
+                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL }
+            },
+            &depth_attachment
+        );
+
+        _state->toolbar_render_pass = _vulkan->CreateRenderPass(
+            {
+                { _swapchain.format,
+                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                  VK_IMAGE_LAYOUT_PRESENT_SRC_KHR  }
+            },
+            nullptr
+        );
+    }
+
+    {
         VkShaderModule voxel_vertex = _vulkan->CompileShader_GLSL(
             VK_SHADER_STAGE_VERTEX_BIT,
             "voxel_vertex",
@@ -324,7 +352,7 @@ void RenderResources(void* _pstate,
 
         _state->voxel_pipeline = _vulkan->CreatePipeline(
             _state->voxel_pipeline_layout,
-            _swapchain.render_pass,
+            _state->viewport_render_pass,
             {
                 { voxel_vertex, VK_SHADER_STAGE_VERTEX_BIT },
                 { voxel_fragment, VK_SHADER_STAGE_FRAGMENT_BIT }
@@ -392,7 +420,7 @@ void RenderResources(void* _pstate,
 
         _state->grid_pipeline = _vulkan->CreatePipeline(
             _state->grid_pipeline_layout,
-            _swapchain.render_pass,
+            _state->viewport_render_pass,
             {
                 { grid_vertex, VK_SHADER_STAGE_VERTEX_BIT },
                 { grid_fragment, VK_SHADER_STAGE_FRAGMENT_BIT }
@@ -458,7 +486,7 @@ void RenderResources(void* _pstate,
 
         _state->cursor_pipeline = _vulkan->CreatePipeline(
             _state->cursor_pipeline_layout,
-            _swapchain.render_pass,
+            _state->viewport_render_pass,
             {
                 { cursor_vertex, VK_SHADER_STAGE_VERTEX_BIT },
                 { cursor_fragment, VK_SHADER_STAGE_FRAGMENT_BIT }
@@ -480,7 +508,17 @@ void Draw(void* _pstate,
           VkSemaphore _acquire_semaphore)
 {
     state_t* _state = (state_t*)_pstate;
-    float how = (float)_swapchain.size.height / (float)_swapchain.size.width;
+
+    numtk::bounds2i editor_viewport{
+        { 0, 0 },
+        { ((int32_t)_swapchain.size.width * 2) / 3, (int32_t)_swapchain.size.height }
+    };
+    numtk::bounds2i toolbar_viewport{
+        { ((int32_t)_swapchain.size.width * 2) / 3, 0 },
+        { (int32_t)_swapchain.size.width / 3, (int32_t)_swapchain.size.height }
+    };
+
+    float how = (float)editor_viewport.extent.y() / (float)editor_viewport.extent.x();
 
     vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
     command_buffer.Begin();
@@ -519,9 +557,10 @@ void Draw(void* _pstate,
             }
         });
 
-    command_buffer.BeginRenderPass(_swapchain.size,
+    command_buffer.BeginRenderPass(editor_viewport,
                                    _swapchain.framebuffers[_swapchain.index],
-                                   _swapchain.render_pass,
+                                   _swapchain.size,
+                                   _state->viewport_render_pass,
                                    { { 0.13f, 0.18f, 0.24f, 0.f }, { 1.f, 0.f, 0.f, 0.f } });
 
     numtk::mat4f projection = numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how);
@@ -532,8 +571,8 @@ void Draw(void* _pstate,
         pc.projection = projection;
         pc.view = view;
         pc.screen_size = {
-            (int32_t)_swapchain.size.width,
-            (int32_t)_swapchain.size.height
+            (int32_t)editor_viewport.extent.x(),
+            (int32_t)editor_viewport.extent.y()
         };
 
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->voxel_pipeline);
@@ -579,6 +618,13 @@ void Draw(void* _pstate,
         vkCmdDraw(command_buffer, 36u, 2u, 0u, 0u);
     }
 
+    vkCmdEndRenderPass(command_buffer);
+
+    command_buffer.BeginRenderPass(toolbar_viewport,
+                                   _swapchain.framebuffers[_swapchain.index],
+                                   _swapchain.size,
+                                   _state->toolbar_render_pass,
+                                   { { 0.3f, 0.3f, 0.3f, 0.f }, { 1.f, 0.f, 0.f, 0.f } });
 
     vkCmdEndRenderPass(command_buffer);
 

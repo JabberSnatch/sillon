@@ -590,16 +590,29 @@ void CommandBuffer::ImageTransitions(VkPipelineStageFlags _src_stage,
 void CommandBuffer::BeginRenderPass(VkExtent2D _size,
                                     VkFramebuffer _target,
                                     VkRenderPass _render_pass,
-                                    std::vector<VkClearValue> _clear_values)
+                                    std::vector<VkClearValue> const& _clear_values)
+{
+    BeginRenderPass(numtk::bounds2i{ { 0, 0 }, { (int32_t)_size.width, (int32_t)_size.height } },
+                    _target, _size, _render_pass, _clear_values);
+}
+
+void CommandBuffer::BeginRenderPass(numtk::bounds2i const& _viewport,
+                                    VkFramebuffer _target,
+                                    VkExtent2D _target_size,
+                                    VkRenderPass _render_pass,
+                                    std::vector<VkClearValue> const& _clear_values)
 {
     VkViewport viewport{};
-    viewport.x = 0.f; viewport.y = 0.f;
-    viewport.width = (float)_size.width;
-    viewport.height = (float)_size.height;
+    viewport.x = (float)_viewport.min.x(); viewport.y = (float)_viewport.min.y();
+    viewport.width = (float)_viewport.extent.x();
+    viewport.height = (float)_viewport.extent.y();
     viewport.minDepth = 0.f; viewport.maxDepth = 1.f;
     vkCmdSetViewport(handle, 0, 1, &viewport);
 
-    VkRect2D scissor{ VkOffset2D{ 0, 0 }, _size };
+    VkRect2D scissor{
+        VkOffset2D{ _viewport.min.x(), _viewport.min.y() },
+        VkExtent2D{ (uint32_t)_viewport.extent.x(), (uint32_t)_viewport.extent.y() }
+    };
     vkCmdSetScissor(handle, 0, 1, &scissor);
 
     VkRenderPassBeginInfo rp_begin_info{};
@@ -607,10 +620,13 @@ void CommandBuffer::BeginRenderPass(VkExtent2D _size,
     rp_begin_info.pNext = nullptr;
     rp_begin_info.renderPass = _render_pass;
     rp_begin_info.framebuffer = _target;
-    rp_begin_info.renderArea = VkRect2D{
-        VkOffset2D{ 0, 0 },
-        _size
-    };
+    rp_begin_info.renderArea = scissor;
+#if 0
+    VkRect2D{
+        { 0, 0 },
+        _target_size,
+            };
+    #endif
     rp_begin_info.clearValueCount = _clear_values.size();
     rp_begin_info.pClearValues = _clear_values.data();
     vkCmdBeginRenderPass(handle, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
@@ -814,10 +830,16 @@ VkRenderPass Context::CreateRenderPass(std::vector<RenderPassAttachment> const& 
         dependency.dstStageMask =
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
             | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-        dependency.srcAccessMask = VK_ACCESS_NONE_KHR;
+        dependency.srcAccessMask =
+            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+            | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT
+            | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
+            | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
         dependency.dstAccessMask =
             VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
-            | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+            | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT
+            | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
+            | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
         dependency.dependencyFlags = 0;
     }
 
@@ -827,8 +849,10 @@ VkRenderPass Context::CreateRenderPass(std::vector<RenderPassAttachment> const& 
         dependency.dstSubpass = VK_SUBPASS_EXTERNAL;
         dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-        dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-        dependency.dstAccessMask = VK_ACCESS_NONE_KHR;
+        dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+            | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+        dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+            | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
         dependency.dependencyFlags = 0;
     }
 
