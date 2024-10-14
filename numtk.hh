@@ -40,6 +40,9 @@ struct vec2 : public std::array<scalar, 2>
     float norm() const { return std::sqrt(sqrnorm()); }
     vec2 normalise() const { return *this / norm(); }
     vec2 abs() const { return { std::abs(x()), std::abs(y()) }; }
+
+    template <typename dst>
+    vec2<dst> cast() const { return vec2<dst>{ (dst)x(), (dst)y() }; }
 };
 
 template <typename scalar>
@@ -78,6 +81,9 @@ struct vec3 : public std::array<scalar, 3>
             data[0]*o[1] - data[1]*o[0],
         };
     }
+
+    template <typename dst>
+    vec3<dst> cast() const { return vec3<dst>{ (dst)x(), (dst)y(), (dst)z() }; }
 };
 
 template <typename scalar>
@@ -107,6 +113,9 @@ struct vec4 : public std::array<scalar, 4>
     float norm() const { return std::sqrt(sqrnorm()); }
     vec4 normalise() const { return *this * norm(); }
     vec4 abs() const { return { std::abs(x()), std::abs(y()), std::abs(z()), std::abs(w()) }; }
+
+    template <typename dst>
+    vec4<dst> cast() const { return vec4<dst>{ (dst)x(), (dst)y(), (dst)z(), (dst)w() }; }
 };
 
 template <typename scalar>
@@ -255,6 +264,12 @@ struct bounds2
 {
     vec2<scalar> min;
     vec2<scalar> extent;
+
+    bool Contains(vec2<scalar> const& point) {
+        vec2<scalar> max = min+extent;
+        return point.x() >= min.x() && point.x() < max.x()
+            && point.y() >= min.y() && point.y() < max.y();
+    }
 };
 
 using vec2f = vec2<float>;
