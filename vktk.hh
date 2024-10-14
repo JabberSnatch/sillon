@@ -214,7 +214,6 @@ struct CommandBuffer {
 
     void BeginRenderPass(numtk::bounds2i const& _viewport,
                          VkFramebuffer _target,
-                         VkExtent2D _target_size,
                          VkRenderPass _render_pass,
                          std::vector<VkClearValue> const& _clear_values);
 

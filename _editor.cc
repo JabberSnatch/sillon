@@ -559,7 +559,6 @@ void Draw(void* _pstate,
 
     command_buffer.BeginRenderPass(editor_viewport,
                                    _swapchain.framebuffers[_swapchain.index],
-                                   _swapchain.size,
                                    _state->viewport_render_pass,
                                    { { 0.13f, 0.18f, 0.24f, 0.f }, { 1.f, 0.f, 0.f, 0.f } });
 
@@ -622,7 +621,6 @@ void Draw(void* _pstate,
 
     command_buffer.BeginRenderPass(toolbar_viewport,
                                    _swapchain.framebuffers[_swapchain.index],
-                                   _swapchain.size,
                                    _state->toolbar_render_pass,
                                    { { 0.3f, 0.3f, 0.3f, 0.f }, { 1.f, 0.f, 0.f, 0.f } });
 

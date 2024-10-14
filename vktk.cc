@@ -593,12 +593,11 @@ void CommandBuffer::BeginRenderPass(VkExtent2D _size,
                                     std::vector<VkClearValue> const& _clear_values)
 {
     BeginRenderPass(numtk::bounds2i{ { 0, 0 }, { (int32_t)_size.width, (int32_t)_size.height } },
-                    _target, _size, _render_pass, _clear_values);
+                    _target, _render_pass, _clear_values);
 }
 
 void CommandBuffer::BeginRenderPass(numtk::bounds2i const& _viewport,
                                     VkFramebuffer _target,
-                                    VkExtent2D _target_size,
                                     VkRenderPass _render_pass,
                                     std::vector<VkClearValue> const& _clear_values)
 {
@@ -621,12 +620,6 @@ void CommandBuffer::BeginRenderPass(numtk::bounds2i const& _viewport,
     rp_begin_info.renderPass = _render_pass;
     rp_begin_info.framebuffer = _target;
     rp_begin_info.renderArea = scissor;
-#if 0
-    VkRect2D{
-        { 0, 0 },
-        _target_size,
-            };
-    #endif
     rp_begin_info.clearValueCount = _clear_values.size();
     rp_begin_info.pClearValues = _clear_values.data();
     vkCmdBeginRenderPass(handle, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
