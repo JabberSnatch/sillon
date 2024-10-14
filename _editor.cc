@@ -24,9 +24,12 @@ struct state_t
     static constexpr int32_t kGridVolume = kGridSize*kGridSize*kGridSize;
     TurntableCamera camera;
     numtk::vec3<int32_t> cursor_coordinates = { kGridSize/2, kGridSize/2, kGridSize/2 };
+    numtk::vec3f current_color = { 1.f, 1.f, 1.f };
+
+    numtk::bounds2i editor_viewport;
+    numtk::bounds2i toolbar_viewport;
 
     VkRenderPass viewport_render_pass;
-    VkRenderPass toolbar_render_pass;
 
     std::array<numtk::vec4<uint8_t>, kGridVolume> voxel_data = {};
     VkSampler sampler;
@@ -41,6 +44,11 @@ struct state_t
 
     VkPipelineLayout cursor_pipeline_layout;
     VkPipeline cursor_pipeline;
+
+    VkRenderPass toolbar_render_pass;
+
+    VkPipelineLayout picker_pipeline_layout;
+    VkPipeline picker_pipeline;
 };
 
 struct CursorPushConstants
@@ -55,6 +63,12 @@ struct VoxelsPushConstants
     numtk::mat4f projection;
     numtk::mat4f view;
     numtk::vec2<int32_t> screen_size;
+};
+
+struct PickerPushConstants
+{
+    numtk::vec2f offset;
+    numtk::vec2f scale;
 };
 
 void ConstantResources(void* _pstate,
@@ -206,6 +220,24 @@ void ConstantResources(void* _pstate,
         CHECKCALL(vkCreatePipelineLayout, _vulkan->device, &pipeline_create, nullptr,
                   &_state->cursor_pipeline_layout);
     }
+
+    {
+        VkPushConstantRange push_constant_range = {};
+        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        push_constant_range.offset = 0;
+        push_constant_range.size = sizeof(PickerPushConstants);
+
+        VkPipelineLayoutCreateInfo pipeline_create{};
+        pipeline_create.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipeline_create.pNext = nullptr;
+        pipeline_create.flags = 0u;
+        pipeline_create.setLayoutCount = 0u;
+        pipeline_create.pSetLayouts = nullptr;
+        pipeline_create.pushConstantRangeCount = 1u;
+        pipeline_create.pPushConstantRanges = &push_constant_range;
+        CHECKCALL(vkCreatePipelineLayout, _vulkan->device, &pipeline_create, nullptr,
+                  &_state->picker_pipeline_layout);
+    }
 }
 
 void RenderResources(void* _pstate,
@@ -213,6 +245,16 @@ void RenderResources(void* _pstate,
                      vktk::Swapchain const& _swapchain)
 {
     state_t* _state = (state_t*)_pstate;
+
+    _state->editor_viewport = numtk::bounds2i{
+        { 0, 0 },
+        { ((int32_t)_swapchain.size.width * 2) / 3, (int32_t)_swapchain.size.height }
+    };
+
+    _state->toolbar_viewport = numtk::bounds2i{
+        { ((int32_t)_swapchain.size.width * 2) / 3, 0 },
+        { (int32_t)_swapchain.size.width / 3, (int32_t)_swapchain.size.height }
+    };
 
     {
         vktk::Context::RenderPassAttachment depth_attachment =
@@ -500,6 +542,75 @@ void RenderResources(void* _pstate,
         vkDestroyShaderModule(_vulkan->device, cursor_vertex, nullptr);
         vkDestroyShaderModule(_vulkan->device, cursor_fragment, nullptr);
     }
+
+    {
+        VkShaderModule picker_vertex = _vulkan->CompileShader_GLSL(
+            VK_SHADER_STAGE_VERTEX_BIT,
+            "picker_vertex",
+            {
+                "#version 450",
+                R"_(
+                const vec2 kTriVertices[] = vec2[4](
+                    vec2(0.0, 1.0),
+                    vec2(1.0, 1.0),
+                    vec2(0.0, 0.0),
+                    vec2(1.0, 0.0)
+                );
+
+                layout(push_constant, std430) uniform PushConstants{
+                    vec2 offset;
+                    vec2 scale;
+                };
+
+                layout(location = 0) out vec2 iFS_uv;
+
+                void main()
+                {
+                    iFS_uv = kTriVertices[gl_VertexIndex];
+                    vec2 ui_coords = iFS_uv * scale + offset;
+                    gl_Position = vec4(ui_coords * 2.0 - vec2(1.0), 0.0, 1.0);
+                }
+                )_"
+            }
+        );
+
+        VkShaderModule picker_fragment = _vulkan->CompileShader_GLSL(
+            VK_SHADER_STAGE_FRAGMENT_BIT,
+            "picker_fragment",
+            {
+                "#version 450",
+                R"_(
+                layout(location = 0) in vec2 iFS_uv;
+                layout(location = 0) out vec4 oFS_color;
+                void main()
+                {
+                    ivec2 cell = ivec2(floor(iFS_uv * 8.0));
+                    int index = cell.x + cell.y * 8;
+                    ivec3 irgb = ivec3(
+                        index % 4,
+                        (index / 4) % 4,
+                        index / 16
+                    );
+                    vec3 rgb = vec3(irgb) / 3.0;
+                    oFS_color = vec4(rgb, 1.0);
+                }
+                )_"
+            }
+        );
+
+        _state->picker_pipeline = _vulkan->CreatePipeline(
+            _state->picker_pipeline_layout,
+            _state->toolbar_render_pass,
+            {
+                { picker_vertex, VK_SHADER_STAGE_VERTEX_BIT },
+                { picker_fragment, VK_SHADER_STAGE_FRAGMENT_BIT }
+            },
+            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP, {}
+        );
+
+        vkDestroyShaderModule(_vulkan->device, picker_vertex, nullptr);
+        vkDestroyShaderModule(_vulkan->device, picker_fragment, nullptr);
+    }
 }
 
 void Draw(void* _pstate,
@@ -509,16 +620,7 @@ void Draw(void* _pstate,
 {
     state_t* _state = (state_t*)_pstate;
 
-    numtk::bounds2i editor_viewport{
-        { 0, 0 },
-        { ((int32_t)_swapchain.size.width * 2) / 3, (int32_t)_swapchain.size.height }
-    };
-    numtk::bounds2i toolbar_viewport{
-        { ((int32_t)_swapchain.size.width * 2) / 3, 0 },
-        { (int32_t)_swapchain.size.width / 3, (int32_t)_swapchain.size.height }
-    };
-
-    float how = (float)editor_viewport.extent.y() / (float)editor_viewport.extent.x();
+    float how = (float)_state->editor_viewport.extent.y() / (float)_state->editor_viewport.extent.x();
 
     vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
     command_buffer.Begin();
@@ -557,7 +659,7 @@ void Draw(void* _pstate,
             }
         });
 
-    command_buffer.BeginRenderPass(editor_viewport,
+    command_buffer.BeginRenderPass(_state->editor_viewport,
                                    _swapchain.framebuffers[_swapchain.index],
                                    _state->viewport_render_pass,
                                    { { 0.13f, 0.18f, 0.24f, 0.f }, { 1.f, 0.f, 0.f, 0.f } });
@@ -570,8 +672,8 @@ void Draw(void* _pstate,
         pc.projection = projection;
         pc.view = view;
         pc.screen_size = {
-            (int32_t)editor_viewport.extent.x(),
-            (int32_t)editor_viewport.extent.y()
+            (int32_t)_state->editor_viewport.extent.x(),
+            (int32_t)_state->editor_viewport.extent.y()
         };
 
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->voxel_pipeline);
@@ -619,10 +721,21 @@ void Draw(void* _pstate,
 
     vkCmdEndRenderPass(command_buffer);
 
-    command_buffer.BeginRenderPass(toolbar_viewport,
+    command_buffer.BeginRenderPass(_state->toolbar_viewport,
                                    _swapchain.framebuffers[_swapchain.index],
                                    _state->toolbar_render_pass,
                                    { { 0.3f, 0.3f, 0.3f, 0.f }, { 1.f, 0.f, 0.f, 0.f } });
+
+    {
+        PickerPushConstants push_constants = {};
+        push_constants.offset = numtk::vec2f{ 0.f, 0.f };
+        push_constants.scale = numtk::vec2f{ 1.f, 0.5f };
+
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->picker_pipeline);
+        vkCmdPushConstants(command_buffer, _state->picker_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT,
+                           0, sizeof(PickerPushConstants), (void*)&push_constants);
+        vkCmdDraw(command_buffer, 4u, 1u, 0u, 0u);
+    }
 
     vkCmdEndRenderPass(command_buffer);
 
@@ -707,12 +820,40 @@ bool Update(void* _pstate,
             + point.y()*state_t::kGridSize
             + point.z()*state_t::kGridSize*state_t::kGridSize;
         if (_state->voxel_data[voxel_index].w() == 0)
-            _state->voxel_data[voxel_index] = numtk::vec4<uint8_t>{ 0, 255, 255, 255 };
+        {
+            numtk::vec3<uint8_t> rgb8_color = (_state->current_color * 255.f).cast<uint8_t>();
+            _state->voxel_data[voxel_index] = numtk::vec4<uint8_t>{
+                rgb8_color.x(), rgb8_color.y(), rgb8_color.z(), 255
+            };
+        }
         else
             _state->voxel_data[voxel_index] = numtk::vec4<uint8_t>{ 0, 0, 0, 0 };
     }
 
-    _state->camera.Update(_input, _past_input);
+    numtk::vec2i const& mouse_pointer = *(numtk::vec2i*)_input->cursor;
+    if (_state->editor_viewport.Contains(mouse_pointer))
+        _state->camera.Update(_input, _past_input);
+    else if (_state->toolbar_viewport.Contains(mouse_pointer))
+    {
+        numtk::vec2f local_pointer = numtk::vec2f{ 1.f, 2.f }
+        * ((mouse_pointer - _state->toolbar_viewport.min).cast<float>()
+           / _state->toolbar_viewport.extent.cast<float>());
+
+        if (local_pointer.y() < 1.f && local_pointer.y() >= 0.f
+            && _input->button_down & iotk::fMouseButton::kLeftBtn)
+        {
+            numtk::vec2i cell = (local_pointer * 8.f).cast<int32_t>();
+            std::cout << "cell " << cell.x() << " " << cell.y() << std::endl;
+            int32_t index = cell.x() + cell.y() * 8;
+            numtk::vec3i irgb{
+                index % 4,
+                (index / 4) % 4,
+                index / 16
+            };
+            numtk::vec3f rgb = irgb.cast<float>() / 3.f;
+            _state->current_color = rgb;
+        }
+    }
 
     return true;
 }
