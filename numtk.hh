@@ -262,13 +262,27 @@ struct quat : public std::array<scalar, 4>
 template <typename scalar>
 struct bounds2
 {
-    vec2<scalar> min;
-    vec2<scalar> extent;
-
-    bool Contains(vec2<scalar> const& point) {
-        vec2<scalar> max = min+extent;
+    using PointType = vec2<scalar>;
+    PointType min;
+    PointType extent;
+    bool Contains(PointType const& point) {
+        PointType max = min+extent;
         return point.x() >= min.x() && point.x() < max.x()
             && point.y() >= min.y() && point.y() < max.y();
+    }
+};
+
+template <typename scalar>
+struct bounds3
+{
+    using PointType = vec3<scalar>;
+    PointType min;
+    PointType extent;
+    bool Contains(PointType const& point) {
+        PointType max = min+extent;
+        return point.x() >= min.x() && point.x() < max.x()
+            && point.y() >= min.y() && point.y() < max.y()
+            && point.z() >= min.z() && point.z() < max.z();
     }
 };
 
@@ -283,6 +297,7 @@ using mat4f = mat4<float>;
 using quatf = quat<float>;
 
 using bounds2i = bounds2<int32_t>;
+using bounds3i = bounds3<int32_t>;
 
 } // namespace numtk
 
