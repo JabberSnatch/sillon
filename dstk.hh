@@ -103,6 +103,62 @@ struct FreeList
 #endif
 };
 
+template <typename Key, typename Value>
+struct OrderedVector
+{
+    template <typename OrderPredicate>
+    OrderedVector(OrderPredicate _order_predicate)
+        : order_predicate{ _order_predicate }
+    {}
+
+    std::vector<Value>::iterator insert(Key const& k, Value const& v)
+    {
+        auto key_position = std::lower_bound(keys.begin(), keys.end(), k, order_predicate);
+        auto item_position = std::next(items.begin(), std::distance(keys.begin(), key_position));
+        if (key_position != keys.end() && *key_position == k)
+        {
+            *item_position = v;
+            return item_position;
+        }
+        else
+        {
+            keys.insert(key_position, k);
+            return items.insert(item_position, v);
+        }
+    }
+
+    void erase(Key const& k)
+    {
+        auto key_position = std::lower_bound(keys.begin(), keys.end(), k, order_predicate);
+        auto item_position = std::next(items.begin(), std::distance(keys.begin(), key_position));
+        if (key_position != keys.end() && *key_position == k)
+        {
+            keys.erase(key_position);
+            items.erase(item_position);
+        }
+    }
+
+    Value const& operator[](Key const& k) const
+    {
+        auto key_position = std::lower_bound(keys.begin(), keys.end(), k, order_predicate);
+        if (*key_position == k)
+            return *std::next(items.begin(), std::distance(keys.begin(), key_position));
+        else
+            throw std::out_of_range{"Invalid key"};
+    }
+
+    Value& operator[](Key const& k)
+    {
+        return const_cast<Value&>(
+            const_cast<OrderedVector<Key, Value> const*>(this)->operator[](k)
+        );
+    }
+
+    std::function<bool(Key const&, Key const&)> order_predicate;
+    std::vector<Value> items{};
+    std::vector<Key> keys{};
+};
+
 struct Registry
 {
 };
