@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace dstk
@@ -65,42 +66,64 @@ struct FreeList
     }
 
     std::vector<Range> indices;
+};
 
-#if 0
-    static void UnitTests() {
-        FreeList free_list{};
-        {
-            for (uint32_t index = 0; index < 50; ++index)
-                free_list.Reserve();
-            uint64_t size = free_list.RequiredSize();
-        }
+struct BlockVector
+{
+    BlockVector(uint64_t _object_size, uint64_t _block_size)
+        : object_size{ _object_size }
+        , block_size{ _block_size }
+    {}
 
-        {
-            for (uint32_t index = 0; index < 25; ++index)
-                free_list.Release((FreeList::Index)index * 2);
-            uint64_t size = free_list.RequiredSize();
-        }
+    void Expand(uint64_t object_count) {
+        if (object_count <= Capacity())
+            return;
 
-        {
-            std::vector<uint64_t> indices{};
-            for (uint32_t index = 0; index < 10; ++index)
-                indices.push_back(free_list.Reserve());
-            uint64_t size = free_list.RequiredSize();
-        }
-
-        {
-            for (uint32_t index = 0; index < 15; ++index)
-                free_list.Release((FreeList::Index)index);
-            uint64_t size = free_list.RequiredSize();
-        }
-
-        {
-            for (uint32_t index = 0; index < 50; ++index)
-                free_list.Release((FreeList::Index)index);
-            uint64_t size = free_list.RequiredSize();
-        }
+        uint64_t delta = object_count - Capacity();
+        uint64_t block_count = (delta + object_size-1) / object_size;
+        for (uint64_t index = 0; index < block_count; ++index)
+            blocks.emplace_back(new uint8_t[object_size * block_size]);
     }
-#endif
+
+    void* operator[](uint64_t index) const {
+        if (index >= Capacity())
+            return nullptr;
+
+        uint64_t block_index = index / block_size;
+        uint64_t object_index = index - (block_index * block_size);
+        return (void*)(blocks[block_index].get() + object_index * object_size);
+    }
+
+    uint64_t Capacity() const { return block_size * blocks.size(); }
+
+    uint64_t object_size; // bytes
+    uint64_t block_size; // object count
+    std::vector<std::unique_ptr<uint8_t[]>> blocks{};
+};
+
+template <typename T>
+struct ObjectPool
+{
+    using Handle = uint64_t;
+
+    Handle Reserve() {
+        Handle handle = free_list.Reserve();
+        items.Expand(free_list.RequiredSize());
+        new (items[handle]) T{};
+        return handle;
+    }
+
+    T* operator[](Handle handle) const {
+        return (T*)items[handle];
+    }
+
+    void Release(Handle handle) {
+        ((T*)items[handle])->~T();
+        free_list.Release(handle);
+    }
+
+    BlockVector items{ sizeof(T), 256ull };
+    FreeList free_list{};
 };
 
 template <typename Key, typename Value>
@@ -110,6 +133,11 @@ struct OrderedVector
     OrderedVector(OrderPredicate _order_predicate)
         : order_predicate{ _order_predicate }
     {}
+
+    OrderedVector(OrderedVector const&) = default;
+    OrderedVector(OrderedVector&&) = default;
+    OrderedVector& operator=(OrderedVector const&) = default;
+    OrderedVector& operator=(OrderedVector&&) = default;
 
     std::vector<Value>::iterator insert(Key const& k, Value const& v)
     {
@@ -157,10 +185,6 @@ struct OrderedVector
     std::function<bool(Key const&, Key const&)> order_predicate;
     std::vector<Value> items{};
     std::vector<Key> keys{};
-};
-
-struct Registry
-{
 };
 
 }
