@@ -34,6 +34,8 @@ struct vec2 : public std::array<scalar, 2>
     vec2 operator*(scalar s) const { return { x()*s, y()*s }; }
     vec2 operator/(vec2 const& o) const { return { x()/o.x(), y()/o.y() }; }
     vec2 operator/(scalar s) const { return { x()/s, y()/s }; }
+    vec2 operator%(vec2 const& o) const { return { x()%o.x(), y()%o.y() }; }
+    vec2 operator%(scalar s) const { return { x()%s, y()%s }; }
 
     scalar dot(vec2 const& o) const { return x()*o.x() + y()*o.y(); }
     float sqrnorm() const { return dot(*this); }
@@ -66,6 +68,8 @@ struct vec3 : public std::array<scalar, 3>
     vec3 operator*(scalar s) const { return { x()*s, y()*s, z()*s }; }
     vec3 operator/(vec3 const& o) const { return { x()/o.x(), y()/o.y(), z()/o.z() }; }
     vec3 operator/(scalar s) const { return { x()/s, y()/s, z()/s }; }
+    vec3 operator%(vec3 const& o) const { return { x()%o.x(), y()%o.y(), z()%o.z() }; }
+    vec3 operator%(scalar s) const { return { x()%s, y()%s, z()%s }; }
 
     scalar dot(vec3 const& o) const { return x()*o.x() + y()*o.y() + z()*o.z(); }
     float sqrnorm() const { return dot(*this); }
@@ -107,6 +111,8 @@ struct vec4 : public std::array<scalar, 4>
     vec4 operator*(scalar s) const { return { x()*s, y()*s, z()*s, w()*s }; }
     vec4 operator/(vec4 const& o) const { return { x()/o.x(), y()/o.y(), z()/o.z(), w()/o.w() }; }
     vec4 operator/(scalar s) const { return { x()/s, y()/s, z()/s, w()/s }; }
+    vec4 operator%(vec4 const& o) const { return { x()%o.x(), y()%o.y(), z()%o.z(), w()%o.w() }; }
+    vec4 operator%(scalar s) const { return { x()%s, y()%s, z()%s, w()%s }; }
 
     scalar dot(vec4 const& o) const { return x()*o.x() + y()*o.y() + z()*o.z() + w()*o.w(); }
     float sqrnorm() const { return dot(*this); }
@@ -298,6 +304,16 @@ using quatf = quat<float>;
 
 using bounds2i = bounds2<int32_t>;
 using bounds3i = bounds3<int32_t>;
+
+template <uint32_t B>
+inline uint32_t
+ilogN(uint32_t _v)
+{
+    if (_v == 0) return ~0u;
+    uint32_t res = 0u;
+    while (_v /= B) { ++res; }
+    return res;
+}
 
 } // namespace numtk
 

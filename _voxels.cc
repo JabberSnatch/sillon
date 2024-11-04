@@ -7,6 +7,8 @@
 #include "systk.hh"
 #include "numtk.hh"
 #include "vktk.hh"
+#include "voxtk.hh"
+#include "dstk.hh"
 
 #include <memory>
 
@@ -484,6 +486,11 @@ void LoadRegion(state_t* state, vktk::Context* vulkan)
 void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 {
     state_t* _state = (state_t*)_pstate;
+
+    voxtk::Region test_region(numtk::vec3u{ 512, 512, 512 });
+    test_region.Set(numtk::vec3u{ 0, 0, 0 }, true);
+    test_region.Set(numtk::vec3u{ 511, 511, 511 }, true);
+    test_region.Set(numtk::vec3u{ 4, 357, 34 }, true);
 
     _state->region = DeserialiseRegion("../r.-1.6.mca");
     LoadRegion(_state, _vulkan);
