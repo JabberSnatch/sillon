@@ -24,9 +24,9 @@ struct VoxelMask
         uint32_t const pack_index = pack_point.x() + pack_point.y() * 2u + pack_point.z() * 4u;
         uint32_t const bit_index = bit_point.x() + bit_point.y() * 4u + bit_point.z() * 16u;
         if (v)
-            bits[pack_index] |= (1 << bit_index);
+            bits[pack_index] |= (1ull << bit_index);
         else
-            bits[pack_index] &= ~(1 << bit_index);
+            bits[pack_index] &= ~(1ull << bit_index);
     }
 
     uint64_t Kernel4(numtk::vec3u const& base) const;
@@ -63,9 +63,10 @@ struct Region
     struct Node;
 
     Region(numtk::vec3u _size)
-        : depth{ numtk::ilogN<VoxelMask::kSize>(
-            std::max(std::max(_size.x(), _size.y()), _size.z())
-        )}
+        : level_count{ std::max(
+            numtk::ilogN<VoxelMask::kSize>(
+                std::max(std::max(_size.x(), _size.y()), _size.z())
+            ), 1u) }
         , size{ _size }
     {}
 
@@ -99,11 +100,11 @@ struct Region
             root = node_pool[node_pool.Reserve()];
             root->parent = nullptr;
             root->location = numtk::vec3u{ 0, 0, 0 };
-            root->depth = depth;
+            root->depth = level_count - 1;
         }
 
         Node* current_node = root;
-        while (current_node && current_node->depth != 0)
+        while (current_node)
         {
             numtk::vec3u local_point =
                 (point
@@ -111,7 +112,10 @@ struct Region
                 % VoxelMask::kSize;
 
             if (current_node->depth == 0)
+            {
                 current_node->data_mask.Set(local_point, v);
+                break;
+            }
             else if (current_node->child_mask.Test(local_point))
                 current_node = current_node->children[local_point];
             else if (current_node->data_mask.Test(local_point) != v)
@@ -146,7 +150,7 @@ struct Region
 
     Node* root = nullptr;
     dstk::ObjectPool<Node> node_pool{};
-    uint32_t depth;
+    uint32_t level_count;
     numtk::vec3u size;
 };
 
