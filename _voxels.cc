@@ -487,10 +487,48 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 {
     state_t* _state = (state_t*)_pstate;
 
+#if 0
+    voxtk::Region test_region(numtk::vec3u{ 8, 8, 8 });
+    test_region.Set(numtk::vec3u{ 0, 0, 0 }, true);
+    test_region.Set(numtk::vec3u{ 7, 7, 7 }, true);
+    test_region.Set(numtk::vec3u{ 3, 2, 6 }, true);
+#endif
+
+#if 0
+    voxtk::Region test_region(numtk::vec3u{ 64, 64, 64 });
+    test_region.Set(numtk::vec3u{ 0, 0, 0 }, true);
+    test_region.Set(numtk::vec3u{ 7, 7, 7 }, true);
+    test_region.Set(numtk::vec3u{ 8, 8, 8 }, true);
+    test_region.Set(numtk::vec3u{ 15, 15, 15 }, true);
+    test_region.Set(numtk::vec3u{ 56, 56, 56 }, true);
+    test_region.Set(numtk::vec3u{ 63, 63, 63 }, true);
+#endif
+
+#if 0
     voxtk::Region test_region(numtk::vec3u{ 512, 512, 512 });
     test_region.Set(numtk::vec3u{ 0, 0, 0 }, true);
     test_region.Set(numtk::vec3u{ 511, 511, 511 }, true);
     test_region.Set(numtk::vec3u{ 4, 357, 34 }, true);
+#endif
+
+    {
+        voxtk::VoxelMask test_mask{};
+        test_mask.FillAbove({ 0, 0, 0 });
+        test_mask.Clear();
+        test_mask.FillAbove({ 1, 0, 0 });
+        test_mask.Clear();
+        test_mask.FillAbove({ 2, 0, 0 });
+        test_mask.Clear();
+        test_mask.FillAbove({ 0, 1, 0 });
+        test_mask.Clear();
+        test_mask.FillAbove({ 0, 2, 0 });
+        test_mask.Clear();
+        test_mask.FillAbove({ 0, 0, 1 });
+        test_mask.Clear();
+        test_mask.FillAbove({ 0, 0, 2 });
+        test_mask.Clear();
+        test_mask.FillAbove({ 2, 3, 4 });
+    }
 
     _state->region = DeserialiseRegion("../r.-1.6.mca");
     LoadRegion(_state, _vulkan);

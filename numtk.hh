@@ -315,6 +315,17 @@ ilogN(uint32_t _v)
     return res;
 }
 
+inline uint64_t
+BitReverse(uint64_t _v)
+{
+    _v = (((_v & 0xAAAAAAAAAAAAAAAAull) >> 1) | ((_v & 0x5555555555555555ull) << 1));
+    _v = (((_v & 0xCCCCCCCCCCCCCCCCull) >> 2) | ((_v & 0x3333333333333333ull) << 2));
+    _v = (((_v & 0xF0F0F0F0F0F0F0F0ull) >> 4) | ((_v & 0x0F0F0F0F0F0F0F0Full) << 4));
+    _v = (((_v & 0xFF00FF00FF00FF00ull) >> 8) | ((_v & 0x00FF00FF00FF00FFull) << 8));
+    _v = (((_v & 0xFFFF0000FFFF0000ull) >> 16) | ((_v & 0x0000FFFF0000FFFFull) << 16));
+    return (_v >> 32) | (_v << 32);
+}
+
 } // namespace numtk
 
 template <typename scalar>
