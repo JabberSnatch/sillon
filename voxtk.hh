@@ -119,6 +119,9 @@ struct VoxelMask
     }
 
     void FillAbove(numtk::vec3u const& begin) {
+        if (begin.x() > 7u || begin.y() > 7u || begin.z() > 7u)
+            return;
+
         numtk::vec3u const pack_begin = begin / 4u;
         numtk::vec3u const bits_begin = begin % 4u;
 
@@ -171,19 +174,30 @@ struct VoxelMask
             bits[7] = ~0ull;
     }
 
+    void FillBelow(numtk::vec3u const& end) {
+        if (end.x() == 0 || end.y() == 0 || end.z() == 0)
+            return;
+
+        FillAbove(numtk::vec3u{ 8u, 8u, 8u, } - end);
+        BitReverse();
+    }
+
+    void FillArea(numtk::vec3u const& begin, numtk::vec3u const& end) {
+        VoxelMask above{};
+        above.FillAbove(begin);
+        FillBelow(end);
+        *this = BitwiseAnd(above);
+    }
+
     void Set(numtk::vec3u const& begin, numtk::vec3u const& end, bool v) {
-        numtk::vec3u const pack_begin = begin / 4u;
-        numtk::vec3u const pack_end = end / 4u;
-        numtk::vec3u const bit_begin = begin % 4u;
-        numtk::vec3u const bit_end = end % 4u;
-
-        uint32_t const pack_begin_index = pack_begin.x() + pack_begin.y()*2u + pack_begin.z()*4u;
-        uint32_t const pack_end_index = pack_end.x() + pack_end.y()*2u + pack_end.z()*4u;
-
-        uint64_t mask[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
-        for (uint32_t pack_index = pack_begin_index; pack_index < pack_end_index; ++pack_index)
+        VoxelMask mask{};
+        mask.FillArea(begin, end);
+        if (v)
+            *this = BitwiseOr(mask);
+        else
         {
-            mask[pack_index];
+            mask = mask.BitwiseNot();
+            *this = BitwiseAnd(mask);
         }
     }
 
@@ -290,6 +304,10 @@ struct Region
     }
 
     void Set(numtk::vec3u const& begin, numtk::vec3u const& end, bool v) {
+        if (begin.x() >= size.x()
+            || begin.y() >= size.y()
+            || begin.z() >= size.z())
+            return;
     }
 
     struct Node {

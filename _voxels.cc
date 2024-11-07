@@ -528,6 +528,10 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         test_mask.FillAbove({ 0, 0, 2 });
         test_mask.Clear();
         test_mask.FillAbove({ 2, 3, 4 });
+        test_mask.Clear();
+        test_mask.Set({ 0, 0, 0 }, { 8, 8, 8 }, true);
+        test_mask.Set({ 1, 1, 1 }, { 7, 7, 7 }, false);
+        test_mask.Clear();
     }
 
     _state->region = DeserialiseRegion("../r.-1.6.mca");
