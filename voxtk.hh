@@ -9,6 +9,7 @@ namespace voxtk
 struct VoxelMask
 {
     static constexpr int32_t kSize = 8;
+    static constexpr int32_t kLogSize = 3;
 
     void Clear() {
         bits[0] = 0ull;
@@ -235,12 +236,15 @@ struct Region
     struct Node;
 
     Region(numtk::vec3u _size)
-        : level_count{ std::max(
-            numtk::ilogN<VoxelMask::kSize>(
-                std::max(std::max(_size.x(), _size.y()), _size.z())
-            ), 1u) }
+        : level_count{ 0u }
         , size{ _size }
-    {}
+    {
+        uint32_t max_size = std::max(std::max(_size.x(), _size.y()), _size.z());
+        uint32_t log_size = numtk::ilogN<VoxelMask::kSize>(max_size);
+        if (1u << (VoxelMask::kLogSize * log_size) < max_size)
+            ++log_size;
+        level_count = std::max(log_size, 1u);
+    }
 
     bool Test(numtk::vec3u const& point) const {
         if (point.x() >= size.x()
@@ -278,9 +282,7 @@ struct Region
         Node* current_node = root;
         while (current_node)
         {
-            numtk::vec3u local_point =
-                (point
-                 / (1u << (3 * current_node->depth)))
+            numtk::vec3u local_point = (point / (1u<<(3*current_node->depth)))
                 % VoxelMask::kSize;
 
             if (current_node->depth == 0)
@@ -308,12 +310,65 @@ struct Region
             || begin.y() >= size.y()
             || begin.z() >= size.z())
             return;
+
+        if (!root)
+        {
+            root = node_pool[node_pool.Reserve()];
+            root->parent = nullptr;
+            root->location = numtk::vec3u{ 0, 0, 0 };
+            root->depth = level_count - 1;
+        }
+
+        std::vector<Node*> node_queue{ root };
+        while (!node_queue.empty())
+        {
+            Node* current_node = node_queue.back();
+            node_queue.pop_back();
+
+            if (current_node->depth == 0)
+            {
+                numtk::vec3u const data_begin =
+                    numtk::max(begin, current_node->Begin()) - current_node->Begin();
+                numtk::vec3u const data_end =
+                    numtk::min(end, current_node->End()) - current_node->Begin();
+
+                current_node->data_mask.Set(data_begin, data_end, v);
+            }
+            else
+            {
+                numtk::vec3u const children_begin =
+                    numtk::max(begin / (1u<<(3*(current_node->depth))),
+                               current_node->Begin());
+                numtk::vec3u const children_end =
+                    numtk::min((end / (1u<<(3*(current_node->depth)))) + numtk::vec3u::Constant(1u),
+                               current_node->End());
+
+                for (uint32_t x = children_begin.x(); x < children_end.x(); ++x)
+                    for (uint32_t y = children_begin.y(); y < children_end.y(); ++y)
+                        for (uint32_t z = children_begin.z(); z < children_end.z(); ++z)
+                        {
+                            numtk::vec3u const child{ x, y, z };
+                            if (!current_node->children.contains(child))
+                            {
+                                auto child_node = current_node->children.insert(
+                                    child, node_pool[node_pool.Reserve()]);
+                                (*child_node)->parent = current_node;
+                                (*child_node)->location = child;
+                                (*child_node)->depth = current_node->depth - 1;
+                            }
+                            node_queue.push_back(current_node->children[child]);
+                        }
+            }
+        }
     }
 
     struct Node {
         Node* parent;
         numtk::vec3u location;
         uint32_t depth;
+
+        numtk::vec3u Begin() const { return location * (1u << (3*(depth+1))); }
+        numtk::vec3u End() const { return Begin() + numtk::vec3u::Constant(8u); }
 
         VoxelMask child_mask{};
         VoxelMask data_mask{};

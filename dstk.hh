@@ -166,10 +166,15 @@ struct OrderedVector
         }
     }
 
+    bool contains(Key const& k) const {
+        auto key_position = std::lower_bound(keys.begin(), keys.end(), k, order_predicate);
+        return key_position != keys.end() && *key_position == k;
+    }
+
     Value const& operator[](Key const& k) const
     {
         auto key_position = std::lower_bound(keys.begin(), keys.end(), k, order_predicate);
-        if (*key_position == k)
+        if (key_position != keys.end() && *key_position == k)
             return *std::next(items.begin(), std::distance(keys.begin(), key_position));
         else
             throw std::out_of_range{"Invalid key"};

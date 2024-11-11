@@ -124,6 +124,53 @@ struct vec4 : public std::array<scalar, 4>
     vec4<dst> cast() const { return vec4<dst>{ (dst)x(), (dst)y(), (dst)z(), (dst)w() }; }
 };
 
+template <typename s>
+vec2<s> min(vec2<s> const& lhs, vec2<s> const& rhs) {
+    return {
+        std::min(lhs.x(), rhs.x()), std::min(lhs.y(), rhs.y())
+    };
+}
+
+template <typename s>
+vec2<s> max(vec2<s> const& lhs, vec2<s> const& rhs) {
+    return {
+        std::max(lhs.x(), rhs.x()), std::max(lhs.y(), rhs.y())
+    };
+}
+
+template <typename s>
+vec3<s> min(vec3<s> const& lhs, vec3<s> const& rhs) {
+    return {
+        std::min(lhs.x(), rhs.x()), std::min(lhs.y(), rhs.y()),
+        std::min(lhs.z(), rhs.z())
+    };
+}
+
+template <typename s>
+vec3<s> max(vec3<s> const& lhs, vec3<s> const& rhs) {
+    return {
+        std::max(lhs.x(), rhs.x()), std::max(lhs.y(), rhs.y()),
+        std::max(lhs.z(), rhs.z())
+    };
+}
+
+template <typename s>
+vec4<s> min(vec4<s> const& lhs, vec4<s> const& rhs) {
+    return {
+        std::min(lhs.x(), rhs.x()), std::min(lhs.y(), rhs.y()),
+        std::min(lhs.z(), rhs.z()), std::min(lhs.w(), rhs.w())
+    };
+}
+
+template <typename s>
+vec4<s> max(vec4<s> const& lhs, vec4<s> const& rhs) {
+    return {
+        std::max(lhs.x(), rhs.x()), std::max(lhs.y(), rhs.y()),
+        std::max(lhs.z(), rhs.z()), std::max(lhs.w(), rhs.w())
+    };
+}
+
+
 template <typename scalar>
 struct mat4 : public std::array<scalar, 16>
 {

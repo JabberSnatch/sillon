@@ -532,6 +532,15 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         test_mask.Set({ 0, 0, 0 }, { 8, 8, 8 }, true);
         test_mask.Set({ 1, 1, 1 }, { 7, 7, 7 }, false);
         test_mask.Clear();
+
+        voxtk::Region test_region(numtk::vec3u{ 16, 16, 16 });
+        test_region.Set(numtk::vec3u{ 0, 0, 0 }, true);
+        test_region.Set(numtk::vec3u{ 7, 7, 7 }, true);
+        test_region.Set(numtk::vec3u{ 10, 10, 10 }, true);
+
+        test_region.Set({ 2, 2, 2 }, { 14, 14, 14 }, true);
+        test_region.Set({ 3, 3, 3 }, { 13, 13, 13 }, false);
+        test_region.Set({ 0, 0, 0 }, { 16, 16, 16 }, true);
     }
 
     _state->region = DeserialiseRegion("../r.-1.6.mca");
