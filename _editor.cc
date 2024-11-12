@@ -4,6 +4,7 @@
 
 #include "vktk.hh"
 #include "numtk.hh"
+#include "voxtk.hh"
 
 namespace {
 
@@ -31,6 +32,9 @@ struct state_t
 
     VkRenderPass viewport_render_pass;
 
+    voxtk::Region<numtk::vec4<uint8_t>> voxel_region{
+        { (uint32_t)kGridSize, (uint32_t)kGridSize, (uint32_t)kGridSize }
+    };
     std::array<numtk::vec4<uint8_t>, kGridVolume> voxel_data = {};
     VkSampler sampler;
     vktk::Texture voxel_texture;
@@ -84,7 +88,7 @@ void ConstantResources(void* _pstate,
             [_state](void* mapped_data) {
                 numtk::vec4<uint8_t>* pixels = (numtk::vec4<uint8_t>*)mapped_data;
                 for (uint32_t index = 0; index < state_t::kGridVolume; ++index) {
-                    pixels[index] = _state->voxel_data[index];
+                    pixels[index] = _state->voxel_region[index];
                 }
             });
 
@@ -643,7 +647,7 @@ void Draw(void* _pstate,
         [_state](void* mapped_data) {
             numtk::vec4<uint8_t>* pixels = (numtk::vec4<uint8_t>*)mapped_data;
             for (uint32_t index = 0; index < state_t::kGridVolume; ++index) {
-                pixels[index] = _state->voxel_data[index];
+                pixels[index] = _state->voxel_region[index];
             }
         });
 
@@ -815,19 +819,20 @@ bool Update(void* _pstate,
 
     if (!_input->key_down[' '] && _past_input->key_down[' '])
     {
-        numtk::vec3<int32_t>& point = _state->cursor_coordinates;
+        numtk::vec3u point = _state->cursor_coordinates.cast<uint32_t>();
         uint32_t voxel_index = point.x()
             + point.y()*state_t::kGridSize
             + point.z()*state_t::kGridSize*state_t::kGridSize;
-        if (_state->voxel_data[voxel_index].w() == 0)
+
+        if (_state->voxel_region[point].w() == 0)
         {
             numtk::vec3<uint8_t> rgb8_color = (_state->current_color * 255.f).cast<uint8_t>();
-            _state->voxel_data[voxel_index] = numtk::vec4<uint8_t>{
+            _state->voxel_region.Set(point, numtk::vec4<uint8_t>{
                 rgb8_color.x(), rgb8_color.y(), rgb8_color.z(), 255
-            };
+            });
         }
         else
-            _state->voxel_data[voxel_index] = numtk::vec4<uint8_t>{ 0, 0, 0, 0 };
+            _state->voxel_region.Set(point, { 0, 0, 0, 0 });
     }
 
     numtk::vec2i const& mouse_pointer = *(numtk::vec2i*)_input->cursor;

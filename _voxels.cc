@@ -488,6 +488,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     state_t* _state = (state_t*)_pstate;
 
 #if 0
+#if 0
     voxtk::Region test_region(numtk::vec3u{ 8, 8, 8 });
     test_region.Set(numtk::vec3u{ 0, 0, 0 }, true);
     test_region.Set(numtk::vec3u{ 7, 7, 7 }, true);
@@ -542,6 +543,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         test_region.Set({ 3, 3, 3 }, { 13, 13, 13 }, false);
         test_region.Set({ 0, 0, 0 }, { 16, 16, 16 }, true);
     }
+#endif
 
     _state->region = DeserialiseRegion("../r.-1.6.mca");
     LoadRegion(_state, _vulkan);
