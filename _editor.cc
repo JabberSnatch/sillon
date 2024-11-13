@@ -808,18 +808,21 @@ bool Update(void* _pstate,
     numtk::vec3<int32_t> cursor_forward = cursor_left.cross(cursor_up);
 
     numtk::vec3<int32_t> cursor_delta = { 0, 0, 0 };
-    if (!_input->key_down['w'] && _past_input->key_down['w'])
-        cursor_delta += cursor_up;
-    if (!_input->key_down['s'] && _past_input->key_down['s'])
-        cursor_delta -= cursor_up;
-    if (!_input->key_down['a'] && _past_input->key_down['a'])
-        cursor_delta += cursor_left;
-    if (!_input->key_down['d'] && _past_input->key_down['d'])
-        cursor_delta -= cursor_left;
-    if (!_input->key_down['r'] && _past_input->key_down['r'])
-        cursor_delta += cursor_forward;
-    if (!_input->key_down['f'] && _past_input->key_down['f'])
-        cursor_delta -= cursor_forward;
+    {
+        int32_t cursor_multiplier = (_input->mod_down & iotk::fKeyMod::kShift) ? 4 : 1;
+        if (!_input->key_down['w'] && _past_input->key_down['w'])
+            cursor_delta += cursor_up * cursor_multiplier;
+        if (!_input->key_down['s'] && _past_input->key_down['s'])
+            cursor_delta -= cursor_up * cursor_multiplier;
+        if (!_input->key_down['a'] && _past_input->key_down['a'])
+            cursor_delta += cursor_left * cursor_multiplier;
+        if (!_input->key_down['d'] && _past_input->key_down['d'])
+            cursor_delta -= cursor_left * cursor_multiplier;
+        if (!_input->key_down['r'] && _past_input->key_down['r'])
+            cursor_delta += cursor_forward * cursor_multiplier;
+        if (!_input->key_down['f'] && _past_input->key_down['f'])
+            cursor_delta -= cursor_forward * cursor_multiplier;
+    }
 
     _state->cursor_coordinates += cursor_delta;
     _state->cursor_coordinates.x() = std::min(std::max(_state->cursor_coordinates.x(), 0), state_t::kGridSize-1);
