@@ -429,6 +429,7 @@ struct Region
                                 (*child_node)->parent = current_node;
                                 (*child_node)->location = child;
                                 (*child_node)->depth = current_node->depth - 1;
+                                current_node->child_mask.Set(child, true);
                             }
                             node_queue.push_back(current_node->children[child]);
                         }

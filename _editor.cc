@@ -19,12 +19,21 @@ struct TurntableCamera
     numtk::mat4f View() const;
 };
 
+enum class RegionMode
+{
+    Disabled,
+    Set,
+    Clear,
+};
+
 struct state_t
 {
     static constexpr int32_t kGridSize = 16;
     static constexpr int32_t kGridVolume = kGridSize*kGridSize*kGridSize;
     TurntableCamera camera;
     numtk::vec3<int32_t> cursor_coordinates = { kGridSize/2, kGridSize/2, kGridSize/2 };
+    RegionMode region_mode = RegionMode::Disabled;
+    numtk::vec3<int32_t> region_point = cursor_coordinates;
     numtk::vec3f current_color = { 1.f, 1.f, 1.f };
 
     numtk::bounds2i editor_viewport;
@@ -35,7 +44,6 @@ struct state_t
     voxtk::Region<numtk::vec4<uint8_t>> voxel_region{
         { (uint32_t)kGridSize, (uint32_t)kGridSize, (uint32_t)kGridSize }
     };
-    std::array<numtk::vec4<uint8_t>, kGridVolume> voxel_data = {};
     VkSampler sampler;
     vktk::Texture voxel_texture;
     vktk::DescriptorPool voxel_desc_pool;
@@ -819,20 +827,67 @@ bool Update(void* _pstate,
 
     if (!_input->key_down[' '] && _past_input->key_down[' '])
     {
-        numtk::vec3u point = _state->cursor_coordinates.cast<uint32_t>();
-        uint32_t voxel_index = point.x()
-            + point.y()*state_t::kGridSize
-            + point.z()*state_t::kGridSize*state_t::kGridSize;
+        RegionMode next_mode =
+            _input->mod_down & iotk::fKeyMod::kShift
+            ? RegionMode::Set
+            : (_input->mod_down & iotk::fKeyMod::kAlt
+               ? RegionMode::Clear
+               : RegionMode::Disabled);
 
-        if (_state->voxel_region[point].w() == 0)
+        if (next_mode == RegionMode::Disabled && _state->region_mode == next_mode)
         {
-            numtk::vec3<uint8_t> rgb8_color = (_state->current_color * 255.f).cast<uint8_t>();
-            _state->voxel_region.Set(point, numtk::vec4<uint8_t>{
-                rgb8_color.x(), rgb8_color.y(), rgb8_color.z(), 255
-            });
+            std::cout << "Put voxel" << std::endl;
+
+            numtk::vec3u point = _state->cursor_coordinates.cast<uint32_t>();
+            uint32_t voxel_index = point.x()
+                + point.y()*state_t::kGridSize
+                + point.z()*state_t::kGridSize*state_t::kGridSize;
+
+            if (_state->voxel_region[point].w() == 0)
+            {
+                numtk::vec3<uint8_t> rgb8_color = (_state->current_color * 255.f).cast<uint8_t>();
+                _state->voxel_region.Set(point, numtk::vec4<uint8_t>{
+                    rgb8_color.x(), rgb8_color.y(), rgb8_color.z(), 255
+                });
+            }
+            else
+                _state->voxel_region.Set(point, { 0, 0, 0, 0 });
         }
-        else
-            _state->voxel_region.Set(point, { 0, 0, 0, 0 });
+
+        if (next_mode != RegionMode::Disabled && _state->region_mode == RegionMode::Disabled)
+        {
+            std::cout << "Region begin "
+                      << (next_mode == RegionMode::Set ? "set" : "clear") << std::endl;
+            _state->region_point = _state->cursor_coordinates;
+        }
+
+        if (next_mode == RegionMode::Disabled && _state->region_mode != RegionMode::Disabled)
+        {
+            std::cout << "Region exec "
+                      << (_state->region_mode == RegionMode::Set ? "set" : "clear") << std::endl;
+
+            numtk::vec3u begin = numtk::min(_state->cursor_coordinates.cast<uint32_t>(),
+                                            _state->region_point.cast<uint32_t>());
+            numtk::vec3u end = numtk::max(_state->cursor_coordinates.cast<uint32_t>(),
+                                          _state->region_point.cast<uint32_t>())
+                + numtk::vec3u::Constant(1);
+            std::cout << begin.x() << " " << begin.y() << " " << begin.z() << "; "
+                      << end.x() << " " << end.y() << " " << end.z()
+                      << std::endl;
+
+            if (_state->region_mode == RegionMode::Set)
+            {
+                numtk::vec3<uint8_t> rgb8_color = (_state->current_color * 255.f).cast<uint8_t>();
+                _state->voxel_region.Set(begin, end, numtk::vec4<uint8_t>{
+                    rgb8_color.x(), rgb8_color.y(), rgb8_color.z(), 255
+                });
+            }
+            if (_state->region_mode == RegionMode::Clear)
+            {
+            }
+        }
+
+        _state->region_mode = next_mode;
     }
 
     numtk::vec2i const& mouse_pointer = *(numtk::vec2i*)_input->cursor;
