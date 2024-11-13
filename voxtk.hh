@@ -237,9 +237,10 @@ struct Region
 {
     struct Node;
 
-    Region(numtk::vec3u _size)
+    Region(numtk::vec3u _size, DataType const& _default_value)
         : level_count{ 0u }
         , size{ _size }
+        , default_value{ _default_value }
     {
         uint32_t max_size = std::max(std::max(_size.x(), _size.y()), _size.z());
         uint32_t log_size = numtk::ilogN<VoxelMask::kSize>(max_size);
@@ -257,11 +258,10 @@ struct Region
     }
 
     DataType const& operator[](numtk::vec3u const& point) const {
-        static DataType const fallback{};
         if (point.x() >= size.x()
             || point.y() >= size.y()
             || point.z() >= size.z())
-            return fallback;
+            return default_value;
 
         Node* current_node = root;
         while (current_node)
@@ -271,11 +271,22 @@ struct Region
                 - current_node->Begin();
             if (current_node->child_mask.Test(local_point))
                 current_node = current_node->children[local_point];
+            else if (current_node->data_mask.Test(local_point))
+            {
+                if (current_node->data.empty())
+                    return default_value;
+
+                uint32_t const data_index =
+                    local_point.x()
+                    + local_point.y()*VoxelMask::kSize
+                    + local_point.z()*VoxelMask::kSize*VoxelMask::kSize;
+                return current_node->data[data_index];
+            }
             else
-                return (*current_node)[local_point];
+                return default_value;
         }
 
-        return fallback;
+        return default_value;
     }
 
     bool Test(numtk::vec3u const& point) const {
@@ -378,6 +389,51 @@ struct Region
         }
     }
 
+    void Clear(numtk::vec3u const& begin, numtk::vec3u const& end) {
+        if (begin.x() >= size.x()
+            || begin.y() >= size.y()
+            || begin.z() >= size.z())
+            return;
+
+        if (!root)
+            return;
+
+        std::vector<Node*> node_queue{ root };
+        while (!node_queue.empty())
+        {
+            Node* current_node = node_queue.back();
+            node_queue.pop_back();
+
+            if (current_node->depth == 0)
+            {
+                numtk::vec3u const data_begin =
+                    numtk::max(begin, current_node->Begin()) - current_node->Begin();
+                numtk::vec3u const data_end =
+                    numtk::min(end, current_node->End()) - current_node->Begin();
+
+                current_node->data_mask.Set(data_begin, data_end, false);
+            }
+            else
+            {
+                numtk::vec3u const children_begin =
+                    numtk::max(begin / (1u<<(3*(current_node->depth))),
+                               current_node->Begin());
+                numtk::vec3u const children_end =
+                    numtk::min((end / (1u<<(3*(current_node->depth)))) + numtk::vec3u::Constant(1u),
+                               current_node->End());
+
+                for (uint32_t x = children_begin.x(); x < children_end.x(); ++x)
+                    for (uint32_t y = children_begin.y(); y < children_end.y(); ++y)
+                        for (uint32_t z = children_begin.z(); z < children_end.z(); ++z)
+                        {
+                            numtk::vec3u const child{ x, y, z };
+                            if (current_node->children.contains(child))
+                                node_queue.push_back(current_node->children[child]);
+                        }
+            }
+        }
+    }
+
     void Set(numtk::vec3u const& begin, numtk::vec3u const& end, DataType const& value) {
         if (begin.x() >= size.x()
             || begin.y() >= size.y()
@@ -466,14 +522,6 @@ struct Region
                     }
         }
 
-        DataType const& operator[](numtk::vec3u const& point) const {
-            static DataType const fallback{};
-            if (data.empty()) return fallback;
-            uint32_t const index =
-                point.x() + point.y()*VoxelMask::kSize + point.z()*VoxelMask::kSize*VoxelMask::kSize;
-            return data[index];
-        }
-
         VoxelMask child_mask{};
         VoxelMask data_mask{};
         std::vector<DataType> data{};
@@ -491,6 +539,7 @@ struct Region
     dstk::ObjectPool<Node> node_pool{};
     uint32_t level_count;
     numtk::vec3u size;
+    DataType default_value;
 };
 
 }

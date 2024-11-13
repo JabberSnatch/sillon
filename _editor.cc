@@ -42,7 +42,8 @@ struct state_t
     VkRenderPass viewport_render_pass;
 
     voxtk::Region<numtk::vec4<uint8_t>> voxel_region{
-        { (uint32_t)kGridSize, (uint32_t)kGridSize, (uint32_t)kGridSize }
+        { (uint32_t)kGridSize, (uint32_t)kGridSize, (uint32_t)kGridSize },
+        numtk::vec4<uint8_t>{ 0, 0, 0, 0 }
     };
     VkSampler sampler;
     vktk::Texture voxel_texture;
@@ -883,8 +884,7 @@ bool Update(void* _pstate,
                 });
             }
             if (_state->region_mode == RegionMode::Clear)
-            {
-            }
+                _state->voxel_region.Clear(begin, end);
         }
 
         _state->region_mode = next_mode;
