@@ -344,7 +344,7 @@ void RenderResources(void* _pstate,
 
                 #define GRID_SIZE 16.0
 
-                float VoxelsTraversal(vec3 org, vec3 dir, out vec3 color, out vec3 normal, float depth)
+                vec2 VoxelsTraversal(vec3 org, vec3 dir, out vec3 color, out vec3 normal, float depth)
                 {
                     DDAContext ctx = InitDDAContext(org, dir, GRID_SIZE);
                     while (ctx.mask.w == 1.0)
@@ -354,12 +354,20 @@ void RenderResources(void* _pstate,
                         {
                             color = voxel.xyz;
                             normal = ctx.mask.xyz * -ctx.step_sign;
-                            return ctx.t;
+                            vec3 ao_center = ctx.voxel_coords + normal * abs(ctx.voxel_step);
+                            float ao = 1.0 + (1.0/6.0);
+                            ao -= texture(voxels, ao_center + vec3(0.0, 0.0, 1.0) * ctx.voxel_step).w / 6.0;
+                            ao -= texture(voxels, ao_center + vec3(0.0, 0.0, -1.0) * ctx.voxel_step).w / 6.0;
+                            ao -= texture(voxels, ao_center + vec3(0.0, 1.0, 0.0) * ctx.voxel_step).w / 6.0;
+                            ao -= texture(voxels, ao_center + vec3(0.0, -1.0, 0.0) * ctx.voxel_step).w / 6.0;
+                            ao -= texture(voxels, ao_center + vec3(1.0, 0.0, 0.0) * ctx.voxel_step).w / 6.0;
+                            ao -= texture(voxels, ao_center + vec3(-1.0, 0.0, 0.0) * ctx.voxel_step).w / 6.0;
+                            return vec2(ctx.t, ao);
                         }
                         StepDDAContext(ctx);
                     }
 
-                    return -1.0/0.0;
+                    return vec2(-1.0/0.0, 0.0);
                 }
 
                 void main() {
@@ -390,11 +398,12 @@ void RenderResources(void* _pstate,
 
                     vec3 normal = vec3(0.0);
                     vec3 color = vec3(0.0);
-                    float t_hit = VoxelsTraversal(org, dir, color, normal, depth);
+                    vec2 result = VoxelsTraversal(org, dir, color, normal, depth);
+                    float t_hit = result.x;
                     if (t_hit >= 0.0)
                     {
                         float diffuse = min(1.0, 0.2 + max(0.0, dot(normal, -cam_forward)));
-                        oFS_color = vec4(color * diffuse, 1.0);
+                        oFS_color = vec4(color * diffuse * result.y, 1.0);
                         vec3 hit_p = (org + dir * t_hit) * 2.0 - vec3(1.0);
                         vec4 cs_p = projection * view * vec4(hit_p, 1.0);
                         gl_FragDepth = cs_p.z / cs_p.w;
