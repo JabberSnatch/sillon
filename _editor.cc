@@ -344,7 +344,7 @@ void RenderResources(void* _pstate,
 
                 #define GRID_SIZE 16.0
 
-                vec2 VoxelsTraversal(vec3 org, vec3 dir, out vec3 color, out vec3 normal, float depth)
+                vec4 VoxelsTraversal(vec3 org, vec3 dir, out vec3 color, out vec3 normal, float depth)
                 {
                     DDAContext ctx = InitDDAContext(org, dir, GRID_SIZE);
                     while (ctx.mask.w == 1.0)
@@ -354,20 +354,40 @@ void RenderResources(void* _pstate,
                         {
                             color = voxel.xyz;
                             normal = ctx.mask.xyz * -ctx.step_sign;
+
+                            vec3 uv3 = fract((vec3(1.0)-abs(normal)) * (org+dir*ctx.t) * GRID_SIZE);
+                            vec2 uv = vec2(uv3.x == 0.0 ? uv3.y : uv3.x,
+                                           uv3.x == 0.0 || uv3.y == 0.0 ? uv3.z : uv3.y);
+
+                            vec3 coucou = /*abs*/(ctx.voxel_step);
+
                             vec3 ao_center = ctx.voxel_coords + normal * abs(ctx.voxel_step);
-                            float ao = 1.0 + (1.0/6.0);
-                            ao -= texture(voxels, ao_center + vec3(0.0, 0.0, 1.0) * ctx.voxel_step).w / 6.0;
-                            ao -= texture(voxels, ao_center + vec3(0.0, 0.0, -1.0) * ctx.voxel_step).w / 6.0;
-                            ao -= texture(voxels, ao_center + vec3(0.0, 1.0, 0.0) * ctx.voxel_step).w / 6.0;
-                            ao -= texture(voxels, ao_center + vec3(0.0, -1.0, 0.0) * ctx.voxel_step).w / 6.0;
-                            ao -= texture(voxels, ao_center + vec3(1.0, 0.0, 0.0) * ctx.voxel_step).w / 6.0;
-                            ao -= texture(voxels, ao_center + vec3(-1.0, 0.0, 0.0) * ctx.voxel_step).w / 6.0;
-                            return vec2(ctx.t, ao);
+                            float ao = 0.0;
+                            ao += texture(voxels, ao_center+vec3(0.0, 0.0, coucou.z)).w
+                                  * (1.0-max(0.0, normal.z*coucou.z))
+                                  /** (max(0.0, uv3.z * 2.0 - 1.0))*/ / 6.0;
+                            ao += texture(voxels, ao_center-vec3(0.0, 0.0, coucou.z)).w
+                                  * (1.0-max(0.0, normal.z*-coucou.z))
+                                  /** (max(0.0, -(uv3.z * 2.0 - 1.0)))*/ / 6.0;
+                            ao += texture(voxels, ao_center+vec3(0.0, coucou.y, 0.0)).w
+                                  * (1.0-max(0.0, normal.y*coucou.y))
+                                  /** (max(0.0, uv3.y * 2.0 - 1.0))*/ / 6.0;
+                            ao += texture(voxels, ao_center-vec3(0.0, coucou.y, 0.0)).w
+                                  * (1.0-max(0.0, normal.y*-coucou.y))
+                                  /** (max(0.0, -(uv3.y * 2.0 - 1.0)))*/ / 6.0;
+                            ao += texture(voxels, ao_center+vec3(coucou.x, 0.0, 0.0)).w
+                                  * (1.0-max(0.0, normal.x*coucou.x))
+                                  /** (max(0.0, uv3.x * 2.0 - 1.0))*/ / 6.0;
+                            ao += texture(voxels, ao_center-vec3(coucou.x, 0.0, 0.0)).w
+                                  * (1.0-max(0.0, normal.x*-coucou.x))
+                                  /** (max(0.0, -(uv3.x * 2.0 - 1.0)))*/ / 6.0;
+
+                            return vec4(ctx.t, 1.0-ao, uv);
                         }
                         StepDDAContext(ctx);
                     }
 
-                    return vec2(-1.0/0.0, 0.0);
+                    return vec4(-1.0/0.0, 0.0, 0.0, 0.0);
                 }
 
                 void main() {
@@ -398,12 +418,15 @@ void RenderResources(void* _pstate,
 
                     vec3 normal = vec3(0.0);
                     vec3 color = vec3(0.0);
-                    vec2 result = VoxelsTraversal(org, dir, color, normal, depth);
+                    vec4 result = VoxelsTraversal(org, dir, color, normal, depth);
                     float t_hit = result.x;
                     if (t_hit >= 0.0)
                     {
                         float diffuse = min(1.0, 0.2 + max(0.0, dot(normal, -cam_forward)));
-                        oFS_color = vec4(color * diffuse * result.y, 1.0);
+                        oFS_color = vec4(result.y == 1.0 ? vec3(1.0, 0.0, 1.0) : vec3(1.0), 1.0);
+                        //oFS_color = vec4(color * result.y, 1.0);
+                        //oFS_color = vec4(color * diffuse * result.y, 1.0);
+                        //oFS_color = vec4(normal * 0.5 + vec3(0.5), 1.0);
                         vec3 hit_p = (org + dir * t_hit) * 2.0 - vec3(1.0);
                         vec4 cs_p = projection * view * vec4(hit_p, 1.0);
                         gl_FragDepth = cs_p.z / cs_p.w;
