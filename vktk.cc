@@ -750,8 +750,19 @@ CommandBuffer Context::CreateCommandBuffer(Queue const& queue)
     return command_buffer;
 }
 
+VkRenderPass Context::CreateRenderPass(std::vector<RenderPassAttachment> const& _attachments)
+{
+    return CreateRenderPass(_attachments, nullptr);
+}
+
 VkRenderPass Context::CreateRenderPass(std::vector<RenderPassAttachment> const& _attachments,
-                                       RenderPassAttachment* _depth_attachment)
+                                       RenderPassAttachment const& _depth_attachment)
+{
+    return CreateRenderPass(_attachments, &_depth_attachment);
+}
+
+VkRenderPass Context::CreateRenderPass(std::vector<RenderPassAttachment> const& _attachments,
+                                       RenderPassAttachment const* _depth_attachment)
 {
     std::vector<VkAttachmentDescription> descriptions{};
     descriptions.reserve(_attachments.size());

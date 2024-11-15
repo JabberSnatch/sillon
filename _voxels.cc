@@ -70,6 +70,16 @@ struct state_t
     VkPipelineLayout skybox_pipeline_layout;
     VkPipeline skybox_pipeline;
 
+    VkRenderPass primary_pass;
+    vktk::Texture primary_pass_color;
+    vktk::Texture primary_pass_depth;
+    VkFramebuffer primary_pass_framebuffer;
+
+    vktk::DescriptorPool resolve_descriptor_pool;
+    VkDescriptorSet resolve_descriptor_set;
+    VkPipelineLayout resolve_pipeline_layout;
+    VkPipeline resolve_pipeline;
+
     VkFence last_submit;
 
     vktk::Buffer matrix_buffer;
@@ -89,8 +99,9 @@ struct MatrixBlock
     numtk::mat4f projection;
     numtk::mat4f view_model;
     numtk::mat4f view;
+    numtk::vec2<int32_t> screen_offset;
     numtk::vec2<int32_t> screen_size;
-    float padding[14];
+    float padding[12];
 };
 
 struct SkyboxPushConstants
@@ -548,36 +559,36 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->region = DeserialiseRegion("../r.-1.6.mca");
     LoadRegion(_state, _vulkan);
     LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
-    //_state->camera.current_section = numtk::vec3<int32_t>{ 16, 8, 16 };
-
-    _state->descriptor_pool = _vulkan->CreateDescriptorPool(64u, {
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          0, VK_SHADER_STAGE_FRAGMENT_BIT, 1 },
-        { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          0, VK_SHADER_STAGE_ALL, 1 },
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT,
-          VK_SHADER_STAGE_FRAGMENT_BIT, 32 * 32 * 32 }
-    });
-
-    uint32_t desc_count = (uint32_t)_state->section_textures.size();
-    VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc = {};
-    desc_count_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
-    desc_count_alloc.pNext = nullptr;
-    desc_count_alloc.descriptorSetCount = 1;
-    desc_count_alloc.pDescriptorCounts = &desc_count;
-
-    VkDescriptorSetAllocateInfo descset_allocate{};
-    descset_allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    descset_allocate.pNext= &desc_count_alloc;
-    descset_allocate.descriptorPool = _state->descriptor_pool.pool;
-    descset_allocate.descriptorSetCount = 1u;
-    descset_allocate.pSetLayouts = &_state->descriptor_pool.layout;
-    for (uint32_t index = 0; index < 64; ++index)
-        CHECKCALL(vkAllocateDescriptorSets, _vulkan->device,
-                  &descset_allocate, &_state->descriptor_set[index]);
+    //LoadArea(_state, _vulkan, { 0, 0, 0 }, { 1, 16, 1 });
 
     {
+        _state->descriptor_pool = _vulkan->CreateDescriptorPool(64u, {
+            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              0, VK_SHADER_STAGE_FRAGMENT_BIT, 1 },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+              0, VK_SHADER_STAGE_ALL, 1 },
+            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT,
+              VK_SHADER_STAGE_FRAGMENT_BIT, 32 * 32 * 32 }
+        });
+
+        uint32_t desc_count = (uint32_t)_state->section_textures.size();
+        VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc = {};
+        desc_count_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+        desc_count_alloc.pNext = nullptr;
+        desc_count_alloc.descriptorSetCount = 1;
+        desc_count_alloc.pDescriptorCounts = &desc_count;
+
+        VkDescriptorSetAllocateInfo descset_allocate{};
+        descset_allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        descset_allocate.pNext = &desc_count_alloc;
+        descset_allocate.descriptorPool = _state->descriptor_pool.pool;
+        descset_allocate.descriptorSetCount = 1u;
+        descset_allocate.pSetLayouts = &_state->descriptor_pool.layout;
+        for (uint32_t index = 0; index < 64; ++index)
+            CHECKCALL(vkAllocateDescriptorSets, _vulkan->device,
+                      &descset_allocate, &_state->descriptor_set[index]);
+
         VkPushConstantRange push_constant_range = {};
         push_constant_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
         push_constant_range.offset = 0;
@@ -611,6 +622,38 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         pipeline_create.pPushConstantRanges = &push_constant_range;
         CHECKCALL(vkCreatePipelineLayout, _vulkan->device, &pipeline_create, nullptr,
                   &_state->skybox_pipeline_layout);
+    }
+
+    {
+        _state->resolve_descriptor_pool = _vulkan->CreateDescriptorPool(1u, {
+            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              0, VK_SHADER_STAGE_FRAGMENT_BIT, 1 }
+        });
+
+        VkDescriptorSetAllocateInfo descset_allocate{};
+        descset_allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        descset_allocate.pNext = nullptr;
+        descset_allocate.descriptorPool = _state->resolve_descriptor_pool.pool;
+        descset_allocate.descriptorSetCount = 1u;
+        descset_allocate.pSetLayouts = &_state->resolve_descriptor_pool.layout;
+        CHECKCALL(vkAllocateDescriptorSets, _vulkan->device,
+                  &descset_allocate, &_state->resolve_descriptor_set);
+
+        VkPushConstantRange push_constant_range = {};
+        push_constant_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        push_constant_range.offset = 0;
+        push_constant_range.size = sizeof(numtk::vec2i);
+
+        VkPipelineLayoutCreateInfo pipeline_create{};
+        pipeline_create.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipeline_create.pNext = nullptr;
+        pipeline_create.flags = 0u;
+        pipeline_create.setLayoutCount = 1;
+        pipeline_create.pSetLayouts = &_state->resolve_descriptor_pool.layout;
+        pipeline_create.pushConstantRangeCount = 1;
+        pipeline_create.pPushConstantRanges = &push_constant_range;
+        CHECKCALL(vkCreatePipelineLayout, _vulkan->device, &pipeline_create, nullptr,
+                  &_state->resolve_pipeline_layout);
     }
 
     _state->staging_buffer = _vulkan->CreateBuffer(
@@ -764,149 +807,101 @@ void RenderResources(void* _pstate,
 {
     state_t* _state = (state_t*)_pstate;
 
-    //   2---6
-    //  /   /|
-    // 3---7 |
-    // | 0 | 4
-    // |   |/
-    // 1---5
-
-    //   Y
-    //   |
-    //   o-X
-    //  /
-    // Z
-
     {
-        static char const draw_cube_vshader[] = R"_(
-    layout(std140, set = 0, binding = 1) uniform MatrixBlock {
-        mat4 projection;
-        mat4 view_model;
-        mat4 view;
-        ivec2 screen_size;
-    };
-
-    layout(location = 0) out vec3 iFS_volume_coords;
-    layout(location = 1) out vec3 iFS_camera_position;
-
-    void main() {
-        vec3 vertex = CurrentVertex();
-        gl_Position = projection * view_model * vec4(vertex, 1.0);
-
-        iFS_camera_position = (inverse(view_model) * vec4(vec3(0.0), 1.0)).xyz;
-        iFS_volume_coords = vertex * 0.5 + vec3(0.5);
-    }
-    )_";
-
-#if 0
-        static char const voxel_traversal_func[] = R"(
-    struct DDAContext
-    {
-        vec3 step_sign;
-        vec3 exit_value;
-        vec3 delta_t;
-        vec3 max_t;
-        vec3 voxel_coords;
-        vec3 voxel_step;
-        vec4 mask;
-        float t;
-    };
-
-    DDAContext InitDDAContext(vec3 org, vec3 dir, float voxel_count)
-    {
-        vec3 voxel_space_org = clamp(org, vec3(0.0), vec3(0.99999)) * voxel_count;
-
-        DDAContext ctx;
-
-        ctx.step_sign = sign(dir);
-        ctx.exit_value = ctx.step_sign * 0.5 + vec3(0.5);
-        vec3 edge_distance = ctx.exit_value - (ctx.step_sign * fract(voxel_space_org));
-        ctx.delta_t = 1.0 / (abs(dir) * voxel_count);
-        ctx.max_t = abs(edge_distance) * ctx.delta_t;
-        ctx.voxel_coords = (floor(voxel_space_org) + vec3(0.5)) / voxel_count;
-        ctx.voxel_step = ctx.step_sign / voxel_count;
-
-        ctx.mask.xyz = vec3(0.0);
-        // Equivalent to mask =
-        // ((voxel_coords.x * step_sign.x < exit_value.x) &&
-        // (voxel_coords.y * step_sign.y < exit_value.y) &&
-        // (voxel_coords.z * step_sign.z < exit_value.z)) ? 1.0 : 0.0
-        ctx.mask.w =
-            (1.0 - step(ctx.exit_value.x, ctx.voxel_coords.x * ctx.step_sign.x))
-            * (1.0 - step(ctx.exit_value.y, ctx.voxel_coords.y * ctx.step_sign.y))
-            * (1.0 - step(ctx.exit_value.z, ctx.voxel_coords.z * ctx.step_sign.z));
-
-        ctx.t = 0.0;
-
-        return ctx;
-    }
-
-    void StepDDAContext(inout DDAContext ctx)
-    {
-        vec3 order = vec3(
-            // ctx.max_t.x < ctx.max_t.y
-            1.0 - step(ctx.max_t.y, ctx.max_t.x),
-            // ctx.max_t.x < ctx.max_t.z
-            1.0 - step(ctx.max_t.z, ctx.max_t.x),
-            // ctx.max_t.y < ctx.max_t.z
-            1.0 - step(ctx.max_t.z, ctx.max_t.y));
-
-        ctx.mask.xyz = vec3(
-            // X && Y
-            order.x * order.y,
-            // !X && Z
-            (1.0 - order.x) * order.z,
-            // (X && !Y) || (!X && Z)
-            order.x * (1.0 - order.y) + (1.0 - order.x) * (1.0 - order.z)
+        _state->primary_pass_color = _vulkan->CreateTexture(
+            _swapchain.size.width, _swapchain.size.height, 1,
+            VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+            | VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+            | VK_IMAGE_USAGE_SAMPLED_BIT
         );
 
-        ctx.t = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
-        ctx.voxel_coords += ctx.voxel_step * ctx.mask.xyz * ctx.mask.w;
-        ctx.max_t += ctx.delta_t * ctx.mask.xyz * ctx.mask.w;
+        _state->primary_pass_depth = _vulkan->CreateTexture(
+            _swapchain.size.width, _swapchain.size.height, 1,
+            VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
+            VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
+        );
 
-        ctx.mask.w =
-            abs(sign(dot(ctx.voxel_step, ctx.mask.xyz))) *
-            (1.0 - step(ctx.exit_value.x, ctx.voxel_coords.x * ctx.step_sign.x))
-            * (1.0 - step(ctx.exit_value.y, ctx.voxel_coords.y * ctx.step_sign.y))
-            * (1.0 - step(ctx.exit_value.z, ctx.voxel_coords.z * ctx.step_sign.z));
+        _state->primary_pass = _vulkan->CreateRenderPass(
+            {{ _state->primary_pass_color.format,
+               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+               //VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+               //VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+               }},
+            { _state->primary_pass_depth.format,
+              VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+              VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL }
+        );
+
+        VkImageView pass_views[2] = {
+            _state->primary_pass_color.view,
+            _state->primary_pass_depth.view
+        };
+
+        VkFramebufferCreateInfo fb_info{};
+        fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        fb_info.pNext = nullptr;
+        fb_info.flags = 0u;
+        fb_info.renderPass = _state->primary_pass;
+        fb_info.attachmentCount = 2u;
+        fb_info.pAttachments = pass_views;
+        fb_info.width = _swapchain.size.width;
+        fb_info.height = _swapchain.size.height;
+        fb_info.layers = 1;
+
+        CHECKCALL(vkCreateFramebuffer, _vulkan->device, &fb_info, nullptr,
+                  &_state->primary_pass_framebuffer);
+
+        {
+            VkDescriptorImageInfo image_info{};
+            image_info.sampler = _state->sampler;
+            image_info.imageView = _state->primary_pass_color.view;
+            image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+            VkWriteDescriptorSet desc_write = {};
+            desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            desc_write.pNext = nullptr;
+            desc_write.dstSet = _state->resolve_descriptor_set;
+            desc_write.dstBinding = 0u;
+            desc_write.dstArrayElement = 0u;
+            desc_write.descriptorCount = 1u;
+            desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            desc_write.pImageInfo = &image_info;
+            desc_write.pBufferInfo = nullptr;
+            desc_write.pTexelBufferView = nullptr;
+
+            vkUpdateDescriptorSets(_vulkan->device, 1, &desc_write, 0u, nullptr);
+        }
+
+        vktk::CommandBuffer layout_commands = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
+        layout_commands.Begin();
+
+        layout_commands.ImageTransitions(
+            VK_PIPELINE_STAGE_NONE,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            {
+                {
+                    _state->primary_pass_color.image,
+                    VK_ACCESS_NONE, VK_ACCESS_NONE,
+                    VK_IMAGE_LAYOUT_UNDEFINED,
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    //VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    VK_IMAGE_ASPECT_COLOR_BIT
+                },
+                {
+                    _state->primary_pass_depth.image,
+                    VK_ACCESS_NONE, VK_ACCESS_NONE,
+                    VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                    VK_IMAGE_ASPECT_DEPTH_BIT
+                }
+            });
+
+        layout_commands.End();
+        layout_commands.Submit();
     }
 
-    struct DDAContextSave
     {
-        vec4 mask;
-        vec3 voxel_coords;
-        vec3 max_t;
-    };
-
-    DDAContextSave SaveDDAContext(inout DDAContext ctx)
-    {
-        DDAContextSave save;
-        save.mask = ctx.mask;
-        save.voxel_coords = ctx.voxel_coords;
-        save.max_t = ctx.max_t;
-        return save;
-    }
-
-    DDAContext RestoreDDAContext(inout DDAContextSave save, vec3 dir, float voxel_count)
-    {
-        DDAContext ctx;
-
-        ctx.step_sign = sign(dir);
-        ctx.exit_value = ctx.step_sign * 0.5 + vec3(0.5);
-        ctx.delta_t = 1.0 / (abs(dir) * voxel_count);
-        ctx.voxel_step = ctx.step_sign / voxel_count;
-
-        ctx.max_t = save.max_t;
-        ctx.voxel_coords = save.voxel_coords;
-        ctx.mask = save.mask;
-        ctx.t = min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
-
-        return ctx;
-    }
-
-    )";
-#endif
-
         {
             VkShaderModule vmodule =
                 _vulkan->CompileShader_GLSL(VK_SHADER_STAGE_VERTEX_BIT,
@@ -916,7 +911,7 @@ void RenderResources(void* _pstate,
                                                 "#define CW_CUBE",
                                                 #include "shaders/cube_vertices.vert.h"
                                                 ,
-                                                draw_cube_vshader
+                                                #include "shaders/draw_cube.vert.h"
                                             });
 
             VkShaderModule fmodule =
@@ -934,7 +929,7 @@ void RenderResources(void* _pstate,
 
             _state->region_pipeline = _vulkan->CreatePipeline(
                 _state->region_pipeline_layout,
-                _swapchain.render_pass,
+                _state->primary_pass,//_swapchain.render_pass,
                 {
                     { vmodule, VK_SHADER_STAGE_VERTEX_BIT },
                     { fmodule, VK_SHADER_STAGE_FRAGMENT_BIT }
@@ -949,177 +944,12 @@ void RenderResources(void* _pstate,
     }
 
     {
-        char const skybox_vertex_source[] = R"(
-            const vec3 kTriVertices[] = vec3[3](
-                vec3(-1.0, -1.0, 1.0),
-                vec3(-1.0, 4.0, 1.0),
-                vec3(4.0, -1.0, 1.0)
-            );
-            layout(location = 0) out vec3 iFS_csPosition;
-            void main()
-            {
-                iFS_csPosition = kTriVertices[gl_VertexIndex];
-                gl_Position = vec4(kTriVertices[gl_VertexIndex], 1.0);
-            }
-        )";
-
-        char const skybox_fragment_source[] = R"(
-            layout(location = 0) in vec3 iFS_csPosition;
-            layout(location = 0) out vec4 oFS_color;
-            layout(push_constant, std430) uniform PushConstant {
-                mat4 projection;
-                mat4 view;
-                vec4 position;
-                vec3 light_dir;
-            };
-
-            float RayleighPhase(float cos_th) {
-                return 3.0 * (1 + cos_th*cos_th) / (16.0 * 3.14159265);
-            }
-
-            float RayleighDensity(float h) {
-                return exp(-h/0.008);
-            }
-
-            float MiePhase(float cos_th) {
-                const float g = 0.8;
-                // Henyey-Greenstein phase func
-                return (1 - g*g) / (pow(1 + g*g - 2*g*cos_th, 1.5) * 4 * 3.14159265);
-            }
-
-            float MieDensity(float h) {
-                return exp(-h/0.0012);
-            }
-
-            float OzonePhase() {
-                return 1 / (4.0 * 3.14159265);
-            }
-
-            float OzoneDensity(float h) {
-                return max(0.0, 1.0 - abs(h - 0.025)/0.015);
-            }
-
-            vec3 CircleIntersection(float radius, float org_height, float ray_polar)
-            {
-                float b = org_height * ray_polar;
-                float det = b*b - (org_height*org_height - radius*radius);
-                float sqrt_det = sqrt(det);
-                vec3 result = vec3(det, -b - sqrt_det, -b + sqrt_det);
-                if (result.x > 0.0 && result.y < 0.0 && result.z < 0.0)
-                    result.x = -result.x;
-                return result;
-            }
-
-#define STEP_COUNT 64.0
-#define STEP_COUNT_SECONDARY 32.0
-            void main()
-            {
-                const float base_radius = 6.360;
-                const float outer_radius = 6.460;
-
-                const float scale_factor = 1000000;
-
-                const vec3 rayleigh_scattering = vec3(5.802e-6, 13.56e-6, 33.10e-6) * scale_factor;
-                const float mie_scattering = 3.996e-6 * scale_factor;
-                const float mie_absorption = 4.40e-6 * scale_factor;
-                const vec3 ozone_absorption = vec3(0.65e-6, 1.881e-6, 0.085e-6) * scale_factor;
-
-                vec3 dir = normalize(inverse(mat3(view)) * inverse(mat3(projection)) * iFS_csPosition);
-                float light_angle = dot(dir, light_dir);
-
-                vec3 origin = vec3(0.0, base_radius, 0.0) + position.xyz * 0.000001;
-                float altitude = origin.y;
-
-                vec3 primary_ground_hit =
-                    CircleIntersection(base_radius, altitude, dir.y);
-                if (primary_ground_hit.x > 0.0)
-                {
-                    oFS_color = vec4(vec3(0.1), 1.0);
-                    return;
-                }
-
-                vec3 primary_atmosphere_hit =
-                    CircleIntersection(outer_radius, altitude, dir.y);
-                if (primary_atmosphere_hit.x <= 0.0)
-                {
-                    oFS_color = vec4(dir * 0.5 + vec3(0.5), 1.0);
-                    return;
-                }
-
-                float step_size = primary_atmosphere_hit.z / STEP_COUNT;
-
-                vec3 optical_depths = vec3(0.0);
-                vec3 inscattering = vec3(0.0);
-
-                for (float index_primary = 0.0; index_primary < STEP_COUNT; ++index_primary)
-                {
-                    vec3 step = origin + step_size * (index_primary + 0.5) * dir;
-                    float sample_height = length(step) - base_radius;
-
-                    vec3 densities = vec3(
-                        RayleighDensity(sample_height),
-                        MieDensity(sample_height),
-                        OzoneDensity(sample_height)
-                    );
-                    vec3 optical_step = densities * step_size;
-
-                    vec3 light_optical_depths = vec3(0.0);
-
-                    vec3 secondary_atmosphere_hit =
-                        CircleIntersection(outer_radius, sample_height, dot(normalize(step), light_dir));
-
-                    vec3 secondary_ground_hit =
-                        CircleIntersection(base_radius, sample_height, dot(normalize(step), light_dir));
-                    if (secondary_ground_hit.x <= 0.0)
-                        continue;
-
-                    float light_step_size = secondary_atmosphere_hit.z / STEP_COUNT_SECONDARY;
-                    for (float index_light = 0.0; index_light < STEP_COUNT_SECONDARY; ++index_light)
-                    {
-                        vec3 light_step = step + (index_light + 0.5) * light_step_size * light_dir;
-                        float light_height = length(light_step) - base_radius;
-
-                        vec3 light_densities = vec3(
-                            RayleighDensity(light_height),
-                            MieDensity(light_height),
-                            OzoneDensity(light_height)
-                        );
-
-                        light_optical_depths += light_densities * light_step_size;
-                    }
-
-                    vec3 current_depths = optical_depths + light_optical_depths;
-                    vec3 transmittance = exp(
-                        -rayleigh_scattering * current_depths.x
-                        -(mie_scattering+mie_absorption).xxx * current_depths.y
-                        -ozone_absorption * current_depths.z);
-
-                    vec3 rayleigh_transmittance = densities.x * transmittance;
-                    vec3 mie_transmittance = densities.y * transmittance;
-
-                    inscattering += 40.0 * step_size *
-                        (rayleigh_scattering * RayleighPhase(light_angle) * rayleigh_transmittance
-                         + mie_scattering * MiePhase(light_angle) * mie_transmittance);
-
-                    optical_depths += densities * step_size;
-                }
-
-                vec3 sky_color = vec3(1.0) - exp(-1.0 * inscattering);
-                oFS_color = vec4(sky_color, 1.0);
-                if (sky_color != sky_color)
-                    oFS_color = vec4(1.0, 0.0, 1.0, 1.0);
-                //oFS_color = vec4(RayleighPhase(light_angle).xxx * 0.5 + 0.5, 1.0);
-                //oFS_color = vec4(dot(sky_color, vec3(1.0/3.0)).xxx, 1.0);
-                //oFS_color = vec4(inscattering, 1.0);
-            }
-        )";
-
         VkShaderModule skybox_vertex =
             _vulkan->CompileShader_GLSL(VK_SHADER_STAGE_VERTEX_BIT,
                                         "skybox_vertex",
                                         {
                                             "#version 450",
-                                            skybox_vertex_source
+                                            #include "shaders/full_screen.vert.h"
                                         });
 
         VkShaderModule skybox_fragment =
@@ -1127,18 +957,47 @@ void RenderResources(void* _pstate,
                                         "skybox_fragment",
                                         {
                                             "#version 450",
-                                            skybox_fragment_source
+                                            #include "shaders/skybox.frag.h"
                                         });
 
         _state->skybox_pipeline = _vulkan->CreatePipeline(
             _state->skybox_pipeline_layout,
-            _swapchain.render_pass,
+            _state->primary_pass,//_swapchain.render_pass,
             { { skybox_vertex, VK_SHADER_STAGE_VERTEX_BIT },
               { skybox_fragment, VK_SHADER_STAGE_FRAGMENT_BIT } },
             VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, {});
 
         vkDestroyShaderModule(_vulkan->device, skybox_vertex, nullptr);
         vkDestroyShaderModule(_vulkan->device, skybox_fragment, nullptr);
+    }
+
+
+    {
+        VkShaderModule resolve_vertex =
+            _vulkan->CompileShader_GLSL(VK_SHADER_STAGE_VERTEX_BIT,
+                                        "resolve_vertex",
+                                        {
+                                            "#version 450",
+                                            #include "shaders/full_screen.vert.h"
+                                        });
+
+        VkShaderModule resolve_fragment =
+            _vulkan->CompileShader_GLSL(VK_SHADER_STAGE_FRAGMENT_BIT,
+                                        "resolve_fragment",
+                                        {
+                                            "#version 450",
+                                            #include "shaders/resolve.frag.h"
+                                        });
+
+        _state->resolve_pipeline = _vulkan->CreatePipeline(
+            _state->resolve_pipeline_layout,
+            _swapchain.render_pass,
+            { { resolve_vertex, VK_SHADER_STAGE_VERTEX_BIT },
+              { resolve_fragment, VK_SHADER_STAGE_FRAGMENT_BIT } },
+            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, {});
+
+        vkDestroyShaderModule(_vulkan->device, resolve_vertex, nullptr);
+        vkDestroyShaderModule(_vulkan->device, resolve_fragment, nullptr);
     }
 }
 
@@ -1180,6 +1039,31 @@ void Draw(void* _pstate,
 {
     state_t* _state = (state_t*)_pstate;
 
+    static uint32_t s_frameIndex = 0;
+    numtk::vec2u sample_index{ (s_frameIndex%4)/2, s_frameIndex%2 };
+    ++s_frameIndex;
+
+    numtk::bounds2u scissor{
+        { (_swapchain.size.width / 2) * sample_index.x(),
+          (_swapchain.size.height / 2) * sample_index.y() },
+        { _swapchain.size.width / 2,
+          _swapchain.size.height / 2 },
+    };
+
+    numtk::bounds2f viewport{
+        { 0.25f + float(sample_index.x()) * ((float)scissor.extent.x() - 0.5f),
+          0.25f + float(sample_index.y()) * ((float)scissor.extent.y() - 0.5f) },
+        { (float)scissor.extent.x(),
+          (float)scissor.extent.y() }
+    };
+
+    numtk::bounds2u render_area{
+        { (_swapchain.size.width / 2) * sample_index.x(),
+          (_swapchain.size.height / 2) * sample_index.y() },
+        { _swapchain.size.width / 2,
+          _swapchain.size.height / 2 }
+    };
+
     float how = (float)_swapchain.size.height / (float)_swapchain.size.width;
 
     MatrixBlock* matrices = (MatrixBlock*)_state->staging_area;
@@ -1201,9 +1085,14 @@ void Draw(void* _pstate,
             0.f, 0.f, 1.f, 0.f,
             (float)(index/8) * 2.f, 0.f, (float)(index%8) * 2.f, 1.f};
 
+        matrices[index].screen_offset = {
+            (int32_t)render_area.min.x(),
+            (int32_t)render_area.min.y()
+        };
+
         matrices[index].screen_size = {
-            (int32_t)_swapchain.size.width,
-            (int32_t)_swapchain.size.height
+            (int32_t)render_area.extent.x(),
+            (int32_t)render_area.extent.y()
         };
     }
 
@@ -1228,15 +1117,23 @@ void Draw(void* _pstate,
             { _state->matrix_buffer, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_UNIFORM_READ_BIT }
         });
 
-    VkViewport viewport{};
-    viewport.x = 0.f; viewport.y = 0.f;
-    viewport.width = (float)_swapchain.size.width;
-    viewport.height = (float)_swapchain.size.height;
-    viewport.minDepth = 0.f; viewport.maxDepth = 1.f;
-    vkCmdSetViewport(command_buffer, 0, 1, &viewport);
+    {
+        VkViewport vk_viewport{};
+        vk_viewport.x = viewport.min.x();
+        vk_viewport.y = viewport.min.y();
+        vk_viewport.width = (float)viewport.extent.x();
+        vk_viewport.height = (float)viewport.extent.y();
+        vk_viewport.minDepth = 0.f; vk_viewport.maxDepth = 1.f;
+        vkCmdSetViewport(command_buffer, 0, 1, &vk_viewport);
+    }
 
-    VkRect2D scissor{ VkOffset2D{ 0, 0 }, _swapchain.size };
-    vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+    {
+        VkRect2D vk_scissor{
+            { (int32_t)scissor.min.x(), (int32_t)scissor.min.y() },
+            { scissor.extent.x(), scissor.extent.y() }
+        };
+        vkCmdSetScissor(command_buffer, 0, 1, &vk_scissor);
+    }
 
     VkClearValue clear_values[2];
     {
@@ -1257,11 +1154,11 @@ void Draw(void* _pstate,
     VkRenderPassBeginInfo rp_begin_info{};
     rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rp_begin_info.pNext = nullptr;
-    rp_begin_info.renderPass = _swapchain.render_pass;
-    rp_begin_info.framebuffer = _swapchain.framebuffers[_swapchain.index];
+    rp_begin_info.renderPass = _state->primary_pass;
+    rp_begin_info.framebuffer = _state->primary_pass_framebuffer;
     rp_begin_info.renderArea = VkRect2D{
-        VkOffset2D{ 0, 0 },
-        _swapchain.size
+        { (int32_t)render_area.min.x(), (int32_t)render_area.min.y() },
+        { render_area.extent.x(), render_area.extent.y() }
     };
     rp_begin_info.clearValueCount = 2;
     rp_begin_info.pClearValues = clear_values;
@@ -1301,7 +1198,28 @@ void Draw(void* _pstate,
                            0, sizeof(numtk::vec3f), (void*)&sun_dir);
 
         vkCmdDraw(command_buffer, 36u, 1u, 0u, 0u);
+    }
 
+    vkCmdEndRenderPass(command_buffer);
+
+    command_buffer.BeginRenderPass(_swapchain.size,
+                                   _swapchain.framebuffers[_swapchain.index],
+                                   _swapchain.render_pass,
+                                   { { 0.f, 1.f, 1.f, 0.f }, { 1.f, 0.f, 0.f, 0.f } });
+
+    {
+        numtk::vec2i screen_size{ (int32_t)_swapchain.size.width, (int32_t)_swapchain.size.height };
+
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->resolve_pipeline);
+        vkCmdPushConstants(command_buffer, _state->resolve_pipeline_layout,
+                           VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0, sizeof(numtk::vec2i), (void*)&screen_size);
+        vkCmdBindDescriptorSets(command_buffer,
+                                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                _state->resolve_pipeline_layout, 0u,
+                                1u, &_state->resolve_descriptor_set,
+                                0u, nullptr);
+        vkCmdDraw(command_buffer, 3u, 1u, 0u, 0u);
     }
 
     vkCmdEndRenderPass(command_buffer);

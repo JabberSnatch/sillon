@@ -349,6 +349,8 @@ using vec3i = vec3<int32_t>;
 using mat4f = mat4<float>;
 using quatf = quat<float>;
 
+using bounds2f = bounds2<float>;
+using bounds2u = bounds2<uint32_t>;
 using bounds2i = bounds2<int32_t>;
 using bounds3i = bounds3<int32_t>;
 

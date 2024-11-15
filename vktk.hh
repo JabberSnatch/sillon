@@ -251,8 +251,11 @@ struct Context
         VkImageLayout initialLayout;
         VkImageLayout finalLayout;
     };
+    VkRenderPass CreateRenderPass(std::vector<RenderPassAttachment> const& _attachments);
     VkRenderPass CreateRenderPass(std::vector<RenderPassAttachment> const& _attachments,
-                                  RenderPassAttachment* _depth_attachment);
+                                  RenderPassAttachment const& _depth_attachment);
+    VkRenderPass CreateRenderPass(std::vector<RenderPassAttachment> const& _attachments,
+                                  RenderPassAttachment const* _depth_attachment);
 
     struct PipelineStage {
         VkShaderModule module;
