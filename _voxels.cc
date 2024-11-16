@@ -99,8 +99,8 @@ struct MatrixBlock
     numtk::mat4f projection;
     numtk::mat4f view_model;
     numtk::mat4f view;
-    numtk::vec2<int32_t> screen_offset;
-    numtk::vec2<int32_t> screen_size;
+    numtk::vec2f screen_offset;
+    numtk::vec2i screen_size;
     float padding[12];
 };
 
@@ -559,7 +559,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->region = DeserialiseRegion("../r.-1.6.mca");
     LoadRegion(_state, _vulkan);
     LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
-    //LoadArea(_state, _vulkan, { 0, 0, 0 }, { 1, 16, 1 });
 
     {
         _state->descriptor_pool = _vulkan->CreateDescriptorPool(64u, {
@@ -1051,8 +1050,8 @@ void Draw(void* _pstate,
     };
 
     numtk::bounds2f viewport{
-        { 0.25f + float(sample_index.x()) * ((float)scissor.extent.x() - 0.5f),
-          0.25f + float(sample_index.y()) * ((float)scissor.extent.y() - 0.5f) },
+        { 0.f + float(sample_index.x()) * ((float)scissor.extent.x() - 0.5f),
+          0.f + float(sample_index.y()) * ((float)scissor.extent.y() - 0.5f) },
         { (float)scissor.extent.x(),
           (float)scissor.extent.y() }
     };
@@ -1085,11 +1084,7 @@ void Draw(void* _pstate,
             0.f, 0.f, 1.f, 0.f,
             (float)(index/8) * 2.f, 0.f, (float)(index%8) * 2.f, 1.f};
 
-        matrices[index].screen_offset = {
-            (int32_t)render_area.min.x(),
-            (int32_t)render_area.min.y()
-        };
-
+        matrices[index].screen_offset = viewport.min;
         matrices[index].screen_size = {
             (int32_t)render_area.extent.x(),
             (int32_t)render_area.extent.y()

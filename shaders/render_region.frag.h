@@ -12,7 +12,7 @@ layout(std140, set = 0, binding = 1) uniform MatrixBlock {
     mat4 projection;
     mat4 view_model;
     mat4 view;
-    ivec2 screen_offset;
+    vec2 screen_offset;
     ivec2 screen_size;
 };
 
@@ -119,8 +119,8 @@ vec3 RegionTraversal(vec3 org, vec3 dir, out vec3 n, float depth)
 
 void main() {
     vec2 uv =
-        (vec2(gl_FragCoord.x, gl_FragCoord.y) - vec2(screen_offset.x, screen_offset.y))
-        / vec2(screen_size.x, screen_size.y);
+        (vec2(gl_FragCoord.xy) - vec2(screen_offset.xy))
+        / vec2(screen_size.xy);
 
     vec3 dir =
         inverse(mat3(view_model)) *
