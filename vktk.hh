@@ -105,7 +105,7 @@ struct Buffer {
 
 struct Texture {
     VkImage image;
-    VkDeviceMemory memory;
+    Allocation alloc;
     VkImageType image_type;
     VkFormat format;
     VkImageView view;

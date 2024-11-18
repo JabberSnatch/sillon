@@ -1396,15 +1396,8 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
     VkMemoryRequirements requirements{};
     vkGetImageMemoryRequirements(device, texture.image, &requirements);
 
-    VkMemoryAllocateInfo allocate_info{};
-    allocate_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocate_info.pNext = nullptr;
-    allocate_info.allocationSize = requirements.size;
-    allocate_info.memoryTypeIndex =
-        SelectMemoryType(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, requirements.size);
-
-    CHECKCALL(vkAllocateMemory, device, &allocate_info, nullptr, &texture.memory);
-    CHECKCALL(vkBindImageMemory, device, texture.image, texture.memory, 0);
+    texture.alloc = allocator.Alloc(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, requirements.size, requirements.alignment);
+    CHECKCALL(vkBindImageMemory, device, texture.image, texture.alloc.memory, texture.alloc.offset);
 
     texture.view = CreateImageView(texture);
     return texture;
@@ -1538,7 +1531,6 @@ void Context::DestroyTexture(Texture const& _texture) const
 {
     vkDestroyImageView(device, _texture.view, nullptr);
     vkDestroyImage(device, _texture.image, nullptr);
-    vkFreeMemory(device, _texture.memory, nullptr);
 }
 
 VkImageView Context::CreateImageView(Texture const& _texture) const

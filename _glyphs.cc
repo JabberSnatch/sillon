@@ -412,7 +412,7 @@ void Shutdown(void* _pstate,
     vkDestroyPipelineLayout(_vulkan->device, _state->pipeline_layout, nullptr);
 
     vkDestroyImage(_vulkan->device, _state->font.image, nullptr);
-    vkFreeMemory(_vulkan->device, _state->font.memory, nullptr);
+    //vkFreeMemory(_vulkan->device, _state->font.memory, nullptr);
     vkDestroyImageView(_vulkan->device, _state->font_view, nullptr);
 
     vkDestroySampler(_vulkan->device, _state->sampler, nullptr);

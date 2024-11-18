@@ -1261,10 +1261,8 @@ void Shutdown(void* _pstate,
         _state->descriptor_set[index] = VK_NULL_HANDLE;
     _vulkan->DestroyDescriptorPool(_state->descriptor_pool);
 
-    vkDestroyImage(_vulkan->device, _state->region_texture.image, nullptr);
-    _state->region_texture.image = VK_NULL_HANDLE;
-    vkFreeMemory(_vulkan->device, _state->region_texture.memory, nullptr);
-    _state->region_texture.memory = VK_NULL_HANDLE;
+    _vulkan->DestroyTexture(_state->region_texture);
+    _state->region_texture = vktk::Texture{};
 
     vkUnmapMemory(_vulkan->device, _state->staging_buffer.alloc.memory);
 
