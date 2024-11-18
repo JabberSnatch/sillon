@@ -62,13 +62,18 @@ struct state_t
 
     numtk::vec2f sun_spherical = { 0.f, 0.f };
 
+    uint32_t frame_index = 0;
+    bool pixel_cycling_enabled = false;
+
     VkPipelineLayout region_pipeline_layout;
-    VkPipeline region_pipeline;
     vktk::DescriptorPool descriptor_pool;
     VkDescriptorSet descriptor_set[64];
+    VkPipeline region_pipeline_full;
+    VkPipeline region_pipeline_cycling;
 
     VkPipelineLayout skybox_pipeline_layout;
-    VkPipeline skybox_pipeline;
+    VkPipeline skybox_pipeline_full;
+    VkPipeline skybox_pipeline_cycling;
 
     VkRenderPass primary_pass;
     vktk::Texture primary_pass_color;
@@ -923,19 +928,29 @@ void RenderResources(void* _pstate,
                                                 #include "shaders/render_region.frag.h"
                                             });
 
-            if (_state->region_pipeline != VK_NULL_HANDLE)
-                vkDestroyPipeline(_vulkan->device, _state->region_pipeline, nullptr);
+            if (_state->region_pipeline_full != VK_NULL_HANDLE)
+            {
+                vkDestroyPipeline(_vulkan->device, _state->region_pipeline_full, nullptr);
+                vkDestroyPipeline(_vulkan->device, _state->region_pipeline_cycling, nullptr);
+            }
 
-            _state->region_pipeline = _vulkan->CreatePipeline(
+            _state->region_pipeline_full = _vulkan->CreatePipeline(
                 _state->region_pipeline_layout,
-                _state->primary_pass,//_swapchain.render_pass,
+                _swapchain.render_pass,
                 {
                     { vmodule, VK_SHADER_STAGE_VERTEX_BIT },
                     { fmodule, VK_SHADER_STAGE_FRAGMENT_BIT }
                 },
-                VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-                {}
-                );
+                VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, {});
+
+            _state->region_pipeline_cycling = _vulkan->CreatePipeline(
+                _state->region_pipeline_layout,
+                _state->primary_pass,
+                {
+                    { vmodule, VK_SHADER_STAGE_VERTEX_BIT },
+                    { fmodule, VK_SHADER_STAGE_FRAGMENT_BIT }
+                },
+                VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, {});
 
             vkDestroyShaderModule(_vulkan->device, vmodule, nullptr);
             vkDestroyShaderModule(_vulkan->device, fmodule, nullptr);
@@ -959,9 +974,16 @@ void RenderResources(void* _pstate,
                                             #include "shaders/skybox.frag.h"
                                         });
 
-        _state->skybox_pipeline = _vulkan->CreatePipeline(
+        _state->skybox_pipeline_full = _vulkan->CreatePipeline(
             _state->skybox_pipeline_layout,
-            _state->primary_pass,//_swapchain.render_pass,
+            _swapchain.render_pass,
+            { { skybox_vertex, VK_SHADER_STAGE_VERTEX_BIT },
+              { skybox_fragment, VK_SHADER_STAGE_FRAGMENT_BIT } },
+            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, {});
+
+        _state->skybox_pipeline_cycling = _vulkan->CreatePipeline(
+            _state->skybox_pipeline_layout,
+            _state->primary_pass,
             { { skybox_vertex, VK_SHADER_STAGE_VERTEX_BIT },
               { skybox_fragment, VK_SHADER_STAGE_FRAGMENT_BIT } },
             VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, {});
@@ -1026,6 +1048,9 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
             std::min(std::max(_state->sun_spherical.y(), -numtk::kPi*0.4999f), numtk::kPi*0.4999f);
     }
 
+    if (!_input->key_down['c'] && _past_input->key_down['c'])
+        _state->pixel_cycling_enabled = !_state->pixel_cycling_enabled;
+
     _state->camera.Update(_input, _past_input);
 
     return true;
@@ -1038,30 +1063,30 @@ void Draw(void* _pstate,
 {
     state_t* _state = (state_t*)_pstate;
 
-    static uint32_t s_frameIndex = 0;
-    numtk::vec2u sample_index{ (s_frameIndex%4)/2, s_frameIndex%2 };
-    ++s_frameIndex;
+    numtk::vec2u const sample_index{ (_state->frame_index%4)/2, _state->frame_index%2 };
+    ++_state->frame_index;
 
-    numtk::bounds2u scissor{
-        { (_swapchain.size.width / 2) * sample_index.x(),
-          (_swapchain.size.height / 2) * sample_index.y() },
-        { _swapchain.size.width / 2,
-          _swapchain.size.height / 2 },
-    };
+    numtk::bounds2u scissor{ { 0, 0 }, { _swapchain.size.width, _swapchain.size.height } };
+    numtk::bounds2f viewport{ { 0.f, 0.f }, { (float)scissor.extent.x(), (float)scissor.extent.y() } };
 
-    numtk::bounds2f viewport{
-        { 0.f + float(sample_index.x()) * ((float)scissor.extent.x() - 0.5f),
-          0.f + float(sample_index.y()) * ((float)scissor.extent.y() - 0.5f) },
-        { (float)scissor.extent.x(),
-          (float)scissor.extent.y() }
-    };
+    if (_state->pixel_cycling_enabled)
+    {
+         scissor = numtk::bounds2u{
+            { ((_swapchain.size.width) / 2) * sample_index.x(),
+              ((_swapchain.size.height) / 2) * sample_index.y() },
+            { (_swapchain.size.width) / 2,
+              (_swapchain.size.height) / 2 },
+        };
 
-    numtk::bounds2u render_area{
-        { (_swapchain.size.width / 2) * sample_index.x(),
-          (_swapchain.size.height / 2) * sample_index.y() },
-        { _swapchain.size.width / 2,
-          _swapchain.size.height / 2 }
-    };
+         viewport = numtk::bounds2f{
+            { 0.f + float(sample_index.x()) * ((float)scissor.extent.x() - 0.5f),
+              0.f + float(sample_index.y()) * ((float)scissor.extent.y() - 0.5f) },
+            { (float)scissor.extent.x(),
+              (float)scissor.extent.y() }
+        };
+    }
+
+    numtk::bounds2u render_area = scissor;
 
     float how = (float)_swapchain.size.height / (float)_swapchain.size.width;
 
@@ -1149,8 +1174,18 @@ void Draw(void* _pstate,
     VkRenderPassBeginInfo rp_begin_info{};
     rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rp_begin_info.pNext = nullptr;
-    rp_begin_info.renderPass = _state->primary_pass;
-    rp_begin_info.framebuffer = _state->primary_pass_framebuffer;
+
+    if (!_state->pixel_cycling_enabled)
+    {
+        rp_begin_info.renderPass = _swapchain.render_pass;
+        rp_begin_info.framebuffer = _swapchain.framebuffers[_swapchain.index];
+    }
+    else
+    {
+        rp_begin_info.renderPass = _state->primary_pass;
+        rp_begin_info.framebuffer = _state->primary_pass_framebuffer;
+    }
+
     rp_begin_info.renderArea = VkRect2D{
         { (int32_t)render_area.min.x(), (int32_t)render_area.min.y() },
         { render_area.extent.x(), render_area.extent.y() }
@@ -1173,14 +1208,20 @@ void Draw(void* _pstate,
         push_constants.position = numtk::vec4f{ 0.f, 20.f, 0.f };
         push_constants.light_dir = sun_dir;
 
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->skybox_pipeline);
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                          !_state->pixel_cycling_enabled
+                          ? _state->skybox_pipeline_full
+                          : _state->skybox_pipeline_cycling);
         vkCmdPushConstants(command_buffer, _state->skybox_pipeline_layout,
                            VK_SHADER_STAGE_FRAGMENT_BIT,
                            0, sizeof(SkyboxPushConstants), (void*)&push_constants);
         vkCmdDraw(command_buffer, 3u, 1u, 0u, 0u);
     }
 
-    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->region_pipeline);
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      !_state->pixel_cycling_enabled
+                      ? _state->region_pipeline_full
+                      : _state->region_pipeline_cycling);
     for (uint32_t index = 0; index < 64; ++index)
     {
         vkCmdBindDescriptorSets(command_buffer,
@@ -1197,27 +1238,30 @@ void Draw(void* _pstate,
 
     vkCmdEndRenderPass(command_buffer);
 
-    command_buffer.BeginRenderPass(_swapchain.size,
-                                   _swapchain.framebuffers[_swapchain.index],
-                                   _swapchain.render_pass,
-                                   { { 0.f, 1.f, 1.f, 0.f }, { 1.f, 0.f, 0.f, 0.f } });
-
+    if (_state->pixel_cycling_enabled)
     {
-        numtk::vec2i screen_size{ (int32_t)_swapchain.size.width, (int32_t)_swapchain.size.height };
+        command_buffer.BeginRenderPass(_swapchain.size,
+                                       _swapchain.framebuffers[_swapchain.index],
+                                       _swapchain.render_pass,
+                                       { { 0.f, 1.f, 1.f, 0.f }, { 1.f, 0.f, 0.f, 0.f } });
 
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->resolve_pipeline);
-        vkCmdPushConstants(command_buffer, _state->resolve_pipeline_layout,
-                           VK_SHADER_STAGE_FRAGMENT_BIT,
-                           0, sizeof(numtk::vec2i), (void*)&screen_size);
-        vkCmdBindDescriptorSets(command_buffer,
-                                VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                _state->resolve_pipeline_layout, 0u,
-                                1u, &_state->resolve_descriptor_set,
-                                0u, nullptr);
-        vkCmdDraw(command_buffer, 3u, 1u, 0u, 0u);
+        {
+            numtk::vec2i screen_size{ (int32_t)_swapchain.size.width, (int32_t)_swapchain.size.height };
+
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->resolve_pipeline);
+            vkCmdPushConstants(command_buffer, _state->resolve_pipeline_layout,
+                               VK_SHADER_STAGE_FRAGMENT_BIT,
+                               0, sizeof(numtk::vec2i), (void*)&screen_size);
+            vkCmdBindDescriptorSets(command_buffer,
+                                    VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                    _state->resolve_pipeline_layout, 0u,
+                                    1u, &_state->resolve_descriptor_set,
+                                    0u, nullptr);
+            vkCmdDraw(command_buffer, 3u, 1u, 0u, 0u);
+        }
+
+        vkCmdEndRenderPass(command_buffer);
     }
-
-    vkCmdEndRenderPass(command_buffer);
 
     command_buffer.End();
 
@@ -1249,8 +1293,10 @@ void Shutdown(void* _pstate,
               vktk::Context* _vulkan)
 {
     state_t* _state = (state_t*)_pstate;
-    vkDestroyPipeline(_vulkan->device, _state->region_pipeline, nullptr);
-    _state->region_pipeline = VK_NULL_HANDLE;
+    vkDestroyPipeline(_vulkan->device, _state->region_pipeline_full, nullptr);
+    _state->region_pipeline_full = VK_NULL_HANDLE;
+    vkDestroyPipeline(_vulkan->device, _state->region_pipeline_cycling, nullptr);
+    _state->region_pipeline_cycling = VK_NULL_HANDLE;
     vkDestroyPipelineLayout(_vulkan->device, _state->region_pipeline_layout, nullptr);
     _state->region_pipeline_layout = VK_NULL_HANDLE;
     vkDestroySampler(_vulkan->device, _state->sampler, nullptr);
