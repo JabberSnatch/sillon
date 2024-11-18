@@ -1,5 +1,6 @@
 #if defined(_WIN32)
 #define VK_USE_PLATFORM_WIN32_KHR
+#define NOMINMAX
 #include <windows.h>
 #endif
 
