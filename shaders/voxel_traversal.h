@@ -71,6 +71,12 @@ void StepDDAContext(inout DDAContext ctx)
         * (1.0 - step(ctx.exit_value.z, ctx.voxel_coords.z * ctx.step_sign.z));
 }
 
+vec3 RecursionPointDDAContext(DDAContext ctx, vec3 org, vec3 dir, float region_size)
+{
+    return (org+dir*ctx.t) * region_size * (1.0 - 0.00001*ctx.step_sign)
+        - floor(ctx.voxel_coords * region_size);
+}
+
 struct DDAContextSave
 {
     vec4 mask;
