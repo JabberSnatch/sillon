@@ -95,6 +95,8 @@ struct state_t
     vktk::Texture region_texture;
     RegionData region;
 
+    voxtk::Region<uint8_t> voxel_region{ { 512u, 512u, 512u }, (uint8_t)0 };
+
     uint32_t section_index = 0;
     std::vector<vktk::Texture> section_textures{};
 };
@@ -117,6 +119,7 @@ struct SkyboxPushConstants
     numtk::vec3f light_dir;
 };
 
+#if 0
 RegionData::ChunkData DecodeChunk(mctk::MCAChunkData const& chunk_data)
 {
     using namespace mctk;
@@ -251,6 +254,154 @@ RegionData DeserialiseRegion(std::string const& file_path)
 
     return output;
 }
+#else
+
+void DecodeChunk(voxtk::Region<uint8_t>& region,
+                 mctk::MCAChunkData const& chunk_data,
+                 numtk::vec2u const& chunk_xz)
+{
+    using namespace mctk;
+
+    std::vector<NBTField> chunk_fields = MCAPackedNBTDecode(chunk_data);
+    if (chunk_fields.empty())
+        return;
+
+    NBTCompound const& root = *(NBTCompound const*)chunk_fields[0].payload;
+    for (NBTField const& field0 : root)
+    {
+        if (field0.name == "sections"
+            && field0.type == TAG_List)
+        {
+            NBTList const& sections = *(NBTList const*)field0.payload;
+            NBTCompound const* compounds = (NBTCompound const*)sections.data;
+            for (uint32_t index = 0u; index < sections.size; ++index)
+            {
+                NBTCompound const& compound = compounds[index];
+                //int32_t section_index = -1;
+                //RegionData::SectionData section_data = {};
+                NBTCompound const* block_states = nullptr;
+                int8_t section_y = -1;
+
+                for (NBTField const& field1 : compound)
+                {
+                    if (field1.name == "Y"
+                        && field1.type == TAG_Byte)
+                        section_y = (*(int8_t const*)field1.payload) + 4;
+
+                    if (field1.name == "block_states"
+                        && field1.type == TAG_Compound)
+                    {
+                        block_states = (NBTCompound const*)field1.payload;
+                    }
+                }
+
+                if (section_y >= 0 && block_states)
+                {
+                    numtk::vec3u section_begin =
+                        numtk::vec3u{ chunk_xz.x(), (uint32_t)section_y, chunk_xz.y() } * 16u;
+                    numtk::vec3u section_end =
+                        section_begin + numtk::vec3u::Constant(16u);
+
+                    //NBTCompound const& block_states = *(NBTCompound const*)field1.payload;
+                    NBTLongArray const* block_data_field = nullptr;
+                    uint32_t palette_size = 0u;
+                    std::vector<std::string> palette_data = {};// = section_data.palette;
+
+                    for (NBTField const& field2 : *block_states)
+                    {
+                        if (field2.name == "palette"
+                            && field2.type == TAG_List)
+                        {
+                            NBTList const& palette = *((NBTList const*)field2.payload);
+                            NBTCompound const* blocks = (NBTCompound const*)palette.data;
+                            palette_size = palette.size;
+
+                            for (uint32_t block_index = 0u;
+                                 block_index < palette_size;
+                                 ++block_index)
+                            {
+                                NBTCompound const& block = blocks[block_index];
+
+                                for (NBTField const& field3 : block)
+                                    if (field3.name == "Name"
+                                        && field3.type == TAG_String)
+                                        palette_data.push_back(
+                                            (*(NBTString const*)field3.payload).substr(10));
+                            }
+                        }
+
+                        if (field2.name == "data"
+                            && field2.type == TAG_Long_Array)
+                            block_data_field = (NBTLongArray const*)field2.payload;
+                    }
+
+                    if (palette_size == 1)
+                    {
+                        region.Set(section_begin, section_end, (uint8_t)0);
+                        //std::memset(section_data.block_ids.data(), 0, 2 * 4096);
+                        continue;
+                    }
+
+                    NBTLongArray const& block_data = *block_data_field;
+                    uint32_t bit_count = numtk::log2(palette_size-1);
+                    if (palette_size - (1 << (bit_count-1)))
+                        ++bit_count;
+                    bit_count = std::max(bit_count, 4u);
+
+                    uint64_t block_index = 0;
+                    uint32_t data_index = 0;
+                    uint8_t data_offset = 0;
+                    while (block_index < 4096 && data_index < block_data.size())
+                    {
+                        if (data_offset + bit_count > 64)
+                        {
+                            data_offset = 0;
+                            ++data_index;
+                        }
+
+                        uint16_t block_id = (uint16_t)
+                            ((block_data[data_index] >> data_offset)
+                             & ((1ull << bit_count) - 1));
+
+                        uint32_t x = block_index % 16;
+                        uint32_t z = (block_index / 16) % 16;
+                        uint32_t y = (block_index / 256) % 16;
+
+                        numtk::vec3u point = section_begin + numtk::vec3u{ x, y, z };
+                        region.Set(point, (uint8_t)block_id);
+                        //section_data.block_ids[z * 256 + y * 16 + x] = block_id;
+                        data_offset += bit_count;
+                        ++block_index;
+                    }
+                }
+            }
+        }
+    }
+}
+
+voxtk::Region<uint8_t> DeserialiseRegion(std::string const& file_path)
+{
+    systk::Timer scope_time{ "DeserialiseRegion",
+        [](std::string const& tag, float time) {
+            std::cout << "[" << tag << "] " << time << " s" << std::endl;
+        }
+    };
+
+    std::vector<uint8_t> region_file = systk::LoadFile(file_path.c_str());
+    mctk::MCAFileData mca_data = mctk::MCADecode(region_file.data(), region_file.size());
+    voxtk::Region<uint8_t> output{ numtk::vec3u{ 512u, 512u, 512u }, (uint8_t)0 };
+
+    for (uint32_t index = 0; index < 1024; ++index)
+    {
+        uint32_t chunk_x = index % 32;
+        uint32_t chunk_z = index / 32;
+        DecodeChunk(output, mca_data.chunks[index], numtk::vec2u{ chunk_x, chunk_z });
+    }
+
+    return output;
+}
+
+#endif
 
 void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& update_commands,
                  numtk::vec3<int32_t> const& coords)
@@ -561,7 +712,8 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     }
 #endif
 
-    _state->region = DeserialiseRegion("../r.-1.6.mca");
+    //_state->region = DeserialiseRegion("../r.-1.6.mca");
+    _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
     LoadRegion(_state, _vulkan);
     LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
 

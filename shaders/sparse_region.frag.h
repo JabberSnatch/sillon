@@ -1,9 +1,13 @@
+R"(
+
+#extension GL_EXT_nonuiform_qualifier: enable
 
 layout(location = 0) in vec3 iFS_volume_coords;
 layout(location = 1) in vec3 iFS_camera_position;
 layout(location = 0) out vec4 color;
 
 layout(set = 0, binding = 0) uniform usampler3D region;
+#if 0
 layout(set = 0, binding = 1) uniform usampler3D masks[];
 struct NodePointer
 {
@@ -11,8 +15,9 @@ struct NodePointer
     uint offset;
 };
 NodePointer pointers[];
+#endif
 
-void RegionTraversal(vec3 org, vec3 dir)
+vec3 RegionTraversal(vec3 org, vec3 dir)
 {
     DDAContextSave ctx_cache[3];
     vec3 org_cache[3];
@@ -20,33 +25,35 @@ void RegionTraversal(vec3 org, vec3 dir)
     DDAContext ctx = InitDDAContext(org, dir, 128.0);
     while (ctx.mask.w == 1.0)
     {
-        while (ctx.mask.w == 1.0)
+        uvec2 data = texture(region, ctx.voxel_coords).xy;
+
+        if (data != uvec2(0, 0))
         {
-            uvec2 data = texture(region, ctx.voxel_coords).xy;
+            ctx_cache[0] = SaveDDAContext(ctx);
+            org_cache[0] = org;
+            org = RecursionPointDDAContext(ctx, org, dir, 128.0);
+            ctx = InitDDAContext(org, dir, 4.0);
 
-            if (data != uvec2(0, 0))
+            while (ctx.mask.w == 1.0)
             {
-                ctx_cache[0] = SaveDDAContext(ctx);
-                org_cache[0] = org;
-                org = RecursionPointDDAContext(ctx, org, dir, 128.0);
-                ctx = InitDDAContext(org, dir, 4.0);
+                uvec3 int_coords = floor(ctx.voxel_coords * 4.0);
+                uint side_index = int_coords.z / 2;
+                uint voxel_index = int_coords.x + int_coords.y * 4 + (int_coords.z%2)*16;
 
-                while (ctx.mask.w == 1.0)
-                {
-                    uvec3 int_coords = floor(ctx.voxel_coords * 4.0);
-                    uint side_index = int_coords.z / 2;
-                    uint voxel_index = int_coords.x + int_coords.y * 4 + (int_coords.z%2)*16;
-                    if (data[side_index] & (1<<voxel_index))
-                    {
-                        // HIT
-                    }
-                    StepDDAContext(ctx);
-                }
+                if (data[side_index] & (1<<voxel_index))
+                    return HitNormalDDAContext(ctx);
+
+                StepDDAContext(ctx);
             }
 
-            StepDDAContext(ctx);
+            ctx = RestoreDDAContext(ctx_cache[0], dir, 128.0);
+            org = org_cache[0];
         }
+
+        StepDDAContext(ctx);
     }
+
+    return vec3(0.0);
 }
 
 void main()
@@ -75,5 +82,8 @@ void main()
 
     vec3 org = root_org;
 
-    masks[0];
+    vec3 trav = RegionTraversal(org, dir);
+    color = trav * 0.5 + vec3(0.5);
 }
+
+)"

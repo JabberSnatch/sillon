@@ -106,6 +106,11 @@ struct ObjectPool
 {
     using Handle = uint64_t;
 
+    void Expand(uint64_t required_size)
+    {
+        items.Expand(required_size);
+    }
+
     Handle Reserve() {
         Handle handle = free_list.Reserve();
         items.Expand(free_list.RequiredSize());

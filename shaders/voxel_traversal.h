@@ -77,6 +77,11 @@ vec3 RecursionPointDDAContext(DDAContext ctx, vec3 org, vec3 dir, float region_s
         - floor(ctx.voxel_coords * region_size);
 }
 
+vec3 HitNormalDDAContext(DDAContext ctx)
+{
+    return ctx.mask.xyz * -ctx.step_sign;
+}
+
 struct DDAContextSave
 {
     vec4 mask;
