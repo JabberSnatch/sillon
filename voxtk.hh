@@ -501,6 +501,18 @@ struct Region
         numtk::vec3u Begin() const { return location * (1u << (3*(depth+1))); }
         numtk::vec3u End() const { return Begin() + numtk::vec3u::Constant(8u); }
 
+        bool Contains(numtk::vec3u const& point) const {
+            numtk::vec3u const begin = Begin();
+            numtk::vec3u const end = End();
+            return
+                point.x() >= begin.x()
+                && point.y() >= begin.y()
+                && point.z() >= begin.z()
+                && point.x() < end.x()
+                && point.y() < end.y()
+                && point.z() < end.z();
+        }
+
         void SetData(numtk::vec3u const& point, DataType const& value) {
             if (data.empty()) data.resize(VoxelMask::kVolume);
             uint32_t const index =
@@ -525,14 +537,7 @@ struct Region
         VoxelMask child_mask{};
         VoxelMask data_mask{};
         std::vector<DataType> data{};
-        dstk::OrderedVector<numtk::vec3u, Node*> children{
-            [](numtk::vec3u const& _lhs, numtk::vec3u const& _rhs) {
-                return _lhs.x() < _rhs.x()
-                    || (_lhs.x() == _rhs.x()
-                        && (_lhs.y() < _rhs.y()
-                            || (_lhs.y() == _rhs.y() && _lhs.z() < _rhs.z())));
-            }
-        };
+        dstk::OrderedVector<numtk::vec3u, Node*> children{};
     };
 
     Node* root = nullptr;

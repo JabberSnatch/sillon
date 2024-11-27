@@ -134,11 +134,7 @@ struct ObjectPool
 template <typename Key, typename Value>
 struct OrderedVector
 {
-    template <typename OrderPredicate>
-    OrderedVector(OrderPredicate _order_predicate)
-        : order_predicate{ _order_predicate }
-    {}
-
+    OrderedVector() = default;
     OrderedVector(OrderedVector const&) = default;
     OrderedVector(OrderedVector&&) = default;
     OrderedVector& operator=(OrderedVector const&) = default;
@@ -146,7 +142,7 @@ struct OrderedVector
 
     std::vector<Value>::iterator insert(Key const& k, Value const& v)
     {
-        auto key_position = std::lower_bound(keys.begin(), keys.end(), k, order_predicate);
+        auto key_position = std::lower_bound(keys.begin(), keys.end(), k);
         auto item_position = std::next(items.begin(), std::distance(keys.begin(), key_position));
         if (key_position != keys.end() && *key_position == k)
         {
@@ -162,7 +158,7 @@ struct OrderedVector
 
     void erase(Key const& k)
     {
-        auto key_position = std::lower_bound(keys.begin(), keys.end(), k, order_predicate);
+        auto key_position = std::lower_bound(keys.begin(), keys.end(), k);
         auto item_position = std::next(items.begin(), std::distance(keys.begin(), key_position));
         if (key_position != keys.end() && *key_position == k)
         {
@@ -172,13 +168,13 @@ struct OrderedVector
     }
 
     bool contains(Key const& k) const {
-        auto key_position = std::lower_bound(keys.begin(), keys.end(), k, order_predicate);
+        auto key_position = std::lower_bound(keys.begin(), keys.end(), k);
         return key_position != keys.end() && *key_position == k;
     }
 
     Value const& operator[](Key const& k) const
     {
-        auto key_position = std::lower_bound(keys.begin(), keys.end(), k, order_predicate);
+        auto key_position = std::lower_bound(keys.begin(), keys.end(), k);
         if (key_position != keys.end() && *key_position == k)
             return *std::next(items.begin(), std::distance(keys.begin(), key_position));
         else
@@ -192,7 +188,6 @@ struct OrderedVector
         );
     }
 
-    std::function<bool(Key const&, Key const&)> order_predicate;
     std::vector<Value> items{};
     std::vector<Key> keys{};
 };

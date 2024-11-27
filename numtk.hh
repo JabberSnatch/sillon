@@ -71,6 +71,13 @@ struct vec3 : public std::array<scalar, 3>
     vec3 operator%(vec3 const& o) const { return { x()%o.x(), y()%o.y(), z()%o.z() }; }
     vec3 operator%(scalar s) const { return { x()%s, y()%s, z()%s }; }
 
+    bool operator<(vec3 const& o) {
+        return x() < o.x()
+            || (x() == o.x()
+                && (y() < o.y()
+                    || (y() == o.y() && z() < o.z())));
+    }
+
     scalar dot(vec3 const& o) const { return x()*o.x() + y()*o.y() + z()*o.z(); }
     float sqrnorm() const { return dot(*this); }
     float norm() const { return std::sqrt(sqrnorm()); }
