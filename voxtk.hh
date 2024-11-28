@@ -303,7 +303,8 @@ struct Region
         Node* current_node = root;
         while (current_node)
         {
-            numtk::vec3u local_point = point / (1u << (3 * current_node->depth));
+            numtk::vec3u local_point = (point / (1u<<(3*current_node->depth)))
+                % VoxelMask::kSize;
             if (current_node->child_mask.Test(local_point))
             {
                 uint16_t point_index = current_node->ChildIndex(local_point);

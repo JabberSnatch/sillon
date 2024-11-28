@@ -368,7 +368,10 @@ void DecodeChunk(voxtk::Region<uint8_t>& region,
                         uint32_t y = (block_index / 256) % 16;
 
                         numtk::vec3u point = section_begin + numtk::vec3u{ x, y, z };
-                        region.Set(point, (uint8_t)block_id);
+                        if (palette_data[block_id] != "air"
+                            && palette_data[block_id] != "glow_lichen")
+                            region.Set(point, (uint8_t)block_id);
+
                         //section_data.block_ids[z * 256 + y * 16 + x] = block_id;
                         data_offset += bit_count;
                         ++block_index;
@@ -610,6 +613,7 @@ void LoadRegion(state_t* state, vktk::Context* vulkan)
         }
     };
 
+#if 0
     RegionData const& region = state->region;
     state->region_texture = vulkan->CreateTexture(
         32, 32, 32,
@@ -648,6 +652,55 @@ void LoadRegion(state_t* state, vktk::Context* vulkan)
                 }
             }
         });
+
+#else
+
+    voxtk::Region<uint8_t> const& region = state->voxel_region;
+    state->region_texture = vulkan->CreateTexture(
+        32, 32, 32,
+        VK_IMAGE_TYPE_3D, VK_FORMAT_R16G16_UINT,
+        VK_IMAGE_USAGE_SAMPLED_BIT,
+        [&region](void* mapped_data) {
+            uint16_t* sections = (uint16_t*)mapped_data;
+
+            for (uint32_t zindex = 0; zindex < 32; ++zindex)
+            {
+                for (uint32_t yindex = 0; yindex < 32; ++yindex)
+                {
+                    for (uint32_t xindex = 0; xindex < 32; ++xindex)
+                    {
+                        uint32_t index = xindex + yindex*32 + zindex*32*32;
+                        sections[index * 2+1] = 0xffff;
+                        if (yindex < 24)
+                        {
+                            float average = 0.f;
+
+                            for (uint32_t pointz = 0; pointz < 16; ++pointz)
+                            {
+                                for (uint32_t pointy = 0; pointy < 16; ++pointy)
+                                {
+                                    for (uint32_t pointx = 0; pointx < 16; ++pointx)
+                                    {
+                                        numtk::vec3u point{
+                                            xindex * 16u + pointx,
+                                            yindex * 16u + pointy,
+                                            zindex * 16u + pointz
+                                        };
+                                        if (region.Test(point))
+                                            average += 1.f/4096.f;
+                                    }
+                                }
+                            }
+
+                            sections[index * 2] = (uint16_t)(average * 65535.f);
+                        }
+                        else
+                            sections[index * 2] = 0;
+                    }
+                }
+            }
+        });
+#endif
 }
 
 void ConstantResources(void* _pstate, vktk::Context* _vulkan)
