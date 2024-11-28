@@ -232,6 +232,8 @@ struct VoxelMask
     uint64_t bits[8];
 };
 
+
+#define DENSE_CHILDREN_ARRAY
 template <typename DataType>
 struct Region
 {
@@ -333,6 +335,7 @@ struct Region
         {
             numtk::vec3u local_point = (point / (1u<<(3*current_node->depth)))
                 % VoxelMask::kSize;
+            uint16_t point_index = current_node->ChildIndex(local_point);
 
             if (current_node->depth == 0)
             {
@@ -340,19 +343,25 @@ struct Region
                 break;
             }
             else if (current_node->child_mask.Test(local_point))
-            {
-                uint16_t point_index = current_node->ChildIndex(local_point);
                 current_node = current_node->children[point_index];
-            }
             else if (current_node->data_mask.Test(local_point) != v)
             {
+#ifndef DENSE_CHILDREN_ARRAY
                 auto next_node =
-                    current_node->children.insert(local_point, node_pool[node_pool.Reserve()]);
+                    current_node->children.insert(point_index, node_pool[node_pool.Reserve()]);
                 (*next_node)->parent = current_node;
                 (*next_node)->location = local_point;
                 (*next_node)->depth = current_node->depth - 1;
                 current_node->child_mask.Set(local_point, true);
                 current_node = *next_node;
+#else
+                Node* next_node = node_pool[node_pool.Reserve()];
+                current_node->children[point_index] = next_node;
+                next_node->parent = current_node;
+                next_node->location = local_point;
+                next_node->depth = current_node->depth - 1;
+                current_node->child_mask.Set(local_point, true);
+#endif
             }
         }
     }
@@ -388,6 +397,7 @@ struct Region
                 current_node = current_node->children[point_index];
             else
             {
+#ifndef DENSE_CHILDREN_ARRAY
                 auto next_node =
                     current_node->children.insert(point_index, node_pool[node_pool.Reserve()]);
                 (*next_node)->parent = current_node;
@@ -395,6 +405,14 @@ struct Region
                 (*next_node)->depth = current_node->depth - 1;
                 current_node->child_mask.Set(local_point, true);
                 current_node = *next_node;
+#else
+                Node* next_node = node_pool[node_pool.Reserve()];
+                current_node->children[point_index] = next_node;
+                next_node->parent = current_node;
+                next_node->location = local_point;
+                next_node->depth = current_node->depth - 1;
+                current_node->child_mask.Set(local_point, true);
+#endif
             }
         }
     }
@@ -438,7 +456,7 @@ struct Region
                         {
                             numtk::vec3u const child{ x, y, z };
                             uint16_t child_index = current_node->ChildIndex(child);
-                            if (current_node->children.contains(child_index))
+                            if (current_node->child_mask.Test(child))
                                 node_queue.push_back(current_node->children[child_index]);
                         }
             }
@@ -490,7 +508,8 @@ struct Region
                         {
                             numtk::vec3u const child{ x, y, z };
                             uint16_t child_index = current_node->ChildIndex(child);
-                            if (!current_node->children.contains(child_index))
+#ifndef DENSE_CHILDREN_ARRAY
+                            if (!current_node->child_mask.Test(child))
                             {
                                 auto child_node = current_node->children.insert(
                                     child_index, node_pool[node_pool.Reserve()]);
@@ -499,6 +518,17 @@ struct Region
                                 (*child_node)->depth = current_node->depth - 1;
                                 current_node->child_mask.Set(child, true);
                             }
+#else
+                            if (!current_node->child_mask.Test(child))
+                            {
+                                Node* child_node = node_pool[node_pool.Reserve()];
+                                current_node->children[child_index] = child_node;
+                                child_node->parent = current_node;
+                                child_node->location = child;
+                                child_node->depth = current_node->depth - 1;
+                                current_node->child_mask.Set(child, true);
+                            }
+#endif
                             node_queue.push_back(current_node->children[child_index]);
                         }
             }
@@ -555,7 +585,11 @@ struct Region
         VoxelMask child_mask{};
         VoxelMask data_mask{};
         std::vector<DataType> data{};
+#ifndef DENSE_CHILDREN_ARRAY
         dstk::OrderedVector<uint16_t, Node*> children{};
+#else
+        std::vector<Node*> children = std::vector<Node*>(VoxelMask::kVolume);
+#endif
     };
 
     Node* root = nullptr;
