@@ -270,7 +270,10 @@ struct Region
                 point / (1u << (3 * current_node->depth))
                 - current_node->Begin();
             if (current_node->child_mask.Test(local_point))
-                current_node = current_node->children[local_point];
+            {
+                uint16_t point_index = current_node->ChildIndex(local_point);
+                current_node = current_node->children[point_index];
+            }
             else if (current_node->data_mask.Test(local_point))
             {
                 if (current_node->data.empty())
@@ -300,7 +303,10 @@ struct Region
         {
             numtk::vec3u local_point = point / (1u << (3 * current_node->depth));
             if (current_node->child_mask.Test(local_point))
-                current_node = current_node->children[local_point];
+            {
+                uint16_t point_index = current_node->ChildIndex(local_point);
+                current_node = current_node->children[point_index];
+            }
             else
                 return current_node->data_mask.Test(local_point);
         }
@@ -334,7 +340,10 @@ struct Region
                 break;
             }
             else if (current_node->child_mask.Test(local_point))
-                current_node = current_node->children[local_point];
+            {
+                uint16_t point_index = current_node->ChildIndex(local_point);
+                current_node = current_node->children[point_index];
+            }
             else if (current_node->data_mask.Test(local_point) != v)
             {
                 auto next_node =
@@ -367,6 +376,7 @@ struct Region
         {
             numtk::vec3u local_point = (point / (1u<<(3*current_node->depth)))
                 % VoxelMask::kSize;
+            uint16_t point_index = current_node->ChildIndex(local_point);
 
             if (current_node->depth == 0)
             {
@@ -375,11 +385,11 @@ struct Region
                 break;
             }
             else if (current_node->child_mask.Test(local_point))
-                current_node = current_node->children[local_point];
+                current_node = current_node->children[point_index];
             else
             {
                 auto next_node =
-                    current_node->children.insert(local_point, node_pool[node_pool.Reserve()]);
+                    current_node->children.insert(point_index, node_pool[node_pool.Reserve()]);
                 (*next_node)->parent = current_node;
                 (*next_node)->location = local_point;
                 (*next_node)->depth = current_node->depth - 1;
@@ -427,8 +437,9 @@ struct Region
                         for (uint32_t z = children_begin.z(); z < children_end.z(); ++z)
                         {
                             numtk::vec3u const child{ x, y, z };
-                            if (current_node->children.contains(child))
-                                node_queue.push_back(current_node->children[child]);
+                            uint16_t child_index = current_node->ChildIndex(child);
+                            if (current_node->children.contains(child_index))
+                                node_queue.push_back(current_node->children[child_index]);
                         }
             }
         }
@@ -478,16 +489,17 @@ struct Region
                         for (uint32_t z = children_begin.z(); z < children_end.z(); ++z)
                         {
                             numtk::vec3u const child{ x, y, z };
-                            if (!current_node->children.contains(child))
+                            uint16_t child_index = current_node->ChildIndex(child);
+                            if (!current_node->children.contains(child_index))
                             {
                                 auto child_node = current_node->children.insert(
-                                    child, node_pool[node_pool.Reserve()]);
+                                    child_index, node_pool[node_pool.Reserve()]);
                                 (*child_node)->parent = current_node;
                                 (*child_node)->location = child;
                                 (*child_node)->depth = current_node->depth - 1;
                                 current_node->child_mask.Set(child, true);
                             }
-                            node_queue.push_back(current_node->children[child]);
+                            node_queue.push_back(current_node->children[child_index]);
                         }
             }
         }
@@ -534,10 +546,16 @@ struct Region
                     }
         }
 
+        uint16_t ChildIndex(numtk::vec3u const& child) {
+            return (uint16_t)(child.x()
+                              + child.y()*VoxelMask::kSize
+                              + child.z()*VoxelMask::kSize*VoxelMask::kSize);
+        }
+
         VoxelMask child_mask{};
         VoxelMask data_mask{};
         std::vector<DataType> data{};
-        dstk::OrderedVector<numtk::vec3u, Node*> children{};
+        dstk::OrderedVector<uint16_t, Node*> children{};
     };
 
     Node* root = nullptr;
