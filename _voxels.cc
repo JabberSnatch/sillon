@@ -96,6 +96,7 @@ struct state_t
     RegionData region;
 
     voxtk::Region<uint8_t> voxel_region{ { 512u, 512u, 512u }, (uint8_t)0 };
+    std::vector<uint16_t> section_map{};
 
     uint32_t section_index = 0;
     std::vector<vktk::Texture> section_textures{};
@@ -118,143 +119,6 @@ struct SkyboxPushConstants
     numtk::vec4f position;
     numtk::vec3f light_dir;
 };
-
-#if 0
-RegionData::ChunkData DecodeChunk(mctk::MCAChunkData const& chunk_data)
-{
-    using namespace mctk;
-
-    RegionData::ChunkData output = {};
-
-    std::vector<NBTField> chunk_fields = MCAPackedNBTDecode(chunk_data);
-    if (chunk_fields.empty())
-        return output;
-
-    NBTCompound const& root = *(NBTCompound const*)chunk_fields[0].payload;
-    for (NBTField const& field0 : root)
-    {
-        if (field0.name == "Status"
-            && field0.type == TAG_String)
-            output.status = *(NBTString const*)field0.payload;
-
-        if (field0.name == "sections"
-            && field0.type == TAG_List)
-        {
-            NBTList const& sections = *(NBTList const*)field0.payload;
-            NBTCompound const* compounds = (NBTCompound const*)sections.data;
-            for (uint32_t index = 0u; index < sections.size; ++index)
-            {
-                NBTCompound const& compound = compounds[index];
-                int32_t section_index = -1;
-                RegionData::SectionData section_data = {};
-                for (NBTField const& field1 : compound)
-                {
-                    if (field1.name == "Y"
-                        && field1.type == TAG_Byte)
-                        section_index = (*(int8_t const*)field1.payload) + 4;
-
-                    if (field1.name == "block_states"
-                        && field1.type == TAG_Compound)
-                    {
-                        NBTCompound const& block_states = *(NBTCompound const*)field1.payload;
-                        NBTLongArray const* block_data_field = nullptr;
-                        uint32_t palette_size = 0u;
-                        std::vector<std::string>& palette_data = section_data.palette;
-
-                        for (NBTField const& field2 : block_states)
-                        {
-                            if (field2.name == "palette"
-                                && field2.type == TAG_List)
-                            {
-                                NBTList const& palette = *((NBTList const*)field2.payload);
-                                NBTCompound const* blocks = (NBTCompound const*)palette.data;
-                                palette_size = palette.size;
-
-                                for (uint32_t block_index = 0u;
-                                     block_index < palette_size;
-                                     ++block_index)
-                                {
-                                    NBTCompound const& block = blocks[block_index];
-
-                                    for (NBTField const& field3 : block)
-                                        if (field3.name == "Name"
-                                            && field3.type == TAG_String)
-                                            palette_data.push_back(
-                                                (*(NBTString const*)field3.payload).substr(10));
-                                }
-                            }
-
-                            if (field2.name == "data"
-                                && field2.type == TAG_Long_Array)
-                                block_data_field = (NBTLongArray const*)field2.payload;
-                        }
-
-                        if (palette_size == 1)
-                        {
-                            std::memset(section_data.block_ids.data(), 0, 2 * 4096);
-                            continue;
-                        }
-
-                        NBTLongArray const& block_data = *block_data_field;
-                        uint32_t bit_count = numtk::log2(palette_size-1);
-                        if (palette_size - (1 << (bit_count-1)))
-                            ++bit_count;
-                        bit_count = std::max(bit_count, 4u);
-
-                        uint64_t block_index = 0;
-                        uint32_t data_index = 0;
-                        uint8_t data_offset = 0;
-                        while (block_index < 4096 && data_index < block_data.size())
-                        {
-                            if (data_offset + bit_count > 64)
-                            {
-                                data_offset = 0;
-                                ++data_index;
-                            }
-
-                            uint16_t block_id = (uint16_t)
-                                ((block_data[data_index] >> data_offset)
-                                 & ((1ull << bit_count) - 1));
-
-                            uint32_t x = block_index % 16;
-                            uint32_t z = (block_index / 16) % 16;
-                            uint32_t y = (block_index / 256) % 16;
-
-                            section_data.block_ids[z * 256 + y * 16 + x] = block_id;
-                            data_offset += bit_count;
-                            ++block_index;
-                        }
-                    }
-                }
-
-                if (section_index >= 0)
-                    output.sections[section_index] = std::move(section_data);
-            }
-        }
-    }
-
-    return output;
-}
-
-RegionData DeserialiseRegion(std::string const& file_path)
-{
-    systk::Timer scope_time{ "DeserialiseRegion",
-        [](std::string const& tag, float time) {
-            std::cout << "[" << tag << "] " << time << " s" << std::endl;
-        }
-    };
-
-    std::vector<uint8_t> region_file = systk::LoadFile(file_path.c_str());
-    mctk::MCAFileData mca_data = mctk::MCADecode(region_file.data(), region_file.size());
-    RegionData output = {};
-    output.chunks.reserve(1024);
-
-    for (uint32_t index = 0; index < 1024; ++index)
-        output.chunks.emplace_back(DecodeChunk(mca_data.chunks[index]));
-
-    return output;
-}
-#else
 
 void DecodeChunk(voxtk::Region<uint8_t>& region,
                  mctk::MCAChunkData const& chunk_data,
@@ -305,7 +169,7 @@ void DecodeChunk(voxtk::Region<uint8_t>& region,
                     //NBTCompound const& block_states = *(NBTCompound const*)field1.payload;
                     NBTLongArray const* block_data_field = nullptr;
                     uint32_t palette_size = 0u;
-                    std::vector<std::string> palette_data = {};// = section_data.palette;
+                    std::vector<std::string> palette_data = {};
 
                     for (NBTField const& field2 : *block_states)
                     {
@@ -338,7 +202,6 @@ void DecodeChunk(voxtk::Region<uint8_t>& region,
                     if (palette_size == 1)
                     {
                         region.Set(section_begin, section_end, (uint8_t)0);
-                        //std::memset(section_data.block_ids.data(), 0, 2 * 4096);
                         continue;
                     }
 
@@ -372,7 +235,6 @@ void DecodeChunk(voxtk::Region<uint8_t>& region,
                             && palette_data[block_id] != "glow_lichen")
                             region.Set(point, (uint8_t)block_id);
 
-                        //section_data.block_ids[z * 256 + y * 16 + x] = block_id;
                         data_offset += bit_count;
                         ++block_index;
                     }
@@ -404,18 +266,14 @@ voxtk::Region<uint8_t> DeserialiseRegion(std::string const& file_path)
     return output;
 }
 
-#endif
-
 void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& update_commands,
                  numtk::vec3<int32_t> const& coords)
 {
-    uint32_t chunk_index = coords[0] + coords[2]*32;
-    RegionData::ChunkData const& chunk = state->region.chunks[chunk_index];
-    RegionData::SectionData const& section = chunk.sections[coords[1]];
-
     std::vector<std::unique_ptr<uint8_t[]>> mip_levels = {};
 
-    if (section.palette.size() > 1)
+    voxtk::Region<uint8_t> const& region = state->voxel_region;
+    uint16_t section_count = state->section_map[coords[0] + coords[1]*32 + coords[2]*32*32];
+    if (section_count != 0u && section_count != 4096u)
     {
         state->section_textures.push_back(
             vulkan->CreateTexture(16, 16, 16, 5,
@@ -438,14 +296,21 @@ void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& upd
         mip_levels.emplace_back(new uint8_t[4096]);
         {
             uint8_t* blocks = mip_levels.back().get();
-            for (uint32_t index = 0u; index < 4096; ++index)
+            for (uint32_t pointz = 0; pointz < 16; ++pointz)
             {
-                blocks[index] =
-                    (!section.palette.empty()
-                     && (section.palette[section.block_ids[index]] != "air")
-                     && (section.palette[section.block_ids[index]] != "glow_lichen"))
-                    ? 255
-                    : 0;
+                for (uint32_t pointy = 0; pointy < 16; ++pointy)
+                {
+                    for (uint32_t pointx = 0; pointx < 16; ++pointx)
+                    {
+                        uint32_t index = pointx + pointy*16u + pointz*256u;
+                        numtk::vec3u point {
+                            (uint32_t)coords.x() * 16u + pointx,
+                            (uint32_t)coords.y() * 16u + pointy,
+                            (uint32_t)coords.z() * 16u + pointz
+                        };
+                        blocks[index] = (region.Test(point) ? 255u : 0u);
+                    }
+                }
             }
 
             update_commands.UpdateTexture(
@@ -534,14 +399,7 @@ void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& upd
             [section_index = state->section_index,
              &mip_levels](void* mapped_data) {
                 uint16_t* section_info = (uint16_t*)mapped_data;
-#if 1
                 section_info[1] = (uint16_t)section_index;
-#else
-                if (mip_levels[4][0])
-                    section_info[1] = 0x80ff;
-                else
-                    section_info[1] = 0x8000;
-#endif
             });
 
         state->section_index++;
@@ -552,11 +410,9 @@ void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& upd
             state->region_texture,
             VkOffset3D{ coords[0], coords[1], coords[2] },
             VkExtent3D{ 1, 1, 1 },
-            [&section](void* mapped_data) {
+            [section_count](void* mapped_data) {
                 uint16_t* section_info = (uint16_t*)mapped_data;
-                if (section.palette.empty()
-                    || section.palette[0] != "air"
-                    || section.palette[0] != "glow_lichen")
+                if (section_count == 0)
                     section_info[1] = 0x8000;
                 else
                     section_info[1] = 0x80ff;
@@ -613,54 +469,50 @@ void LoadRegion(state_t* state, vktk::Context* vulkan)
         }
     };
 
-#if 0
-    RegionData const& region = state->region;
-    state->region_texture = vulkan->CreateTexture(
-        32, 32, 32,
-        VK_IMAGE_TYPE_3D, VK_FORMAT_R16G16_UINT,
-        VK_IMAGE_USAGE_SAMPLED_BIT,
-        [&region](void* mapped_data) {
-            uint16_t* sections = (uint16_t*)mapped_data;
+    voxtk::Region<uint8_t> const& region = state->voxel_region;
 
+    state->section_map.resize(32*32*32);
+
+    for (uint32_t zindex = 0; zindex < 32; ++zindex)
+    {
+        for (uint32_t yindex = 0; yindex < 32; ++yindex)
+        {
             for (uint32_t xindex = 0; xindex < 32; ++xindex)
             {
-                for (uint32_t zindex = 0; zindex < 32; ++zindex)
+                uint32_t index = xindex + yindex*32 + zindex*32*32;
+                state->section_map[index] = 0;
+                if (yindex < 24)
                 {
-                    RegionData::ChunkData const& chunk_data = region.chunks[xindex + zindex*32];
-                    for (uint32_t yindex = 0; yindex < 32; ++yindex)
+                    uint16_t count = 0;
+
+                    for (uint32_t pointz = 0; pointz < 16; ++pointz)
                     {
-                        uint32_t index = xindex + yindex*32 + zindex*32*32;
-                        sections[index * 2+1] = 0xffff;
-                        if (yindex < 24)
+                        for (uint32_t pointy = 0; pointy < 16; ++pointy)
                         {
-                            RegionData::SectionData const& section = chunk_data.sections[yindex];
-                            float average = 0.f;
-
-                            if (!section.palette.empty())
-                                for (uint16_t block_id : section.block_ids)
-                                    average +=
-                                        ((section.palette[block_id] != "air")
-                                         && (section.palette[block_id] != "glow_lichen"))
-                                        ? 1.f / 4096.f
-                                        : 0.f;
-
-                            sections[index * 2] = (uint16_t)(average * 65535.f);
+                            for (uint32_t pointx = 0; pointx < 16; ++pointx)
+                            {
+                                numtk::vec3u point{
+                                    xindex * 16u + pointx,
+                                    yindex * 16u + pointy,
+                                    zindex * 16u + pointz
+                                };
+                                if (region.Test(point))
+                                    ++count;
+                            }
                         }
-                        else
-                            sections[index * 2] = 0;
                     }
+
+                    state->section_map[index] = count;
                 }
             }
-        });
+        }
+    }
 
-#else
-
-    voxtk::Region<uint8_t> const& region = state->voxel_region;
     state->region_texture = vulkan->CreateTexture(
         32, 32, 32,
         VK_IMAGE_TYPE_3D, VK_FORMAT_R16G16_UINT,
         VK_IMAGE_USAGE_SAMPLED_BIT,
-        [&region](void* mapped_data) {
+        [state](void* mapped_data) {
             uint16_t* sections = (uint16_t*)mapped_data;
 
             for (uint32_t zindex = 0; zindex < 32; ++zindex)
@@ -671,99 +523,16 @@ void LoadRegion(state_t* state, vktk::Context* vulkan)
                     {
                         uint32_t index = xindex + yindex*32 + zindex*32*32;
                         sections[index * 2+1] = 0xffff;
-                        if (yindex < 24)
-                        {
-                            float average = 0.f;
-
-                            for (uint32_t pointz = 0; pointz < 16; ++pointz)
-                            {
-                                for (uint32_t pointy = 0; pointy < 16; ++pointy)
-                                {
-                                    for (uint32_t pointx = 0; pointx < 16; ++pointx)
-                                    {
-                                        numtk::vec3u point{
-                                            xindex * 16u + pointx,
-                                            yindex * 16u + pointy,
-                                            zindex * 16u + pointz
-                                        };
-                                        if (region.Test(point))
-                                            average += 1.f/4096.f;
-                                    }
-                                }
-                            }
-
-                            sections[index * 2] = (uint16_t)(average * 65535.f);
-                        }
-                        else
-                            sections[index * 2] = 0;
+                        sections[index * 2] = (uint16_t)(((float)state->section_map[index] / 4096.f) * 65535.f);
                     }
                 }
             }
         });
-#endif
 }
 
 void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 {
     state_t* _state = (state_t*)_pstate;
-
-#if 0
-#if 0
-    voxtk::Region test_region(numtk::vec3u{ 8, 8, 8 });
-    test_region.Set(numtk::vec3u{ 0, 0, 0 }, true);
-    test_region.Set(numtk::vec3u{ 7, 7, 7 }, true);
-    test_region.Set(numtk::vec3u{ 3, 2, 6 }, true);
-#endif
-
-#if 0
-    voxtk::Region test_region(numtk::vec3u{ 64, 64, 64 });
-    test_region.Set(numtk::vec3u{ 0, 0, 0 }, true);
-    test_region.Set(numtk::vec3u{ 7, 7, 7 }, true);
-    test_region.Set(numtk::vec3u{ 8, 8, 8 }, true);
-    test_region.Set(numtk::vec3u{ 15, 15, 15 }, true);
-    test_region.Set(numtk::vec3u{ 56, 56, 56 }, true);
-    test_region.Set(numtk::vec3u{ 63, 63, 63 }, true);
-#endif
-
-#if 0
-    voxtk::Region test_region(numtk::vec3u{ 512, 512, 512 });
-    test_region.Set(numtk::vec3u{ 0, 0, 0 }, true);
-    test_region.Set(numtk::vec3u{ 511, 511, 511 }, true);
-    test_region.Set(numtk::vec3u{ 4, 357, 34 }, true);
-#endif
-
-    {
-        voxtk::VoxelMask test_mask{};
-        test_mask.FillAbove({ 0, 0, 0 });
-        test_mask.Clear();
-        test_mask.FillAbove({ 1, 0, 0 });
-        test_mask.Clear();
-        test_mask.FillAbove({ 2, 0, 0 });
-        test_mask.Clear();
-        test_mask.FillAbove({ 0, 1, 0 });
-        test_mask.Clear();
-        test_mask.FillAbove({ 0, 2, 0 });
-        test_mask.Clear();
-        test_mask.FillAbove({ 0, 0, 1 });
-        test_mask.Clear();
-        test_mask.FillAbove({ 0, 0, 2 });
-        test_mask.Clear();
-        test_mask.FillAbove({ 2, 3, 4 });
-        test_mask.Clear();
-        test_mask.Set({ 0, 0, 0 }, { 8, 8, 8 }, true);
-        test_mask.Set({ 1, 1, 1 }, { 7, 7, 7 }, false);
-        test_mask.Clear();
-
-        voxtk::Region test_region(numtk::vec3u{ 16, 16, 16 });
-        test_region.Set(numtk::vec3u{ 0, 0, 0 }, true);
-        test_region.Set(numtk::vec3u{ 7, 7, 7 }, true);
-        test_region.Set(numtk::vec3u{ 10, 10, 10 }, true);
-
-        test_region.Set({ 2, 2, 2 }, { 14, 14, 14 }, true);
-        test_region.Set({ 3, 3, 3 }, { 13, 13, 13 }, false);
-        test_region.Set({ 0, 0, 0 }, { 16, 16, 16 }, true);
-    }
-#endif
 
     //_state->region = DeserialiseRegion("../r.-1.6.mca");
     _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
