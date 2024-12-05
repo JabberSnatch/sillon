@@ -37,6 +37,11 @@ struct vec2 : public std::array<scalar, 2>
     vec2 operator%(vec2 const& o) const { return { x()%o.x(), y()%o.y() }; }
     vec2 operator%(scalar s) const { return { x()%s, y()%s }; }
 
+    vec2 operator>>(vec2 const& o) const { return { x()>>o.x(), y()>>o.y() }; }
+    vec2 operator>>(scalar s) const{ return { x()>>s, y()>>s }; }
+    vec2 operator&(vec2 const& o) const { return { x()&o.x(), y()&o.y() }; }
+    vec2 operator&(scalar s) const { return { x()&s, y()&s }; }
+
     scalar dot(vec2 const& o) const { return x()*o.x() + y()*o.y(); }
     float sqrnorm() const { return dot(*this); }
     float norm() const { return std::sqrt(sqrnorm()); }
@@ -48,41 +53,68 @@ struct vec2 : public std::array<scalar, 2>
 };
 
 template <typename scalar>
-struct vec3 : public std::array<scalar, 3>
+struct vec3
 {
-    scalar& x() { return this->operator[](0); }
-    scalar& y() { return this->operator[](1); }
-    scalar& z() { return this->operator[](2); }
+    scalar x, y, z;
+#if 0
+    union {
+        struct {
+            scalar x;
+            scalar y;
+            scalar z;
+        } comp;
+
+        std::array<scalar, 3> a;
+    } data;
+#endif
+
+#if 0
+    scalar& x() { return data.comp.x; }
+    scalar& y() { return data.comp.y; }
+    scalar& z() { return data.comp.z; }
+#endif
+
+    scalar& operator[](std::size_t index) { return ((scalar*)&x)[index]; }
+    scalar const& operator[](std::size_t index) const {
+        return static_cast<scalar const&>(const_cast<vec3*>(this)->operator[](index));
+    }
 
     static vec3<scalar> Constant(scalar v) { return vec3<scalar>{ v, v, v }; }
 
+#if 0
     scalar const& x() const { return static_cast<scalar const&>(const_cast<vec3*>(this)->x()); }
     scalar const& y() const { return static_cast<scalar const&>(const_cast<vec3*>(this)->y()); }
     scalar const& z() const { return static_cast<scalar const&>(const_cast<vec3*>(this)->z()); }
+#endif
 
-    vec3 operator+(vec3 const& o) const { return { x()+o.x(), y()+o.y(), z()+o.z() }; }
-    vec3& operator+=(vec3 const& o) { x()+=o.x(); y()+=o.y(); z()+=o.z(); return *this; }
-    vec3 operator-(vec3 const& o) const { return { x()-o.x(), y()-o.y(), z()-o.z() }; }
-    vec3& operator-=(vec3 const& o) { x()-=o.x(); y()-=o.y(); z()-=o.z(); return *this; }
-    vec3 operator*(vec3 const& o) const { return { x()*o.x(), y()*o.y(), z()*o.z() }; }
-    vec3 operator*(scalar s) const { return { x()*s, y()*s, z()*s }; }
-    vec3 operator/(vec3 const& o) const { return { x()/o.x(), y()/o.y(), z()/o.z() }; }
-    vec3 operator/(scalar s) const { return { x()/s, y()/s, z()/s }; }
-    vec3 operator%(vec3 const& o) const { return { x()%o.x(), y()%o.y(), z()%o.z() }; }
-    vec3 operator%(scalar s) const { return { x()%s, y()%s, z()%s }; }
+    vec3 operator+(vec3 const& o) const { return { x+o.x, y+o.y, z+o.z }; }
+    vec3& operator+=(vec3 const& o) { x+=o.x; y+=o.y; z+=o.z; return *this; }
+    vec3 operator-(vec3 const& o) const { return { x-o.x, y-o.y, z-o.z }; }
+    vec3& operator-=(vec3 const& o) { x-=o.x; y-=o.y; z-=o.z; return *this; }
+    vec3 operator*(vec3 const& o) const { return { x*o.x, y*o.y, z*o.z }; }
+    vec3 operator*(scalar s) const { return { x*s, y*s, z*s }; }
+    vec3 operator/(vec3 const& o) const { return { x/o.x, y/o.y, z/o.z }; }
+    vec3 operator/(scalar s) const { return { x/s, y/s, z/s }; }
+    vec3 operator%(vec3 const& o) const { return { x%o.x, y%o.y, z%o.z }; }
+    vec3 operator%(scalar s) const { return { x%s, y%s, z%s }; }
+
+    vec3 operator>>(vec3 const& o) const { return { x>>o.x, y>>o.y, z>>o.z }; }
+    vec3 operator>>(scalar s) const{ return { x>>s, y>>s, z>>s }; }
+    vec3 operator&(vec3 const& o) const { return { x&o.x, y&o.y, z&o.z }; }
+    vec3 operator&(scalar s) const { return { x&s, y&s, z&s }; }
 
     bool operator<(vec3 const& o) {
-        return x() < o.x()
-            || (x() == o.x()
-                && (y() < o.y()
-                    || (y() == o.y() && z() < o.z())));
+        return x < o.x
+            || (x == o.x
+                && (y < o.y
+                    || (y == o.y && z < o.z)));
     }
 
-    scalar dot(vec3 const& o) const { return x()*o.x() + y()*o.y() + z()*o.z(); }
+    scalar dot(vec3 const& o) const { return x*o.x + y*o.y + z*o.z; }
     float sqrnorm() const { return dot(*this); }
     float norm() const { return std::sqrt(sqrnorm()); }
     vec3 normalise() const { return *this / norm(); }
-    vec3 abs() const { return { std::abs(x()), std::abs(y()), std::abs(z()) }; }
+    vec3 abs() const { return { std::abs(x), std::abs(y), std::abs(z) }; }
 
     vec3 cross(vec3 const& o) const {
         std::array<scalar, 3> const& data = *(std::array<scalar, 3> const*)this;
@@ -94,7 +126,7 @@ struct vec3 : public std::array<scalar, 3>
     }
 
     template <typename dst>
-    vec3<dst> cast() const { return vec3<dst>{ (dst)x(), (dst)y(), (dst)z() }; }
+    vec3<dst> cast() const { return vec3<dst>{ (dst)x, (dst)y, (dst)z }; }
 };
 
 template <typename scalar>
@@ -120,6 +152,11 @@ struct vec4 : public std::array<scalar, 4>
     vec4 operator/(scalar s) const { return { x()/s, y()/s, z()/s, w()/s }; }
     vec4 operator%(vec4 const& o) const { return { x()%o.x(), y()%o.y(), z()%o.z(), w()%o.w() }; }
     vec4 operator%(scalar s) const { return { x()%s, y()%s, z()%s, w()%s }; }
+
+    vec4 operator>>(vec4 const& o) const { return { x()>>o.x(), y()>>o.y(), z()>>o.z(), w()>>o.w() }; }
+    vec4 operator>>(scalar s) const{ return { x()>>s, y()>>s, z()>>s, w()>>s }; }
+    vec4 operator&(vec4 const& o) const { return { x()&o.x(), y()&o.y(), z()&o.z(), w()&o.w() }; }
+    vec4 operator&(scalar s) const { return { x()&s, y()&s, z()&s, w()&s }; }
 
     scalar dot(vec4 const& o) const { return x()*o.x() + y()*o.y() + z()*o.z() + w()*o.w(); }
     float sqrnorm() const { return dot(*this); }
@@ -148,16 +185,16 @@ vec2<s> max(vec2<s> const& lhs, vec2<s> const& rhs) {
 template <typename s>
 vec3<s> min(vec3<s> const& lhs, vec3<s> const& rhs) {
     return {
-        std::min(lhs.x(), rhs.x()), std::min(lhs.y(), rhs.y()),
-        std::min(lhs.z(), rhs.z())
+        std::min(lhs.x, rhs.x), std::min(lhs.y, rhs.y),
+        std::min(lhs.z, rhs.z)
     };
 }
 
 template <typename s>
 vec3<s> max(vec3<s> const& lhs, vec3<s> const& rhs) {
     return {
-        std::max(lhs.x(), rhs.x()), std::max(lhs.y(), rhs.y()),
-        std::max(lhs.z(), rhs.z())
+        std::max(lhs.x, rhs.x), std::max(lhs.y, rhs.y),
+        std::max(lhs.z, rhs.z)
     };
 }
 
@@ -340,9 +377,9 @@ struct bounds3
     PointType extent;
     bool Contains(PointType const& point) {
         PointType max = min+extent;
-        return point.x() >= min.x() && point.x() < max.x()
-            && point.y() >= min.y() && point.y() < max.y()
-            && point.z() >= min.z() && point.z() < max.z();
+        return point.x >= min.x && point.x < max.x
+            && point.y >= min.y && point.y < max.y
+            && point.z >= min.z && point.z < max.z;
     }
 };
 

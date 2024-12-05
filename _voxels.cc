@@ -304,9 +304,9 @@ void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& upd
                     {
                         uint32_t index = pointx + pointy*16u + pointz*256u;
                         numtk::vec3u point {
-                            (uint32_t)coords.x() * 16u + pointx,
-                            (uint32_t)coords.y() * 16u + pointy,
-                            (uint32_t)coords.z() * 16u + pointz
+                            (uint32_t)coords.x * 16u + pointx,
+                            (uint32_t)coords.y * 16u + pointy,
+                            (uint32_t)coords.z * 16u + pointz
                         };
                         blocks[index] = (region.Test(point) ? 255u : 0u);
                     }
@@ -446,11 +446,11 @@ void LoadArea(state_t* _state, vktk::Context* _vulkan,
     update_commands.Begin();
 
     uint32_t sync_counter = 0;
-    for (int32_t x = _begin.x(); x < _end.x(); ++x)
+    for (int32_t x = _begin.x; x < _end.x; ++x)
     {
-        for (int32_t y = _begin.y(); y < _end.y(); ++y)
+        for (int32_t y = _begin.y; y < _end.y; ++y)
         {
-            for (int32_t z = _begin.z(); z < _end.z(); ++z)
+            for (int32_t z = _begin.z; z < _end.z; ++z)
             {
                 LoadSection(_state, _vulkan, update_commands, { x, y, z });
             }
@@ -1315,9 +1315,9 @@ void TurntableCamera::Update(iotk::input_t const* _input,
     }
 
     {
-        spherical_coordinates.z() *= (1.f + 0.0005f * (float)_input->wheel_delta);
-        if (spherical_coordinates.z() < 0.01f)
-            spherical_coordinates.z() = 0.01f;
+        spherical_coordinates.z *= (1.f + 0.0005f * (float)_input->wheel_delta);
+        if (spherical_coordinates.z < 0.01f)
+            spherical_coordinates.z = 0.01f;
     }
 
     if (_input->button_down & iotk::fMouseButton::kRightBtn)
@@ -1342,9 +1342,9 @@ void TurntableCamera::Update(iotk::input_t const* _input,
             ++next_section[1];
         #undef KEY_PRESSED
 
-        next_section.x() = std::max(0, std::min(31, next_section.x()));
-        next_section.y() = std::max(0, std::min(23, next_section.y()));
-        next_section.z() = std::max(0, std::min(31, next_section.z()));
+        next_section.x = std::max(0, std::min(31, next_section.x));
+        next_section.y = std::max(0, std::min(23, next_section.y));
+        next_section.z = std::max(0, std::min(31, next_section.z));
 
         current_section = next_section;
     }
@@ -1366,15 +1366,15 @@ numtk::mat4f TurntableCamera::Matrix() const
         up = forward.cross(numtk::vec3f{ 0.f, 0.f, 1.f }).cross(forward).normalise();
 
     numtk::vec3f center = (numtk::vec3f{
-        (float)current_section.x() + 0.5f,
-        (float)current_section.y() + 0.5f,
-        (float)current_section.z() + 0.5f
+        (float)current_section.x + 0.5f,
+        (float)current_section.y + 0.5f,
+        (float)current_section.z + 0.5f
     } / 16.f) - numtk::vec3f{ 1.f, 1.f, 1.f } + numtk::vec3f{ 0.f, y_offset, 0.f };
 
     return
         numtk::mat4f::View({ 0.f, 0.f, -1.f },
                            { 0.f, 1.f, 0.f },
-                           { 0.f, 0.f, spherical_coordinates.z() })
+                           { 0.f, 0.f, spherical_coordinates.z })
         * numtk::mat4f::View(forward, up, center);
 
 }
@@ -1417,20 +1417,20 @@ void FlightCamera::Update(iotk::input_t const* _input,
 
     numtk::vec3f movement = { 0.f, 0.f, 0.f };
     if (_input->key_down['w'])
-        movement.z() += 1.f;
+        movement.z += 1.f;
     if (_input->key_down['s'])
-        movement.z() -= 1.f;
+        movement.z -= 1.f;
     if (_input->key_down['a'])
-        movement.x() += 1.f;
+        movement.x += 1.f;
     if (_input->key_down['d'])
-        movement.x() -= 1.f;
+        movement.x -= 1.f;
     if (_input->key_down[' '])
-        movement.y() += 1.f;
+        movement.y += 1.f;
     if (_input->mod_down & iotk::fKeyMod::kShift)
-        movement.y() -= 1.f;
+        movement.y -= 1.f;
     movement.normalise();
 
-    position += (forward*movement.z() + left*movement.x() + numtk::vec3f{ 0.f, movement.y(), 0.f })
+    position += (forward*movement.z + left*movement.x + numtk::vec3f{ 0.f, movement.y, 0.f })
         * velocity * _input->time_delta;
 }
 

@@ -138,10 +138,10 @@ void ConstantResources(void* _pstate,
             // { 0, 0, 1 } -> { 0, 0, 1 }
             // { 90, 0, 1 } -> { 0, 1, 0 }
             // { -90, 0, 1 } -> { 0, -1, 0 }
-            return v.z() * numtk::vec3f{
-                std::cos(v.y())*std::cos(v.x()),
-                std::sin(v.x()),
-                std::sin(v.y())*std::cos(v.x())
+            return v.z * numtk::vec3f{
+                std::cos(v.y)*std::cos(v.x),
+                std::sin(v.x),
+                std::sin(v.y)*std::cos(v.x)
             };
         };
 

@@ -730,9 +730,9 @@ void Draw(void* _pstate,
         push_constants.projection = projection;
         push_constants.view_model = view;
         push_constants.coordinates = numtk::vec4f{
-            (float)_state->cursor_coordinates.x(),
-            (float)_state->cursor_coordinates.y(),
-            (float)_state->cursor_coordinates.z(),
+            (float)_state->cursor_coordinates.x,
+            (float)_state->cursor_coordinates.y,
+            (float)_state->cursor_coordinates.z,
             (float)state_t::kGridSize };
 
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->cursor_pipeline);
@@ -834,9 +834,9 @@ bool Update(void* _pstate,
     }
 
     _state->cursor_coordinates += cursor_delta;
-    _state->cursor_coordinates.x() = std::min(std::max(_state->cursor_coordinates.x(), 0), state_t::kGridSize-1);
-    _state->cursor_coordinates.y() = std::min(std::max(_state->cursor_coordinates.y(), 0), state_t::kGridSize-1);
-    _state->cursor_coordinates.z() = std::min(std::max(_state->cursor_coordinates.z(), 0), state_t::kGridSize-1);
+    _state->cursor_coordinates.x = std::min(std::max(_state->cursor_coordinates.x, 0), state_t::kGridSize-1);
+    _state->cursor_coordinates.y = std::min(std::max(_state->cursor_coordinates.y, 0), state_t::kGridSize-1);
+    _state->cursor_coordinates.z = std::min(std::max(_state->cursor_coordinates.z, 0), state_t::kGridSize-1);
 
     if (!_input->key_down[' '] && _past_input->key_down[' '])
     {
@@ -852,15 +852,15 @@ bool Update(void* _pstate,
             std::cout << "Put voxel" << std::endl;
 
             numtk::vec3u point = _state->cursor_coordinates.cast<uint32_t>();
-            uint32_t voxel_index = point.x()
-                + point.y()*state_t::kGridSize
-                + point.z()*state_t::kGridSize*state_t::kGridSize;
+            uint32_t voxel_index = point.x
+                + point.y*state_t::kGridSize
+                + point.z*state_t::kGridSize*state_t::kGridSize;
 
             if (_state->voxel_region[point].w() == 0)
             {
                 numtk::vec3<uint8_t> rgb8_color = (_state->current_color * 255.f).cast<uint8_t>();
                 _state->voxel_region.Set(point, numtk::vec4<uint8_t>{
-                    rgb8_color.x(), rgb8_color.y(), rgb8_color.z(), 255
+                    rgb8_color.x, rgb8_color.y, rgb8_color.z, 255
                 });
             }
             else
@@ -884,15 +884,15 @@ bool Update(void* _pstate,
             numtk::vec3u end = numtk::max(_state->cursor_coordinates.cast<uint32_t>(),
                                           _state->region_point.cast<uint32_t>())
                 + numtk::vec3u::Constant(1);
-            std::cout << begin.x() << " " << begin.y() << " " << begin.z() << "; "
-                      << end.x() << " " << end.y() << " " << end.z()
+            std::cout << begin.x << " " << begin.y << " " << begin.z << "; "
+                      << end.x << " " << end.y << " " << end.z
                       << std::endl;
 
             if (_state->region_mode == RegionMode::Set)
             {
                 numtk::vec3<uint8_t> rgb8_color = (_state->current_color * 255.f).cast<uint8_t>();
                 _state->voxel_region.Set(begin, end, numtk::vec4<uint8_t>{
-                    rgb8_color.x(), rgb8_color.y(), rgb8_color.z(), 255
+                    rgb8_color.x, rgb8_color.y, rgb8_color.z, 255
                 });
             }
             if (_state->region_mode == RegionMode::Clear)
@@ -944,14 +944,14 @@ void TurntableCamera::Update(iotk::input_t const* _input,
             0.f
         };
 
-        spherical_coordinates.y() =
-            std::min(std::max(spherical_coordinates.y(), -numtk::kPi*0.4999f), numtk::kPi*0.4999f);
+        spherical_coordinates.y =
+            std::min(std::max(spherical_coordinates.y, -numtk::kPi*0.4999f), numtk::kPi*0.4999f);
     }
 
     {
-        spherical_coordinates.z() *= (1.f + 0.0005f * (float)_input->wheel_delta);
-        if (spherical_coordinates.z() < 0.01f)
-            spherical_coordinates.z() = 0.01f;
+        spherical_coordinates.z *= (1.f + 0.0005f * (float)_input->wheel_delta);
+        if (spherical_coordinates.z < 0.01f)
+            spherical_coordinates.z = 0.01f;
     }
 }
 
@@ -972,7 +972,7 @@ numtk::mat4f TurntableCamera::View() const
     return
         numtk::mat4f::View({ 0.f, 0.f, -1.f },
                            { 0.f, 1.f, 0.f },
-                           { 0.f, 0.f, spherical_coordinates.z() })
+                           { 0.f, 0.f, spherical_coordinates.z })
         * numtk::mat4f::View(forward, up, center);
 }
 

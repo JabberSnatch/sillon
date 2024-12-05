@@ -10,6 +10,7 @@ struct VoxelMask
 {
     static constexpr int32_t kSize = 8;
     static constexpr int32_t kLogSize = 3;
+    static constexpr uint32_t kSizeMask = 0x7u;
     static constexpr int32_t kVolume = kSize*kSize*kSize;
 
     void Clear() {
@@ -78,18 +79,28 @@ struct VoxelMask
     }
 
     bool Test(numtk::vec3u const& point) const {
-        numtk::vec3u const pack_point = point / 4u;
-        numtk::vec3u const bit_point = point % 4u;
-        uint32_t const pack_index = pack_point.x() + pack_point.y() * 2u + pack_point.z() * 4u;
-        uint32_t const bit_index = bit_point.x() + bit_point.y() * 4u + bit_point.z() * 16u;
+#if 1
+        numtk::vec3u const pack_point = point >> 2u;/// 4u;
+        numtk::vec3u const bit_point = point & 0x3u;//% 4u;
+        uint32_t const pack_index = pack_point.x + pack_point.y * 2u + pack_point.z * 4u;
+        uint32_t const bit_index = bit_point.x + bit_point.y * 4u + bit_point.z * 16u;
+#else
+        uint32_t const pack_index = (point.x >> 2u) + (point.y >> 1u) + point.z;
+        uint32_t const bit_index = (point.x & 0x3u) + (point.y & 0x3u) * 4u + (point.z & 0x3u) * 16u;
+#endif
         return !!((bits[pack_index] >> bit_index) & 1);
     }
 
     void Set(numtk::vec3u const& point, bool v) {
-        numtk::vec3u const pack_point = point / 4u;
-        numtk::vec3u const bit_point = point % 4u;
-        uint32_t const pack_index = pack_point.x() + pack_point.y() * 2u + pack_point.z() * 4u;
-        uint32_t const bit_index = bit_point.x() + bit_point.y() * 4u + bit_point.z() * 16u;
+#if 1
+        numtk::vec3u const pack_point = point >> 2u;/// 4u;
+        numtk::vec3u const bit_point = point & 0x3u;//% 4u;
+        uint32_t const pack_index = pack_point.x + pack_point.y * 2u + pack_point.z * 4u;
+        uint32_t const bit_index = bit_point.x + bit_point.y * 4u + bit_point.z * 16u;
+#else
+        uint32_t const pack_index = (point.x >> 2u) + (point.y >> 1u) + point.z;
+        uint32_t const bit_index = (point.x & 0x3u) + (point.y & 0x3u) * 4u + (point.z & 0x3u) * 16u;
+#endif
         if (v)
             bits[pack_index] |= (1ull << bit_index);
         else
@@ -99,21 +110,21 @@ struct VoxelMask
     static inline uint64_t PackFillMask(numtk::vec3u const& begin) {
         uint64_t mask = 0ull;
 
-        if (begin.x() == 0 && begin.y() == 0 && begin.z() == 0)
+        if (begin.x == 0 && begin.y == 0 && begin.z == 0)
             mask = ~0ull;
-        else if (begin.x() == 0 && begin.y() == 0)
-            mask = ~((1ull << begin.z()*16) - 1ull);
-        else if (begin.x() == 0)
+        else if (begin.x == 0 && begin.y == 0)
+            mask = ~((1ull << begin.z*16) - 1ull);
+        else if (begin.x == 0)
         {
-            uint64_t plane = ~((1ull << begin.y()*4) - 1ull) & 0xffffull;
-            for (uint32_t z = begin.z(); z < 4; ++z)
+            uint64_t plane = ~((1ull << begin.y*4) - 1ull) & 0xffffull;
+            for (uint32_t z = begin.z; z < 4; ++z)
                 mask |= plane << (z*16);
         }
         else
         {
-            uint64_t row = ~((1ull << begin.x()) - 1ull) & 0xfull;
-            for (uint32_t z = begin.z(); z < 4; ++z)
-                for (uint32_t y = begin.y(); y < 4; ++y)
+            uint64_t row = ~((1ull << begin.x) - 1ull) & 0xfull;
+            for (uint32_t z = begin.z; z < 4; ++z)
+                for (uint32_t y = begin.y; y < 4; ++y)
                     mask |= row << (y*4 + z*16);
         }
 
@@ -121,63 +132,63 @@ struct VoxelMask
     }
 
     void FillAbove(numtk::vec3u const& begin) {
-        if (begin.x() > 7u || begin.y() > 7u || begin.z() > 7u)
+        if (begin.x > 7u || begin.y > 7u || begin.z > 7u)
             return;
 
-        numtk::vec3u const pack_begin = begin / 4u;
-        numtk::vec3u const bits_begin = begin % 4u;
+        numtk::vec3u const pack_begin = begin >> 2u;/// 4u;
+        numtk::vec3u const bits_begin = begin & 0x3u;//% 4u;
 
         numtk::vec3u quadrant0 = pack_begin;
-        bits[quadrant0.x() + quadrant0.y()*2 + quadrant0.z()*4] = PackFillMask(bits_begin);
+        bits[quadrant0.x + quadrant0.y*2 + quadrant0.z*4] = PackFillMask(bits_begin);
 
-        if (quadrant0.x() == 0)
+        if (quadrant0.x == 0)
         {
-            numtk::vec3u const quadrant1{ 1u, quadrant0.y(), quadrant0.z() };
-            bits[quadrant1.x() + quadrant1.y()*2 + quadrant1.z()*4] =
-                PackFillMask(numtk::vec3u{ 0, bits_begin.y(), bits_begin.z() });
+            numtk::vec3u const quadrant1{ 1u, quadrant0.y, quadrant0.z };
+            bits[quadrant1.x + quadrant1.y*2 + quadrant1.z*4] =
+                PackFillMask(numtk::vec3u{ 0, bits_begin.y, bits_begin.z });
         }
 
-        if (quadrant0.y() == 0)
+        if (quadrant0.y == 0)
         {
-            numtk::vec3u const quadrant2{ quadrant0.x(), 1u, quadrant0.z() };
-            bits[quadrant2.x() + quadrant2.y()*2 + quadrant2.z()*4] =
-                PackFillMask(numtk::vec3u{ bits_begin.x(), 0, bits_begin.z() });
+            numtk::vec3u const quadrant2{ quadrant0.x, 1u, quadrant0.z };
+            bits[quadrant2.x + quadrant2.y*2 + quadrant2.z*4] =
+                PackFillMask(numtk::vec3u{ bits_begin.x, 0, bits_begin.z });
         }
 
-        if (quadrant0.z() == 0)
+        if (quadrant0.z == 0)
         {
-            numtk::vec3u const quadrant3{ quadrant0.x(), quadrant0.y(), 1u };
-            bits[quadrant3.x() + quadrant3.y()*2 + quadrant3.z()*4] =
-                PackFillMask(numtk::vec3u{ bits_begin.x(), bits_begin.y(), 0 });
+            numtk::vec3u const quadrant3{ quadrant0.x, quadrant0.y, 1u };
+            bits[quadrant3.x + quadrant3.y*2 + quadrant3.z*4] =
+                PackFillMask(numtk::vec3u{ bits_begin.x, bits_begin.y, 0 });
         }
 
-        if (quadrant0.x() == 0 && quadrant0.y() == 0)
+        if (quadrant0.x == 0 && quadrant0.y == 0)
         {
-            numtk::vec3u const quadrant4{ 1u, 1u, quadrant0.z() };
-            bits[quadrant4.x() + quadrant4.y()*2 + quadrant4.z()*4] =
-                PackFillMask(numtk::vec3u{ 0, 0, bits_begin.z() });
+            numtk::vec3u const quadrant4{ 1u, 1u, quadrant0.z };
+            bits[quadrant4.x + quadrant4.y*2 + quadrant4.z*4] =
+                PackFillMask(numtk::vec3u{ 0, 0, bits_begin.z });
         }
 
-        if (quadrant0.y() == 0 && quadrant0.z() == 0)
+        if (quadrant0.y == 0 && quadrant0.z == 0)
         {
-            numtk::vec3u const quadrant5{ quadrant0.x(), 1u, 1u };
-            bits[quadrant5.x() + quadrant5.y()*2 + quadrant5.z()*4] =
-                PackFillMask(numtk::vec3u{ bits_begin.x(), 0, 0 });
+            numtk::vec3u const quadrant5{ quadrant0.x, 1u, 1u };
+            bits[quadrant5.x + quadrant5.y*2 + quadrant5.z*4] =
+                PackFillMask(numtk::vec3u{ bits_begin.x, 0, 0 });
         }
 
-        if (quadrant0.x() == 0 && quadrant0.z() == 0)
+        if (quadrant0.x == 0 && quadrant0.z == 0)
         {
-            numtk::vec3u const quadrant6{ 1u, quadrant0.y(), 1u };
-            bits[quadrant6.x() + quadrant6.y()*2 + quadrant6.z()*4] =
-                PackFillMask(numtk::vec3u{ 0, bits_begin.y(), 0 });
+            numtk::vec3u const quadrant6{ 1u, quadrant0.y, 1u };
+            bits[quadrant6.x + quadrant6.y*2 + quadrant6.z*4] =
+                PackFillMask(numtk::vec3u{ 0, bits_begin.y, 0 });
         }
 
-        if (quadrant0.x() == 0 && quadrant0.y() == 0 && quadrant0.z() == 0)
+        if (quadrant0.x == 0 && quadrant0.y == 0 && quadrant0.z == 0)
             bits[7] = ~0ull;
     }
 
     void FillBelow(numtk::vec3u const& end) {
-        if (end.x() == 0 || end.y() == 0 || end.z() == 0)
+        if (end.x == 0 || end.y == 0 || end.z == 0)
             return;
 
         FillAbove(numtk::vec3u{ 8u, 8u, 8u, } - end);
@@ -244,7 +255,7 @@ struct Region
         , size{ _size }
         , default_value{ _default_value }
     {
-        uint32_t max_size = std::max(std::max(_size.x(), _size.y()), _size.z());
+        uint32_t max_size = std::max(std::max(_size.x, _size.y), _size.z);
         uint32_t log_size = numtk::ilogN<VoxelMask::kSize>(max_size);
         if (1u << (VoxelMask::kLogSize * log_size) < max_size)
             ++log_size;
@@ -253,23 +264,23 @@ struct Region
 
     DataType const& operator[](uint32_t const& index) const {
         numtk::vec3u point{};
-        point.x() = index % size.x();
-        point.y() = (index / size.x()) % size.y();
-        point.z() = index / (size.x() * size.y());
+        point.x = index % size.x;
+        point.y = (index / size.x) % size.y;
+        point.z = index / (size.x * size.y);
         return (*this)[point];
     }
 
     DataType const& operator[](numtk::vec3u const& point) const {
-        if (point.x() >= size.x()
-            || point.y() >= size.y()
-            || point.z() >= size.z())
+        if (point.x >= size.x
+            || point.y >= size.y
+            || point.z >= size.z)
             return default_value;
 
         Node* current_node = root;
         while (current_node)
         {
             numtk::vec3u local_point =
-                point / (1u << (3 * current_node->depth))
+                (point >> (3 * current_node->depth))//point / (1u << (3 * current_node->depth))
                 - current_node->Begin();
             if (current_node->child_mask.Test(local_point))
             {
@@ -282,9 +293,9 @@ struct Region
                     return default_value;
 
                 uint32_t const data_index =
-                    local_point.x()
-                    + local_point.y()*VoxelMask::kSize
-                    + local_point.z()*VoxelMask::kSize*VoxelMask::kSize;
+                    local_point.x
+                    + local_point.y*VoxelMask::kSize
+                    + local_point.z*VoxelMask::kSize*VoxelMask::kSize;
                 return current_node->data[data_index];
             }
             else
@@ -295,16 +306,17 @@ struct Region
     }
 
     bool Test(numtk::vec3u const& point) const {
-        if (point.x() >= size.x()
-            || point.y() >= size.y()
-            || point.z() >= size.z())
+        if (point.x >= size.x
+            || point.y >= size.y
+            || point.z >= size.z)
             return false;
 
         Node* current_node = root;
         while (current_node)
         {
-            numtk::vec3u local_point = (point / (1u<<(3*current_node->depth)))
-                % VoxelMask::kSize;
+            numtk::vec3u local_point =
+                (point >> (3*current_node->depth))//(point / (1u<<(3*current_node->depth)))
+                & VoxelMask::kSizeMask;//% VoxelMask::kSize;
             if (current_node->child_mask.Test(local_point))
             {
                 uint16_t point_index = current_node->ChildIndex(local_point);
@@ -318,9 +330,9 @@ struct Region
     }
 
     void Set(numtk::vec3u const& point, bool v) {
-        if (point.x() >= size.x()
-            || point.y() >= size.y()
-            || point.z() >= size.z())
+        if (point.x >= size.x
+            || point.y >= size.y
+            || point.z >= size.z)
             return;
 
         if (!root)
@@ -334,8 +346,9 @@ struct Region
         Node* current_node = root;
         while (current_node)
         {
-            numtk::vec3u local_point = (point / (1u<<(3*current_node->depth)))
-                % VoxelMask::kSize;
+            numtk::vec3u local_point =
+                (point >> (3*current_node->depth))//(point / (1u<<(3*current_node->depth)))
+                & VoxelMask::kSizeMask;//% VoxelMask::kSize;
             uint16_t point_index = current_node->ChildIndex(local_point);
 
             if (current_node->depth == 0)
@@ -368,9 +381,9 @@ struct Region
     }
 
     void Set(numtk::vec3u const& point, DataType const& value) {
-        if (point.x() >= size.x()
-            || point.y() >= size.y()
-            || point.z() >= size.z())
+        if (point.x >= size.x
+            || point.y >= size.y
+            || point.z >= size.z)
             return;
 
         if (!root)
@@ -384,8 +397,9 @@ struct Region
         Node* current_node = root;
         while (current_node)
         {
-            numtk::vec3u local_point = (point / (1u<<(3*current_node->depth)))
-                % VoxelMask::kSize;
+            numtk::vec3u local_point =
+                (point >> (3*current_node->depth))//(point / (1u<<(3*current_node->depth)))
+                & VoxelMask::kSizeMask;//% VoxelMask::kSize;
             uint16_t point_index = current_node->ChildIndex(local_point);
 
             if (current_node->depth == 0)
@@ -419,9 +433,9 @@ struct Region
     }
 
     void Clear(numtk::vec3u const& begin, numtk::vec3u const& end) {
-        if (begin.x() >= size.x()
-            || begin.y() >= size.y()
-            || begin.z() >= size.z())
+        if (begin.x >= size.x
+            || begin.y >= size.y
+            || begin.z >= size.z)
             return;
 
         if (!root)
@@ -445,15 +459,16 @@ struct Region
             else
             {
                 numtk::vec3u const children_begin =
-                    numtk::max(begin / (1u<<(3*(current_node->depth))),
+                    numtk::max(begin >> (3*(current_node->depth)),/// (1u<<(3*(current_node->depth))),
                                current_node->Begin());
                 numtk::vec3u const children_end =
-                    numtk::min((end / (1u<<(3*(current_node->depth)))) + numtk::vec3u::Constant(1u),
+                    numtk::min((end >> (3*(current_node->depth)))/// (1u<<(3*(current_node->depth))))
+                               + numtk::vec3u::Constant(1u),
                                current_node->End());
 
-                for (uint32_t x = children_begin.x(); x < children_end.x(); ++x)
-                    for (uint32_t y = children_begin.y(); y < children_end.y(); ++y)
-                        for (uint32_t z = children_begin.z(); z < children_end.z(); ++z)
+                for (uint32_t x = children_begin.x; x < children_end.x; ++x)
+                    for (uint32_t y = children_begin.y; y < children_end.y; ++y)
+                        for (uint32_t z = children_begin.z; z < children_end.z; ++z)
                         {
                             numtk::vec3u const child{ x, y, z };
                             uint16_t child_index = current_node->ChildIndex(child);
@@ -465,9 +480,9 @@ struct Region
     }
 
     void Set(numtk::vec3u const& begin, numtk::vec3u const& end, DataType const& value) {
-        if (begin.x() >= size.x()
-            || begin.y() >= size.y()
-            || begin.z() >= size.z())
+        if (begin.x >= size.x
+            || begin.y >= size.y
+            || begin.z >= size.z)
             return;
 
         if (!root)
@@ -497,15 +512,16 @@ struct Region
             else
             {
                 numtk::vec3u const children_begin =
-                    numtk::max(begin / (1u<<(3*(current_node->depth))),
+                    numtk::max(begin >> (3*(current_node->depth)),/// (1u<<(3*(current_node->depth))),
                                current_node->Begin());
                 numtk::vec3u const children_end =
-                    numtk::min((end / (1u<<(3*(current_node->depth)))) + numtk::vec3u::Constant(1u),
+                    numtk::min((end >> (3*(current_node->depth)))/// (1u<<(3*(current_node->depth))))
+                               + numtk::vec3u::Constant(1u),
                                current_node->End());
 
-                for (uint32_t x = children_begin.x(); x < children_end.x(); ++x)
-                    for (uint32_t y = children_begin.y(); y < children_end.y(); ++y)
-                        for (uint32_t z = children_begin.z(); z < children_end.z(); ++z)
+                for (uint32_t x = children_begin.x; x < children_end.x; ++x)
+                    for (uint32_t y = children_begin.y; y < children_end.y; ++y)
+                        for (uint32_t z = children_begin.z; z < children_end.z; ++z)
                         {
                             numtk::vec3u const child{ x, y, z };
                             uint16_t child_index = current_node->ChildIndex(child);
@@ -548,28 +564,28 @@ struct Region
             numtk::vec3u const begin = Begin();
             numtk::vec3u const end = End();
             return
-                point.x() >= begin.x()
-                && point.y() >= begin.y()
-                && point.z() >= begin.z()
-                && point.x() < end.x()
-                && point.y() < end.y()
-                && point.z() < end.z();
+                point.x >= begin.x
+                && point.y >= begin.y
+                && point.z >= begin.z
+                && point.x < end.x
+                && point.y < end.y
+                && point.z < end.z;
         }
 
         void SetData(numtk::vec3u const& point, DataType const& value) {
             if (data.empty()) data.resize(VoxelMask::kVolume);
             uint32_t const index =
-                point.x()
-                + point.y()*VoxelMask::kSize
-                + point.z()*VoxelMask::kSize*VoxelMask::kSize;
+                point.x
+                + point.y*VoxelMask::kSize
+                + point.z*VoxelMask::kSize*VoxelMask::kSize;
             data[index] = value;
         }
 
         void SetData(numtk::vec3u const& begin, numtk::vec3u const& end, DataType const& value) {
             if (data.empty()) data.resize(VoxelMask::kVolume);
-            for (uint32_t z = begin.z(); z < end.z(); ++z)
-                for (uint32_t y = begin.y(); y < end.y(); ++y)
-                    for (uint32_t x = begin.x(); x < end.x(); ++x)
+            for (uint32_t z = begin.z; z < end.z; ++z)
+                for (uint32_t y = begin.y; y < end.y; ++y)
+                    for (uint32_t x = begin.x; x < end.x; ++x)
                     {
                         uint32_t const index =
                             x + y*VoxelMask::kSize + z*VoxelMask::kSize*VoxelMask::kSize;
@@ -578,9 +594,9 @@ struct Region
         }
 
         uint16_t ChildIndex(numtk::vec3u const& child) {
-            return (uint16_t)(child.x()
-                              + child.y()*VoxelMask::kSize
-                              + child.z()*VoxelMask::kSize*VoxelMask::kSize);
+            return (uint16_t)(child.x
+                              + child.y*VoxelMask::kSize
+                              + child.z*VoxelMask::kSize*VoxelMask::kSize);
         }
 
         VoxelMask child_mask{};
