@@ -79,28 +79,18 @@ struct VoxelMask
     }
 
     bool Test(numtk::vec3u const& point) const {
-#if 1
-        numtk::vec3u const pack_point = point >> 2u;/// 4u;
-        numtk::vec3u const bit_point = point & 0x3u;//% 4u;
-        uint32_t const pack_index = pack_point.x + pack_point.y * 2u + pack_point.z * 4u;
-        uint32_t const bit_index = bit_point.x + bit_point.y * 4u + bit_point.z * 16u;
-#else
-        uint32_t const pack_index = (point.x >> 2u) + (point.y >> 1u) + point.z;
-        uint32_t const bit_index = (point.x & 0x3u) + (point.y & 0x3u) * 4u + (point.z & 0x3u) * 16u;
-#endif
+        //numtk::vec3u const pack_point = point >> 2u;
+        //numtk::vec3u const bit_point = point & 0x3u;
+        uint32_t const pack_index = (point.x >> 2u) + ((point.y >> 1u) & ~0x1u) + (point.z & ~0x3u);
+        uint32_t const bit_index = (point.x & 0x3u) + ((point.y & 0x3u) << 2u) + ((point.z & 0x3u) << 4u);
         return !!((bits[pack_index] >> bit_index) & 1);
     }
 
     void Set(numtk::vec3u const& point, bool v) {
-#if 1
-        numtk::vec3u const pack_point = point >> 2u;/// 4u;
-        numtk::vec3u const bit_point = point & 0x3u;//% 4u;
-        uint32_t const pack_index = pack_point.x + pack_point.y * 2u + pack_point.z * 4u;
-        uint32_t const bit_index = bit_point.x + bit_point.y * 4u + bit_point.z * 16u;
-#else
-        uint32_t const pack_index = (point.x >> 2u) + (point.y >> 1u) + point.z;
-        uint32_t const bit_index = (point.x & 0x3u) + (point.y & 0x3u) * 4u + (point.z & 0x3u) * 16u;
-#endif
+        //numtk::vec3u const pack_point = point >> 2u;/// 4u;
+        //numtk::vec3u const bit_point = point & 0x3u;//% 4u;
+        uint32_t const pack_index = (point.x >> 2u) + ((point.y >> 1u) & ~0x1u) + (point.z & ~0x3u);
+        uint32_t const bit_index = (point.x & 0x3u) + ((point.y & 0x3u) << 2u) + ((point.z & 0x3u) << 4u);
         if (v)
             bits[pack_index] |= (1ull << bit_index);
         else
