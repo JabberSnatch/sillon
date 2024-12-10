@@ -53,6 +53,63 @@ struct FlightCamera
     numtk::mat4f Matrix() const;
 };
 
+struct RenderNodeInfo
+{
+    std::string name;
+
+    // shaders
+    struct ShaderStage {
+        VkShaderStageFlagBits stage;
+        std::vector<std::string> source;
+    };
+    std::vector<ShaderStage> shaders;
+
+    // resource bindings
+    struct ResourceBindingInfo {
+        VkShaderStageFlagBits stages;
+        VkDescriptorType type;
+        VkDescriptorBindingFlags flags;
+        uint32_t count;
+    };
+    struct BindingGroupInfo {
+        std::vector<ResourceBindingInfo> resources;
+        uint32_t count;
+    };
+    std::vector<BindingGroupInfo> binding_groups;
+
+    // push constants
+    struct PushConstantRange {
+        VkShaderStageFlagBits stages;
+        uint32_t offset;
+        uint32_t size;
+    };
+    std::vector<PushConstantRange> push_constants;
+
+    // render attachments
+    union ClearValue {
+        numtk::vec4f color;
+        struct {
+            float depth;
+            uint32_t stencil;
+        } depth_stencil;
+    };
+    struct RenderAttachment {
+        VkImageType type;
+        VkFormat format;
+        VkImageUsageFlagBits usage;
+    };
+    numtk::vec3u size;
+    std::vector<RenderAttachment> attachments;
+
+    // dispatch description
+    enum DispatchMode {
+        DispatchMode_Draw,
+        DispatchMode_Compute,
+    };
+    DispatchMode mode;
+    VkPrimitiveTopology topology;
+};
+
 struct state_t
 {
     float time = 0.f;
@@ -1134,13 +1191,9 @@ void Draw(void* _pstate,
         VkClearValue& clear_value = clear_values[0];
         clear_value.color.float32[0] = 0.f; clear_value.color.float32[1] = 1.f;
         clear_value.color.float32[2] = 1.f; clear_value.color.float32[3] = 0.f;
-        clear_value.depthStencil.depth = 0.f;
-        clear_value.depthStencil.stencil = 0;
     }
     {
         VkClearValue& clear_value = clear_values[1];
-        clear_value.color.float32[0] = 0.f; clear_value.color.float32[1] = 0.f;
-        clear_value.color.float32[2] = 0.f; clear_value.color.float32[3] = 0.f;
         clear_value.depthStencil.depth = 1.f;
         clear_value.depthStencil.stencil = 0;
     }
