@@ -53,7 +53,7 @@ struct FlightCamera
     numtk::mat4f Matrix() const;
 };
 
-struct RenderNodeInfo
+struct DispatchStageInfo
 {
     std::string name;
 
@@ -85,30 +85,112 @@ struct RenderNodeInfo
     };
     std::vector<PushConstantRange> push_constants;
 
-    // render attachments
-    union ClearValue {
-        numtk::vec4f color;
-        struct {
-            float depth;
-            uint32_t stencil;
-        } depth_stencil;
-    };
-    struct RenderAttachment {
-        VkImageType type;
-        VkFormat format;
-        VkImageUsageFlagBits usage;
-    };
-    numtk::vec3u size;
-    std::vector<RenderAttachment> attachments;
+    struct GraphicsDispatchInfo {
+        std::vector<vktk::Context::StateOverride> state_overrides;
 
+        // geometry attachments
+        VkPrimitiveTopology topology;
+        std::vector<vktk::Context::VertexInput> input_layout;
+    };
+
+#if 0
+    union {
+        GraphicsDispatchInfo graphics;
+    } dispatch_info;
+#endif
+};
+
+struct DispatchNode
+{
     // dispatch description
     enum DispatchMode {
-        DispatchMode_Draw,
+        DispatchMode_Graphics,
         DispatchMode_Compute,
     };
     DispatchMode mode;
-    VkPrimitiveTopology topology;
+
+    std::vector<DispatchStageInfo> sequence;
+
+    struct GraphicsDispatchNodeInfo {
+        // render attachments
+        union ClearValue {
+            numtk::vec4f color;
+            struct {
+                float depth;
+                uint32_t stencil;
+            } depth_stencil;
+        };
+        struct RenderAttachment {
+            VkImageType type;
+            VkFormat format;
+            VkImageUsageFlagBits usage;
+            ClearValue clear_value;
+        };
+
+        std::vector<RenderAttachment> attachments;
+    };
+
+#if 0
+    union {
+        GraphicsDispatchNodeInfo graphics;
+    } dispatch_info;
+#endif
 };
+
+DispatchStageInfo RegionPassDispatchStageInfo()
+{
+    DispatchStageInfo output{};
+    output.name = "render_region";
+
+    output.shaders = std::vector<DispatchStageInfo::ShaderStage>{
+        {
+            VK_SHADER_STAGE_VERTEX_BIT,
+            {
+                "#version 450",
+                "#define CW_CUBE",
+                #include "shaders/cube_vertices.vert.h"
+                ,
+                #include "shaders/draw_cube.vert.h"
+            }
+        },
+        {
+            VK_SHADER_STAGE_FRAGMENT_BIT,
+            {
+                "#version 450",
+                #include "shaders/voxel_traversal.h"
+                ,
+                #include "shaders/render_region.frag.h"
+            }
+        }
+    };
+
+    output.binding_groups = std::vector<DispatchStageInfo::BindingGroupInfo>{
+        {
+            {
+                { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                  0, 1 },
+                { VK_SHADER_STAGE_ALL, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                  0, 1 },
+                { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                  VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT, 32*32*32 },
+            },
+            64
+        }
+    };
+
+    output.push_constants = std::vector<DispatchStageInfo::PushConstantRange>{
+        { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(numtk::vec3f) }
+    };
+
+#if 0
+    DispatchStageInfo::GraphicsDispatchInfo& dispatch_info = output.dispatch_info.graphics;
+    dispatch_info.state_overrides = std::vector<vktk::Context::StateOverride>{};
+    dispatch_info.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    dispatch_info.input_layout = std::vector<vktk::Context::VertexInput>{};
+#endif
+
+    return output;
+}
 
 struct state_t
 {
