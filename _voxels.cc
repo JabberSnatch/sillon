@@ -11,6 +11,7 @@
 #include "dstk.hh"
 
 #include <memory>
+#include <variant>
 
 namespace {
 
@@ -85,7 +86,7 @@ struct DispatchStageInfo
     };
     std::vector<PushConstantRange> push_constants;
 
-    struct GraphicsDispatchInfo {
+    struct GraphicsStageInfo {
         std::vector<vktk::Context::StateOverride> state_overrides;
 
         // geometry attachments
@@ -93,14 +94,10 @@ struct DispatchStageInfo
         std::vector<vktk::Context::VertexInput> input_layout;
     };
 
-#if 0
-    union {
-        GraphicsDispatchInfo graphics;
-    } dispatch_info;
-#endif
+    std::variant<GraphicsStageInfo> details;
 };
 
-struct DispatchNode
+struct DispatchNodeInfo
 {
     // dispatch description
     enum DispatchMode {
@@ -111,7 +108,7 @@ struct DispatchNode
 
     std::vector<DispatchStageInfo> sequence;
 
-    struct GraphicsDispatchNodeInfo {
+    struct GraphicsNodeInfo {
         // render attachments
         union ClearValue {
             numtk::vec4f color;
@@ -123,18 +120,33 @@ struct DispatchNode
         struct RenderAttachment {
             VkImageType type;
             VkFormat format;
-            VkImageUsageFlagBits usage;
             ClearValue clear_value;
         };
 
         std::vector<RenderAttachment> attachments;
     };
 
-#if 0
-    union {
-        GraphicsDispatchNodeInfo graphics;
-    } dispatch_info;
-#endif
+    std::variant<GraphicsNodeInfo> details;
+};
+
+struct DispatchNodeRuntime
+{
+    struct StageRuntime {
+        vktk::DescriptorPool descriptor_pool;
+        std::vector<VkDescriptorSet> descriptor_sets;
+        VkPipelineLayout pipeline_layout;
+
+        VkPipeline pipeline;
+    };
+    std::vector<StageRuntime> stages;
+
+    struct GraphicsNodeRuntime {
+        std::vector<vktk::Texture> render_targets;
+        VkFramebuffer framebuffer;
+        VkRenderPass render_pass;
+    };
+
+    std::variant<GraphicsNodeRuntime> details;
 };
 
 DispatchStageInfo RegionPassDispatchStageInfo()
@@ -182,12 +194,33 @@ DispatchStageInfo RegionPassDispatchStageInfo()
         { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(numtk::vec3f) }
     };
 
-#if 0
-    DispatchStageInfo::GraphicsDispatchInfo& dispatch_info = output.dispatch_info.graphics;
-    dispatch_info.state_overrides = std::vector<vktk::Context::StateOverride>{};
-    dispatch_info.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    dispatch_info.input_layout = std::vector<vktk::Context::VertexInput>{};
-#endif
+    DispatchStageInfo::GraphicsStageInfo& details = std::get<DispatchStageInfo::GraphicsStageInfo>(output.details);
+    details.state_overrides = std::vector<vktk::Context::StateOverride>{};
+    details.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    details.input_layout = std::vector<vktk::Context::VertexInput>{};
+
+    return output;
+}
+
+DispatchNodeInfo MainWorldDispatchInfo()
+{
+    DispatchNodeInfo output{};
+    output.mode = DispatchNodeInfo::DispatchMode_Graphics;
+    output.sequence = std::vector<DispatchStageInfo>{
+        RegionPassDispatchStageInfo()
+    };
+
+    DispatchNodeInfo::GraphicsNodeInfo& details = std::get<DispatchNodeInfo::GraphicsNodeInfo>(output.details);
+    details.attachments = std::vector<DispatchNodeInfo::GraphicsNodeInfo::RenderAttachment>{
+        {
+            VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
+            numtk::vec4f{ 0.f, 1.f, 1.f, 0.f }
+        },
+        {
+            VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
+            DispatchNodeInfo::GraphicsNodeInfo::ClearValue{ 1.f, 0u }
+        }
+    };
 
     return output;
 }
