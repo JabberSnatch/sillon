@@ -957,6 +957,42 @@ void RenderResources(void* _pstate,
 {
     state_t* _state = (state_t*)_pstate;
 
+    DispatchNodeInfo main_world_dispatch = MainWorldDispatchInfo();
+    DispatchNodeRuntime main_world_runtime = {};
+    {
+        DispatchNodeInfo& dispatch_info = main_world_dispatch;
+        DispatchNodeRuntime& dispatch_runtime = main_world_runtime;
+
+        for (DispatchStageInfo const& stage : dispatch_info.sequence)
+        {
+            std::vector<VkShaderModule> shader_modules = {};
+            for (DispatchStageInfo::ShaderStage const& shader : stage.shaders)
+            {
+            }
+
+            for (DispatchStageInfo::BindingGroupInfo const& binding_group : stage.binding_groups)
+            {
+            }
+
+            for (DispatchStageInfo::PushConstantRange const& push_constants : stage.push_constants)
+            {
+            }
+
+            if (dispatch_info.mode == DispatchNodeInfo::DispatchMode_Graphics)
+            {
+            }
+        }
+
+        if (dispatch_info.mode == DispatchNodeInfo::DispatchMode_Graphics)
+        {
+            DispatchNodeInfo::GraphicsNodeInfo const& graphics_info =
+                std::get<DispatchNodeInfo::GraphicsNodeInfo>(dispatch_info.details);
+            for (DispatchNodeInfo::GraphicsNodeInfo::RenderAttachment const& attachment : graphics_info.attachments)
+            {
+            }
+        }
+    }
+
     {
         _state->primary_pass_color = _vulkan->CreateTexture(
             _swapchain.size.width, _swapchain.size.height, 1,
