@@ -67,7 +67,7 @@ struct DispatchStageInfo
 
     // resource bindings
     struct ResourceBindingInfo {
-        VkShaderStageFlagBits stages;
+        VkShaderStageFlags stages;
         VkDescriptorType type;
         VkDescriptorBindingFlags flags;
         uint32_t count;
@@ -129,21 +129,26 @@ struct DispatchNodeInfo
     std::variant<GraphicsNodeInfo> details;
 };
 
+struct DispatchStageRuntime
+{
+    struct DescriptorRuntime {
+        vktk::DescriptorPool pool;
+        std::vector<VkDescriptorSet> sets;
+    };
+
+    std::vector<DescriptorRuntime> descriptors;
+    VkPipelineLayout pipeline_layout;
+    VkPipeline pipeline;
+};
+
 struct DispatchNodeRuntime
 {
-    struct StageRuntime {
-        vktk::DescriptorPool descriptor_pool;
-        std::vector<VkDescriptorSet> descriptor_sets;
-        VkPipelineLayout pipeline_layout;
-
-        VkPipeline pipeline;
-    };
-    std::vector<StageRuntime> stages;
+    std::vector<DispatchStageRuntime> stages;
 
     struct GraphicsNodeRuntime {
+        VkRenderPass render_pass;
         std::vector<vktk::Texture> render_targets;
         VkFramebuffer framebuffer;
-        VkRenderPass render_pass;
     };
 
     std::variant<GraphicsNodeRuntime> details;
@@ -963,15 +968,100 @@ void RenderResources(void* _pstate,
         DispatchNodeInfo& dispatch_info = main_world_dispatch;
         DispatchNodeRuntime& dispatch_runtime = main_world_runtime;
 
+        if (dispatch_info.mode == DispatchNodeInfo::DispatchMode_Graphics)
+        {
+            DispatchNodeRuntime::GraphicsNodeRuntime& graphics_runtime =
+                std::get<DispatchNodeRuntime::GraphicsNodeRuntime>(dispatch_runtime.details);
+            DispatchNodeInfo::GraphicsNodeInfo& graphics_info =
+                std::get<DispatchNodeInfo::GraphicsNodeInfo>(dispatch_info.details);
+
+            std::vector<vktk::Context::RenderPassAttachment> attachments{};
+            std::vector<VkImageView> views{};
+            for (DispatchNodeInfo::GraphicsNodeInfo::RenderAttachment const& attachment
+                     : graphics_info.attachments)
+            {
+                graphics_runtime.render_targets.push_back(
+                    _vulkan->CreateTexture(
+                        _swapchain.size.width, _swapchain.size.height, 1,
+                        attachment.type, attachment.format,
+                        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+                        )
+                    );
+
+                attachments.push_back(vktk::Context::RenderPassAttachment{
+                    attachment.format,
+                    VK_IMAGE_LAYOUT_UNDEFINED,
+                    VK_IMAGE_LAYOUT_UNDEFINED
+                });
+
+                views.push_back(graphics_runtime.render_targets.back().view);
+            }
+
+            graphics_runtime.render_pass = _vulkan->CreateRenderPass(attachments);
+
+            VkFramebufferCreateInfo fb_info{};
+            fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+            fb_info.pNext = nullptr;
+            fb_info.flags = 0u;
+            fb_info.renderPass = graphics_runtime.render_pass;
+            fb_info.attachmentCount = views.size();
+            fb_info.pAttachments = views.data();
+            fb_info.width = _swapchain.size.width;
+            fb_info.height = _swapchain.size.height;
+            fb_info.layers = 1;
+            CHECKCALL(vkCreateFramebuffer, _vulkan->device, &fb_info, nullptr,
+                      &graphics_runtime.framebuffer);
+        }
+
         for (DispatchStageInfo const& stage : dispatch_info.sequence)
         {
+            DispatchStageRuntime stage_runtime = {};
+
             std::vector<VkShaderModule> shader_modules = {};
             for (DispatchStageInfo::ShaderStage const& shader : stage.shaders)
             {
+                std::string shader_name = stage.name;
+                switch (shader.stage)
+                {
+                case VK_SHADER_STAGE_VERTEX_BIT: shader_name += "_vertex"; break;
+                case VK_SHADER_STAGE_FRAGMENT_BIT: shader_name += "_fragment"; break;
+                default: shader_name += "_unknown"; break;
+                }
+
+                VkShaderModule shader_module =
+                    _vulkan->CompileShader_GLSL(shader.stage, shader_name.c_str(), shader.source);
+
+                shader_modules.push_back(shader_module);
             }
 
             for (DispatchStageInfo::BindingGroupInfo const& binding_group : stage.binding_groups)
             {
+                DispatchStageRuntime::DescriptorRuntime descriptor = {};
+                std::vector<vktk::Context::DescriptorSetBindingPoint> bindings = {};
+                for (DispatchStageInfo::ResourceBindingInfo const& binding : binding_group.resources)
+                {
+                    bindings.push_back(vktk::Context::DescriptorSetBindingPoint{
+                        binding.type,
+                        binding.flags,
+                        binding.stages,
+                        binding.count
+                    });
+                }
+
+                descriptor.pool = _vulkan->CreateDescriptorPool(binding_group.count, bindings);
+
+                descriptor.sets.resize(binding_group.count);
+                VkDescriptorSetAllocateInfo descset_allocate{};
+                descset_allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+                descset_allocate.pNext = nullptr;
+                descset_allocate.descriptorPool = descriptor.pool.pool;
+                descset_allocate.descriptorSetCount = 1u;
+                descset_allocate.pSetLayouts = &descriptor.pool.layout;
+                for (uint32_t index = 0; index < binding_group.count; ++index)
+                    CHECKCALL(vkAllocateDescriptorSets, _vulkan->device,
+                              &descset_allocate, &descriptor.sets[index]);
+
+                stage_runtime.descriptors.push_back(descriptor);
             }
 
             for (DispatchStageInfo::PushConstantRange const& push_constants : stage.push_constants)
@@ -980,16 +1070,14 @@ void RenderResources(void* _pstate,
 
             if (dispatch_info.mode == DispatchNodeInfo::DispatchMode_Graphics)
             {
+                DispatchStageInfo::GraphicsStageInfo const& graphics_info =
+                    std::get<DispatchStageInfo::GraphicsStageInfo>(stage.details);
             }
-        }
 
-        if (dispatch_info.mode == DispatchNodeInfo::DispatchMode_Graphics)
-        {
-            DispatchNodeInfo::GraphicsNodeInfo const& graphics_info =
-                std::get<DispatchNodeInfo::GraphicsNodeInfo>(dispatch_info.details);
-            for (DispatchNodeInfo::GraphicsNodeInfo::RenderAttachment const& attachment : graphics_info.attachments)
-            {
-            }
+            stage_runtime.pipeline_layout;
+            stage_runtime.pipeline;
+
+            dispatch_runtime.stages.push_back(stage_runtime);
         }
     }
 

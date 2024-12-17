@@ -753,7 +753,13 @@ CommandBuffer Context::CreateCommandBuffer(Queue const& queue)
 
 VkRenderPass Context::CreateRenderPass(std::vector<RenderPassAttachment> const& _attachments)
 {
-    return CreateRenderPass(_attachments, nullptr);
+    auto it = std::find_if(_attachments.begin(), _attachments.end(),
+                           [](RenderPassAttachment const& attachment) {
+                               return (
+                                   attachment.format >= VK_FORMAT_D16_UNORM
+                                   && attachment.format < VK_FORMAT_BC1_RGB_UNORM_BLOCK);
+                           });
+    return CreateRenderPass(_attachments, it == _attachments.end() ? nullptr : &*it);
 }
 
 VkRenderPass Context::CreateRenderPass(std::vector<RenderPassAttachment> const& _attachments,
