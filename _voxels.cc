@@ -80,7 +80,7 @@ struct DispatchStageInfo
 
     // push constants
     struct PushConstantRange {
-        VkShaderStageFlagBits stages;
+        VkShaderStageFlags stages;
         uint32_t offset;
         uint32_t size;
     };
@@ -1034,6 +1034,7 @@ void RenderResources(void* _pstate,
                 shader_modules.push_back(shader_module);
             }
 
+            std::vector<VkDescriptorSetLayout> set_layouts = {};
             for (DispatchStageInfo::BindingGroupInfo const& binding_group : stage.binding_groups)
             {
                 DispatchStageRuntime::DescriptorRuntime descriptor = {};
@@ -1062,10 +1063,18 @@ void RenderResources(void* _pstate,
                               &descset_allocate, &descriptor.sets[index]);
 
                 stage_runtime.descriptors.push_back(descriptor);
+
+                set_layouts.push_back(descriptor.pool.layout);
             }
 
-            for (DispatchStageInfo::PushConstantRange const& push_constants : stage.push_constants)
+            std::vector<VkPushConstantRange> push_constant_ranges = {};
+            for (DispatchStageInfo::PushConstantRange const& push_constant : stage.push_constants)
             {
+                push_constant_ranges.push_back(VkPushConstantRange{
+                    push_constant.stages,
+                    push_constant.offset,
+                    push_constant.size
+                });
             }
 
             if (dispatch_info.mode == DispatchNodeInfo::DispatchMode_Graphics)
@@ -1074,7 +1083,19 @@ void RenderResources(void* _pstate,
                     std::get<DispatchStageInfo::GraphicsStageInfo>(stage.details);
             }
 
-            stage_runtime.pipeline_layout;
+            {
+                VkPipelineLayoutCreateInfo pipeline_create = {};
+                pipeline_create.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+                pipeline_create.pNext = nullptr;
+                pipeline_create.flags = 0u;
+                pipeline_create.setLayoutCount = set_layouts.size();
+                pipeline_create.pSetLayouts = set_layouts.data();
+                pipeline_create.pushConstantRangeCount = push_constant_ranges.size();
+                pipeline_create.pPushConstantRanges = push_constant_ranges.data();
+                CHECKCALL(vkCreatePipelineLayout, _vulkan->device, &pipeline_create, nullptr,
+                          &stage_runtime.pipeline_layout);
+            }
+
             stage_runtime.pipeline;
 
             dispatch_runtime.stages.push_back(stage_runtime);
