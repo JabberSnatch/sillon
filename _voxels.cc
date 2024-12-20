@@ -131,14 +131,16 @@ struct DispatchNodeInfo
 
 struct DispatchStageRuntime
 {
-    struct DescriptorRuntime {
+    struct BindingGroupRuntime {
         vktk::DescriptorPool pool;
         std::vector<VkDescriptorSet> sets;
     };
 
-    std::vector<DescriptorRuntime> descriptors;
+    std::vector<BindingGroupRuntime> binding_groups;
     VkPipelineLayout pipeline_layout;
     VkPipeline pipeline;
+
+    //void UpdateBindingGroup(uint32_t group_index, std::vector<BindingUpdateInfo> const& updates);
 };
 
 struct DispatchNodeRuntime
@@ -152,6 +154,31 @@ struct DispatchNodeRuntime
     };
 
     std::variant<GraphicsNodeRuntime> details;
+};
+
+struct BindingInfo
+{
+    VkDescriptorType type;
+
+    uint32_t set_index;
+    uint32_t binding_index;
+    uint32_t array_index;
+    union {
+        VkDescriptorImageInfo image_binding;
+        VkDescriptorBufferInfo buffer_binding;
+    };
+};
+
+struct NodeBindingPoint
+{
+    DispatchNodeRuntime const* node;
+    BindingInfo location;
+};
+
+struct GraphEdge
+{
+    NodeBindingPoint source;
+    NodeBindingPoint target;
 };
 
 DispatchStageInfo RegionPassDispatchStageInfo()
@@ -1017,27 +1044,10 @@ void RenderResources(void* _pstate,
         {
             DispatchStageRuntime stage_runtime = {};
 
-            std::vector<VkShaderModule> shader_modules = {};
-            for (DispatchStageInfo::ShaderStage const& shader : stage.shaders)
-            {
-                std::string shader_name = stage.name;
-                switch (shader.stage)
-                {
-                case VK_SHADER_STAGE_VERTEX_BIT: shader_name += "_vertex"; break;
-                case VK_SHADER_STAGE_FRAGMENT_BIT: shader_name += "_fragment"; break;
-                default: shader_name += "_unknown"; break;
-                }
-
-                VkShaderModule shader_module =
-                    _vulkan->CompileShader_GLSL(shader.stage, shader_name.c_str(), shader.source);
-
-                shader_modules.push_back(shader_module);
-            }
-
             std::vector<VkDescriptorSetLayout> set_layouts = {};
             for (DispatchStageInfo::BindingGroupInfo const& binding_group : stage.binding_groups)
             {
-                DispatchStageRuntime::DescriptorRuntime descriptor = {};
+                DispatchStageRuntime::BindingGroupRuntime descriptor = {};
                 std::vector<vktk::Context::DescriptorSetBindingPoint> bindings = {};
                 for (DispatchStageInfo::ResourceBindingInfo const& binding : binding_group.resources)
                 {
@@ -1062,7 +1072,7 @@ void RenderResources(void* _pstate,
                     CHECKCALL(vkAllocateDescriptorSets, _vulkan->device,
                               &descset_allocate, &descriptor.sets[index]);
 
-                stage_runtime.descriptors.push_back(descriptor);
+                stage_runtime.binding_groups.push_back(descriptor);
 
                 set_layouts.push_back(descriptor.pool.layout);
             }
@@ -1075,12 +1085,6 @@ void RenderResources(void* _pstate,
                     push_constant.offset,
                     push_constant.size
                 });
-            }
-
-            if (dispatch_info.mode == DispatchNodeInfo::DispatchMode_Graphics)
-            {
-                DispatchStageInfo::GraphicsStageInfo const& graphics_info =
-                    std::get<DispatchStageInfo::GraphicsStageInfo>(stage.details);
             }
 
             {
@@ -1096,7 +1100,40 @@ void RenderResources(void* _pstate,
                           &stage_runtime.pipeline_layout);
             }
 
-            stage_runtime.pipeline;
+            std::vector<vktk::Context::PipelineStage> pipeline_stages = {};
+            for (DispatchStageInfo::ShaderStage const& shader : stage.shaders)
+            {
+                std::string shader_name = stage.name;
+                switch (shader.stage)
+                {
+                case VK_SHADER_STAGE_VERTEX_BIT: shader_name += "_vertex"; break;
+                case VK_SHADER_STAGE_FRAGMENT_BIT: shader_name += "_fragment"; break;
+                default: shader_name += "_unknown"; break;
+                }
+
+                VkShaderModule shader_module =
+                    _vulkan->CompileShader_GLSL(shader.stage, shader_name.c_str(), shader.source);
+
+                pipeline_stages.push_back(vktk::Context::PipelineStage{ shader_module, shader.stage });
+            }
+
+            if (dispatch_info.mode == DispatchNodeInfo::DispatchMode_Graphics)
+            {
+                DispatchStageInfo::GraphicsStageInfo const& graphics_info =
+                    std::get<DispatchStageInfo::GraphicsStageInfo>(stage.details);
+
+                stage_runtime.pipeline = _vulkan->CreatePipeline(
+                    stage_runtime.pipeline_layout,
+                    _swapchain.render_pass,
+                    pipeline_stages,
+                    graphics_info.state_overrides,
+                    graphics_info.topology,
+                    graphics_info.input_layout
+                    );
+            }
+
+            for (vktk::Context::PipelineStage const& pipeline_stage : pipeline_stages)
+                vkDestroyShaderModule(_vulkan->device, pipeline_stage.module, nullptr);
 
             dispatch_runtime.stages.push_back(stage_runtime);
         }
