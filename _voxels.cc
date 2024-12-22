@@ -145,6 +145,8 @@ struct DispatchStageRuntime
 
 struct DispatchNodeRuntime
 {
+    DispatchNodeInfo info;
+
     std::vector<DispatchStageRuntime> stages;
 
     struct GraphicsNodeRuntime {
@@ -156,7 +158,7 @@ struct DispatchNodeRuntime
     std::variant<GraphicsNodeRuntime> details;
 };
 
-struct BindingInfo
+struct ShaderResource
 {
     VkDescriptorType type;
 
@@ -169,17 +171,127 @@ struct BindingInfo
     };
 };
 
+struct FramebufferResource
+{
+    enum AttachmentType {
+        AttachmentType_Color,
+        AttachmentType_DepthStencil,
+    };
+
+    AttachmentType type;
+    uint32_t index;
+};
+
 struct NodeBindingPoint
 {
     DispatchNodeRuntime const* node;
-    BindingInfo location;
+    uint32_t stage_index;
+
+    enum BindingType {
+        BindingType_Shader,
+        BindingType_Framebuffer,
+        BindingType_Transfer,
+    };
+
+    BindingType type;
+    union {
+        ShaderResource shader;
+        FramebufferResource framebuffer;
+    } location;
 };
 
 struct GraphEdge
 {
+    enum EdgeType {
+        EdgeType_Image,
+        EdgeType_Buffer,
+    };
+
+    EdgeType type;
     NodeBindingPoint source;
     NodeBindingPoint target;
 };
+
+struct MemoryBarrier
+{
+    VkPipelineStageFlags src_stage;
+    VkPipelineStageFlags dst_stage;
+    VkAccessFlags src_access;
+    VkAccessFlags dst_access;
+    VkImageLayout src_layout;
+    VkImageLayout dst_layout;
+};
+
+struct HalfMemoryBarrier
+{
+    VkPipelineStageFlags stage;
+    VkAccessFlags access;
+    VkImageLayout layout;
+};
+
+MemoryBarrier GenerateEdgeBarrier(GraphEdge const& edge)
+{
+    VkPipelineStageFlags stage = {};
+
+    if (edge.type == GraphEdge::EdgeType_Image)
+    {
+        VkAccessFlags access = VK_ACCESS_NONE;
+        VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+
+        switch (edge.source.type)
+        {
+
+        case NodeBindingPoint::BindingType_Shader:
+        {
+            ShaderResource const& location = edge.source.location.shader;
+            DispatchStageInfo const& stage_info =
+                edge.source.node->info.sequence[edge.source.stage_index];
+
+            switch (location.type)
+            {
+
+            case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER: {
+                access = VK_ACCESS_SHADER_READ_BIT;
+                layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            } break;
+
+            case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE: {
+                access = VK_ACCESS_SHADER_READ_BIT;
+                layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            } break;
+
+            case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE: {
+                access = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+                layout = VK_IMAGE_LAYOUT_GENERAL;
+            } break;
+
+            default: break;
+            }
+        } break;
+
+        case NodeBindingPoint::BindingType_Framebuffer:
+        {
+            FramebufferResource const& location = edge.source.location.framebuffer;
+
+            if (location.type == FramebufferResource::AttachmentType_Color) {
+                access = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT
+                    | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+                layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            }
+
+            if (location.type == FramebufferResource::AttachmentType_DepthStencil) {
+                access = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT
+                    | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+                layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            }
+
+        } break;
+
+        default: break;
+        }
+    }
+}
 
 DispatchStageInfo RegionPassDispatchStageInfo()
 {
