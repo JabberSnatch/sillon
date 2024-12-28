@@ -184,12 +184,13 @@ struct FramebufferResource
 
 struct NodeBindingPoint
 {
-    DispatchNodeRuntime const* node;
+    DispatchNodeInfo const* node;
     uint32_t stage_index;
 
     enum BindingType {
         BindingType_Shader,
         BindingType_Framebuffer,
+        BindingType_Swapchain,
         BindingType_Transfer,
     };
 
@@ -212,14 +213,31 @@ struct GraphEdge
     NodeBindingPoint target;
 };
 
-struct MemoryBarrier
+struct RenderGraph
 {
-    VkPipelineStageFlags src_stage;
-    VkPipelineStageFlags dst_stage;
-    VkAccessFlags src_access;
-    VkAccessFlags dst_access;
-    VkImageLayout src_layout;
-    VkImageLayout dst_layout;
+    std::vector<DispatchNodeInfo> nodes;
+    std::vector<GraphEdge> edges;
+    std::unordered_map<DispatchNodeInfo const*, std::vector<GraphEdge const*>> edges_in;
+    std::unordered_map<DispatchNodeInfo const*, std::vector<GraphEdge const*>> edges_out;
+
+    void InsertEdge(GraphEdge const& edge)
+    {
+        edges.push_back(edge);
+        GraphEdge const* pEdge = &edges.back();
+        if (pEdge->source.node)
+            edges_out[pEdge->source.node].push_back(pEdge);
+        if (pEdge->target.node)
+            edges_in[pEdge->target.node].push_back(pEdge);
+    }
+};
+
+struct ResourceSlot
+{
+    enum ResourceType {
+        ResourceType_Image,
+        ResourceType_Buffer,
+    };
+    ResourceType type;
 };
 
 struct HalfMemoryBarrier
@@ -229,41 +247,46 @@ struct HalfMemoryBarrier
     VkImageLayout layout;
 };
 
-MemoryBarrier GenerateEdgeBarrier(GraphEdge const& edge)
+struct MemoryBarrier
 {
-    VkPipelineStageFlags stage = {};
+    HalfMemoryBarrier src;
+    HalfMemoryBarrier dst;
+};
 
-    if (edge.type == GraphEdge::EdgeType_Image)
+HalfMemoryBarrier HalfEdgeBarrier(GraphEdge::EdgeType type, NodeBindingPoint const& binding_point)
+{
+    HalfMemoryBarrier output = {};
+    output.access = VK_ACCESS_NONE;
+    output.layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    output.stage = 0;
+
+    if (type == GraphEdge::EdgeType_Image)
     {
-        VkAccessFlags access = VK_ACCESS_NONE;
-        VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
-
-
-        switch (edge.source.type)
+        switch (binding_point.type)
         {
 
         case NodeBindingPoint::BindingType_Shader:
         {
-            ShaderResource const& location = edge.source.location.shader;
+            ShaderResource const& location = binding_point.location.shader;
             DispatchStageInfo const& stage_info =
-                edge.source.node->info.sequence[edge.source.stage_index];
+                binding_point.node->sequence[binding_point.stage_index];
 
             switch (location.type)
             {
 
             case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER: {
-                access = VK_ACCESS_SHADER_READ_BIT;
-                layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                output.access = VK_ACCESS_SHADER_READ_BIT;
+                output.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
             } break;
 
             case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE: {
-                access = VK_ACCESS_SHADER_READ_BIT;
-                layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                output.access = VK_ACCESS_SHADER_READ_BIT;
+                output.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
             } break;
 
             case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE: {
-                access = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-                layout = VK_IMAGE_LAYOUT_GENERAL;
+                output.access = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+                output.layout = VK_IMAGE_LAYOUT_GENERAL;
             } break;
 
             default: break;
@@ -272,18 +295,18 @@ MemoryBarrier GenerateEdgeBarrier(GraphEdge const& edge)
 
         case NodeBindingPoint::BindingType_Framebuffer:
         {
-            FramebufferResource const& location = edge.source.location.framebuffer;
+            FramebufferResource const& location = binding_point.location.framebuffer;
 
             if (location.type == FramebufferResource::AttachmentType_Color) {
-                access = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT
+                output.access = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT
                     | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-                layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                output.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
             }
 
             if (location.type == FramebufferResource::AttachmentType_DepthStencil) {
-                access = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT
+                output.access = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT
                     | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-                layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+                output.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
             }
 
         } break;
@@ -291,6 +314,14 @@ MemoryBarrier GenerateEdgeBarrier(GraphEdge const& edge)
         default: break;
         }
     }
+}
+
+MemoryBarrier GenerateEdgeBarrier(GraphEdge const& edge)
+{
+    MemoryBarrier output = {};
+    output.src = HalfEdgeBarrier(edge.type, edge.source);
+    output.dst = HalfEdgeBarrier(edge.type, edge.target);
+    return output;
 }
 
 DispatchStageInfo RegionPassDispatchStageInfo()
@@ -367,6 +398,35 @@ DispatchNodeInfo MainWorldDispatchInfo()
     };
 
     return output;
+}
+
+RenderGraph TestRenderGraph()
+{
+    RenderGraph output = {};
+    output.nodes.push_back(MainWorldDispatchInfo());
+    DispatchNodeInfo const* main_world_node = &output.nodes.back();
+
+    {
+        GraphEdge edge = {};
+        edge.type = GraphEdge::EdgeType_Image;
+
+        edge.source.node = main_world_node;
+        edge.source.type = NodeBindingPoint::BindingType_Framebuffer;
+        edge.source.location.framebuffer = FramebufferResource{
+            FramebufferResource::AttachmentType_Color, 0
+        };
+
+        edge.target.node = nullptr;
+        edge.target.type = NodeBindingPoint::BindingType_Swapchain;
+
+        output.InsertEdge(edge);
+    }
+
+    return output;
+}
+
+void PrepareRuntime(RenderGraph const& graph)
+{
 }
 
 struct state_t
