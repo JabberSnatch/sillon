@@ -99,6 +99,8 @@ struct DispatchStageInfo
 
 struct DispatchNodeInfo
 {
+    std::string name;
+
     // dispatch description
     enum DispatchMode {
         DispatchMode_Graphics,
@@ -108,21 +110,21 @@ struct DispatchNodeInfo
 
     std::vector<DispatchStageInfo> sequence;
 
-    struct GraphicsNodeInfo {
-        // render attachments
-        union ClearValue {
-            numtk::vec4f color;
-            struct {
-                float depth;
-                uint32_t stencil;
-            } depth_stencil;
-        };
-        struct RenderAttachment {
-            VkImageType type;
-            VkFormat format;
-            ClearValue clear_value;
-        };
+    // render attachments
+    union ClearValue {
+        numtk::vec4f color;
+        struct {
+            float depth;
+            uint32_t stencil;
+        } depth_stencil;
+    };
+    struct RenderAttachment {
+        VkImageType type;
+        VkFormat format;
+        ClearValue clear_value;
+    };
 
+    struct GraphicsNodeInfo {
         std::vector<RenderAttachment> attachments;
     };
 
@@ -158,20 +160,20 @@ struct DispatchNodeRuntime
     std::variant<GraphicsNodeRuntime> details;
 };
 
-struct ShaderResource
+struct ShaderBindingInfo
 {
     VkDescriptorType type;
 
     uint32_t set_index;
     uint32_t binding_index;
-    uint32_t array_index;
+
     union {
         VkDescriptorImageInfo image_binding;
         VkDescriptorBufferInfo buffer_binding;
     };
 };
 
-struct FramebufferResource
+struct FramebufferBindingInfo
 {
     enum AttachmentType {
         AttachmentType_Color,
@@ -190,14 +192,14 @@ struct NodeBindingPoint
     enum BindingType {
         BindingType_Shader,
         BindingType_Framebuffer,
-        BindingType_Swapchain,
-        BindingType_Transfer,
+        BindingType_PushConstantRange,
+        BindingType_VertexInput,
     };
 
     BindingType type;
     union {
-        ShaderResource shader;
-        FramebufferResource framebuffer;
+        ShaderBindingInfo shader;
+        FramebufferBindingInfo framebuffer;
     } location;
 };
 
@@ -216,6 +218,7 @@ struct GraphEdge
 struct RenderGraph
 {
     std::vector<DispatchNodeInfo> nodes;
+
     std::vector<GraphEdge> edges;
     std::unordered_map<DispatchNodeInfo const*, std::vector<GraphEdge const*>> edges_in;
     std::unordered_map<DispatchNodeInfo const*, std::vector<GraphEdge const*>> edges_out;
@@ -229,15 +232,134 @@ struct RenderGraph
         if (pEdge->target.node)
             edges_in[pEdge->target.node].push_back(pEdge);
     }
-};
 
-struct ResourceSlot
-{
-    enum ResourceType {
-        ResourceType_Image,
-        ResourceType_Buffer,
-    };
-    ResourceType type;
+    std::vector<NodeBindingPoint> Inputs() const
+    {
+        std::vector<NodeBindingPoint> binding_points = {};
+
+        for (DispatchNodeInfo const& node : nodes)
+        {
+            uint32_t stage_index = 0;
+            for (DispatchStageInfo const& stage : node.sequence)
+            {
+                uint32_t group_index = 0;
+                for (DispatchStageInfo::BindingGroupInfo const& binding_group : stage.binding_groups)
+                {
+                    uint32_t binding_index = 0;
+                    for (DispatchStageInfo::ResourceBindingInfo const& resource : binding_group.resources)
+                    {
+                        if (resource.type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+                            || resource.type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+                            || resource.type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+                            || resource.type == VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER
+                            || resource.type == VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER
+                            || resource.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+                            || resource.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+                        {
+                            NodeBindingPoint binding_point = {};
+                            binding_point.node = &node;
+                            binding_point.stage_index = stage_index;
+                            binding_point.type = NodeBindingPoint::BindingType_Shader;
+                            binding_point.location.shader.type = resource.type;
+                            binding_point.location.shader.set_index = group_index;
+                            binding_point.location.shader.binding_index = binding_index;
+                            binding_points.push_back(binding_point);
+                        }
+
+                        ++binding_index;
+                    }
+
+                    ++group_index;
+                }
+
+                for (DispatchStageInfo::PushConstantRange const& push_constants : stage.push_constants)
+                {
+                    NodeBindingPoint binding_point = {};
+                    binding_point.node = &node;
+                    binding_point.stage_index = stage_index;
+                    binding_point.type = NodeBindingPoint::BindingType_PushConstantRange;
+                    binding_points.push_back(binding_point);
+                }
+
+                if (node.mode == DispatchNodeInfo::DispatchMode_Graphics)
+                {
+                    auto const& details = std::get<DispatchStageInfo::GraphicsStageInfo>(stage.details);
+                    for (vktk::Context::VertexInput const& vertex_input : details.input_layout)
+                    {
+                        NodeBindingPoint binding_point = {};
+                        binding_point.node = &node;
+                        binding_point.stage_index = stage_index;
+                        binding_point.type = NodeBindingPoint::BindingType_VertexInput;
+                        binding_points.push_back(binding_point);
+                    }
+                }
+
+                ++stage_index;
+            }
+        }
+
+        return binding_points;
+    }
+
+    std::vector<NodeBindingPoint> Outputs() const
+    {
+        std::vector<NodeBindingPoint> binding_points = {};
+
+        for (DispatchNodeInfo const& node : nodes)
+        {
+            uint32_t stage_index = 0;
+            for (DispatchStageInfo const& stage : node.sequence)
+            {
+                uint32_t group_index = 0;
+                for (DispatchStageInfo::BindingGroupInfo const& binding_group : stage.binding_groups)
+                {
+                    uint32_t binding_index = 0;
+                    for (DispatchStageInfo::ResourceBindingInfo const& resource : binding_group.resources)
+                    {
+                        if (resource.type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+                            || resource.type == VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER
+                            || resource.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
+                        {
+                            NodeBindingPoint binding_point = {};
+                            binding_point.node = &node;
+                            binding_point.stage_index = stage_index;
+                            binding_point.type = NodeBindingPoint::BindingType_Shader;
+                            binding_point.location.shader.type = resource.type;
+                            binding_point.location.shader.set_index = group_index;
+                            binding_point.location.shader.binding_index = binding_index;
+                            binding_points.push_back(binding_point);
+                        }
+
+                        ++binding_index;
+                    }
+
+                    ++group_index;
+                }
+
+                ++stage_index;
+            }
+
+            if (node.mode == DispatchNodeInfo::DispatchMode_Graphics)
+            {
+                auto const& details = std::get<DispatchNodeInfo::GraphicsNodeInfo>(node.details);
+                uint32_t attachment_index = 0;
+                for (DispatchNodeInfo::RenderAttachment const& attachment : details.attachments)
+                {
+                    NodeBindingPoint binding_point = {};
+                    binding_point.node = &node;
+                    binding_point.stage_index = -1;
+                    binding_point.type = NodeBindingPoint::BindingType_Framebuffer;
+                    binding_point.location.framebuffer.type = FramebufferBindingInfo::AttachmentType_Color;
+                    binding_point.location.framebuffer.index = attachment_index;
+                    binding_points.push_back(binding_point);
+
+                    ++attachment_index;
+                }
+            }
+        }
+
+        return binding_points;
+    }
 };
 
 struct HalfMemoryBarrier
@@ -267,7 +389,7 @@ HalfMemoryBarrier HalfEdgeBarrier(GraphEdge::EdgeType type, NodeBindingPoint con
 
         case NodeBindingPoint::BindingType_Shader:
         {
-            ShaderResource const& location = binding_point.location.shader;
+            ShaderBindingInfo const& location = binding_point.location.shader;
             DispatchStageInfo const& stage_info =
                 binding_point.node->sequence[binding_point.stage_index];
 
@@ -295,15 +417,15 @@ HalfMemoryBarrier HalfEdgeBarrier(GraphEdge::EdgeType type, NodeBindingPoint con
 
         case NodeBindingPoint::BindingType_Framebuffer:
         {
-            FramebufferResource const& location = binding_point.location.framebuffer;
+            FramebufferBindingInfo const& location = binding_point.location.framebuffer;
 
-            if (location.type == FramebufferResource::AttachmentType_Color) {
+            if (location.type == FramebufferBindingInfo::AttachmentType_Color) {
                 output.access = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT
                     | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
                 output.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
             }
 
-            if (location.type == FramebufferResource::AttachmentType_DepthStencil) {
+            if (location.type == FramebufferBindingInfo::AttachmentType_DepthStencil) {
                 output.access = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT
                     | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
                 output.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
@@ -380,20 +502,21 @@ DispatchStageInfo RegionPassDispatchStageInfo()
 DispatchNodeInfo MainWorldDispatchInfo()
 {
     DispatchNodeInfo output{};
+    output.name = "MainWorldDispatch";
     output.mode = DispatchNodeInfo::DispatchMode_Graphics;
     output.sequence = std::vector<DispatchStageInfo>{
         RegionPassDispatchStageInfo()
     };
 
     DispatchNodeInfo::GraphicsNodeInfo& details = std::get<DispatchNodeInfo::GraphicsNodeInfo>(output.details);
-    details.attachments = std::vector<DispatchNodeInfo::GraphicsNodeInfo::RenderAttachment>{
+    details.attachments = std::vector<DispatchNodeInfo::RenderAttachment>{
         {
             VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
             numtk::vec4f{ 0.f, 1.f, 1.f, 0.f }
         },
         {
             VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
-            DispatchNodeInfo::GraphicsNodeInfo::ClearValue{ 1.f, 0u }
+            DispatchNodeInfo::ClearValue{ 1.f, 0u }
         }
     };
 
@@ -404,16 +527,18 @@ RenderGraph TestRenderGraph()
 {
     RenderGraph output = {};
     output.nodes.push_back(MainWorldDispatchInfo());
+
     DispatchNodeInfo const* main_world_node = &output.nodes.back();
 
+#if 0
     {
         GraphEdge edge = {};
         edge.type = GraphEdge::EdgeType_Image;
 
         edge.source.node = main_world_node;
         edge.source.type = NodeBindingPoint::BindingType_Framebuffer;
-        edge.source.location.framebuffer = FramebufferResource{
-            FramebufferResource::AttachmentType_Color, 0
+        edge.source.location.framebuffer = FramebufferBindingInfo{
+            FramebufferBindingInfo::AttachmentType_Color, 0
         };
 
         edge.target.node = nullptr;
@@ -421,12 +546,9 @@ RenderGraph TestRenderGraph()
 
         output.InsertEdge(edge);
     }
+#endif
 
     return output;
-}
-
-void PrepareRuntime(RenderGraph const& graph)
-{
 }
 
 struct state_t
@@ -1176,8 +1298,7 @@ void RenderResources(void* _pstate,
 
             std::vector<vktk::Context::RenderPassAttachment> attachments{};
             std::vector<VkImageView> views{};
-            for (DispatchNodeInfo::GraphicsNodeInfo::RenderAttachment const& attachment
-                     : graphics_info.attachments)
+            for (DispatchNodeInfo::RenderAttachment const& attachment : graphics_info.attachments)
             {
                 graphics_runtime.render_targets.push_back(
                     _vulkan->CreateTexture(
