@@ -141,8 +141,6 @@ struct DispatchStageRuntime
     std::vector<BindingGroupRuntime> binding_groups;
     VkPipelineLayout pipeline_layout;
     VkPipeline pipeline;
-
-    //void UpdateBindingGroup(uint32_t group_index, std::vector<BindingUpdateInfo> const& updates);
 };
 
 struct DispatchNodeRuntime
@@ -160,28 +158,46 @@ struct DispatchNodeRuntime
     std::variant<GraphicsNodeRuntime> details;
 };
 
+struct DispatchStageStatic
+{
+    struct BindingGroup {
+        vktk::DescriptorPool pool;
+        std::vector<VkDescriptorSet> sets;
+    };
+    VkPipelineLayout pipeline_layout;
+    std::vector<BindingGroup> binding_groups;
+};
+
+struct DispatchNodeStatic
+{
+    std::vector<DispatchStageStatic> stages;
+};
+
+struct DispatchStageFramebuffer
+{
+    VkPipeline pipeline;
+};
+
+struct DispatchNodeFramebuffer
+{
+    struct GraphicsDetails {
+        VkRenderPass render_pass;
+        VkFramebuffer framebuffer;
+    };
+
+    std::vector<DispatchStageFramebuffer> stages;
+    std::variant<GraphicsDetails> details;
+};
+
 struct ShaderBindingInfo
 {
-    VkDescriptorType type;
-
     uint32_t set_index;
     uint32_t binding_index;
-
-    union {
-        VkDescriptorImageInfo image_binding;
-        VkDescriptorBufferInfo buffer_binding;
-    };
 };
 
 struct FramebufferBindingInfo
 {
-    enum AttachmentType {
-        AttachmentType_Color,
-        AttachmentType_DepthStencil,
-    };
-
-    AttachmentType type;
-    uint32_t index;
+    uint32_t attachment_index;
 };
 
 struct NodeBindingPoint
@@ -215,7 +231,7 @@ struct GraphEdge
     NodeBindingPoint target;
 };
 
-struct RenderGraph
+struct DispatchGraph
 {
     std::vector<DispatchNodeInfo> nodes;
 
@@ -260,7 +276,6 @@ struct RenderGraph
                             binding_point.node = &node;
                             binding_point.stage_index = stage_index;
                             binding_point.type = NodeBindingPoint::BindingType_Shader;
-                            binding_point.location.shader.type = resource.type;
                             binding_point.location.shader.set_index = group_index;
                             binding_point.location.shader.binding_index = binding_index;
                             binding_points.push_back(binding_point);
@@ -324,7 +339,6 @@ struct RenderGraph
                             binding_point.node = &node;
                             binding_point.stage_index = stage_index;
                             binding_point.type = NodeBindingPoint::BindingType_Shader;
-                            binding_point.location.shader.type = resource.type;
                             binding_point.location.shader.set_index = group_index;
                             binding_point.location.shader.binding_index = binding_index;
                             binding_points.push_back(binding_point);
@@ -349,8 +363,7 @@ struct RenderGraph
                     binding_point.node = &node;
                     binding_point.stage_index = -1;
                     binding_point.type = NodeBindingPoint::BindingType_Framebuffer;
-                    binding_point.location.framebuffer.type = FramebufferBindingInfo::AttachmentType_Color;
-                    binding_point.location.framebuffer.index = attachment_index;
+                    binding_point.location.framebuffer.attachment_index = attachment_index;
                     binding_points.push_back(binding_point);
 
                     ++attachment_index;
@@ -360,6 +373,13 @@ struct RenderGraph
 
         return binding_points;
     }
+};
+
+struct DispatchRuntime
+{
+    DispatchGraph const* graph;
+    std::vector<DispatchNodeStatic> nodes_static;
+    std::vector<DispatchNodeFramebuffer> nodes_framebuffer;
 };
 
 struct HalfMemoryBarrier
@@ -375,6 +395,7 @@ struct MemoryBarrier
     HalfMemoryBarrier dst;
 };
 
+#if 0
 HalfMemoryBarrier HalfEdgeBarrier(GraphEdge::EdgeType type, NodeBindingPoint const& binding_point)
 {
     HalfMemoryBarrier output = {};
@@ -445,6 +466,7 @@ MemoryBarrier GenerateEdgeBarrier(GraphEdge const& edge)
     output.dst = HalfEdgeBarrier(edge.type, edge.target);
     return output;
 }
+#endif
 
 DispatchStageInfo RegionPassDispatchStageInfo()
 {
@@ -523,9 +545,9 @@ DispatchNodeInfo MainWorldDispatchInfo()
     return output;
 }
 
-RenderGraph TestRenderGraph()
+DispatchGraph TestDispatchGraph()
 {
-    RenderGraph output = {};
+    DispatchGraph output = {};
     output.nodes.push_back(MainWorldDispatchInfo());
 
     DispatchNodeInfo const* main_world_node = &output.nodes.back();
@@ -547,6 +569,9 @@ RenderGraph TestRenderGraph()
         output.InsertEdge(edge);
     }
 #endif
+
+    std::vector<NodeBindingPoint> inputs = output.Inputs();
+    std::vector<NodeBindingPoint> outputs = output.Outputs();
 
     return output;
 }
@@ -582,6 +607,8 @@ struct state_t
     VkDescriptorSet resolve_descriptor_set;
     VkPipelineLayout resolve_pipeline_layout;
     VkPipeline resolve_pipeline;
+
+    DispatchGraph dispatch_graph;
 
     VkFence last_submit;
 
@@ -1283,6 +1310,7 @@ void RenderResources(void* _pstate,
 {
     state_t* _state = (state_t*)_pstate;
 
+    TestDispatchGraph();
     DispatchNodeInfo main_world_dispatch = MainWorldDispatchInfo();
     DispatchNodeRuntime main_world_runtime = {};
     {
