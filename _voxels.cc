@@ -66,14 +66,14 @@ struct DispatchStageInfo
     std::vector<ShaderStage> shaders;
 
     // resource bindings
-    struct ResourceBindingInfo {
+    struct BindingInfo {
         VkShaderStageFlags stages;
         VkDescriptorType type;
         VkDescriptorBindingFlags flags;
         uint32_t count;
     };
     struct BindingGroupInfo {
-        std::vector<ResourceBindingInfo> resources;
+        std::vector<BindingInfo> bindings;
         uint32_t count;
     };
     std::vector<BindingGroupInfo> binding_groups;
@@ -262,7 +262,7 @@ struct DispatchGraph
                 for (DispatchStageInfo::BindingGroupInfo const& binding_group : stage.binding_groups)
                 {
                     uint32_t binding_index = 0;
-                    for (DispatchStageInfo::ResourceBindingInfo const& resource : binding_group.resources)
+                    for (DispatchStageInfo::BindingInfo const& resource : binding_group.bindings)
                     {
                         if (resource.type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
                             || resource.type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
@@ -329,7 +329,7 @@ struct DispatchGraph
                 for (DispatchStageInfo::BindingGroupInfo const& binding_group : stage.binding_groups)
                 {
                     uint32_t binding_index = 0;
-                    for (DispatchStageInfo::ResourceBindingInfo const& resource : binding_group.resources)
+                    for (DispatchStageInfo::BindingInfo const& resource : binding_group.bindings)
                     {
                         if (resource.type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
                             || resource.type == VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER
@@ -381,6 +381,76 @@ struct DispatchRuntime
     std::vector<DispatchNodeStatic> nodes_static;
     std::vector<DispatchNodeFramebuffer> nodes_framebuffer;
 };
+
+DispatchNodeStatic GenerateDispatchStaticRuntime(DispatchNodeInfo const& _node,
+                                                 vktk::Context* _vulkan)
+{
+    DispatchNodeStatic static_runtime = {};
+
+    for (DispatchStageInfo const& stage : _node.sequence)
+    {
+        DispatchStageStatic stage_static = {};
+        std::vector<VkDescriptorSetLayout> set_layouts = {};
+        std::vector<VkPushConstantRange> push_constant_ranges = {};
+
+        for (DispatchStageInfo::BindingGroupInfo const& binding_group : stage.binding_groups)
+        {
+            DispatchStageStatic::BindingGroup descriptor = {};
+            std::vector<vktk::Context::DescriptorSetBindingPoint> bindings = {};
+
+            for (DispatchStageInfo::BindingInfo const& binding : binding_group.bindings)
+            {
+                bindings.push_back(vktk::Context::DescriptorSetBindingPoint{
+                    binding.type,
+                    binding.flags,
+                    binding.stages,
+                    binding.count
+                });
+            }
+
+            descriptor.pool = _vulkan->CreateDescriptorPool(binding_group.count, bindings);
+
+            descriptor.sets.resize(binding_group.count);
+            VkDescriptorSetAllocateInfo descset_allocate{};
+            descset_allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+            descset_allocate.pNext = nullptr;
+            descset_allocate.descriptorPool = descriptor.pool.pool;
+            descset_allocate.descriptorSetCount = 1u;
+            descset_allocate.pSetLayouts = &descriptor.pool.layout;
+            for (uint32_t index = 0; index < binding_group.count; ++index)
+                CHECKCALL(vkAllocateDescriptorSets, _vulkan->device,
+                          &descset_allocate, &descriptor.sets[index]);
+
+            stage_static.binding_groups.push_back(descriptor);
+
+            set_layouts.push_back(descriptor.pool.layout);
+        }
+
+        for (DispatchStageInfo::PushConstantRange const& push_constant : stage.push_constants)
+        {
+            push_constant_ranges.push_back(VkPushConstantRange{
+                push_constant.stages,
+                push_constant.offset,
+                push_constant.size
+            });
+        }
+
+        VkPipelineLayoutCreateInfo pipeline_create = {};
+        pipeline_create.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipeline_create.pNext = nullptr;
+        pipeline_create.flags = 0u;
+        pipeline_create.setLayoutCount = set_layouts.size();
+        pipeline_create.pSetLayouts = set_layouts.data();
+        pipeline_create.pushConstantRangeCount = push_constant_ranges.size();
+        pipeline_create.pPushConstantRanges = push_constant_ranges.data();
+        CHECKCALL(vkCreatePipelineLayout, _vulkan->device, &pipeline_create, nullptr,
+                  &stage_static.pipeline_layout);
+
+        static_runtime.stages.push_back(stage_static);
+    }
+
+    return static_runtime;
+}
 
 struct HalfMemoryBarrier
 {
@@ -609,6 +679,7 @@ struct state_t
     VkPipeline resolve_pipeline;
 
     DispatchGraph dispatch_graph;
+    DispatchRuntime dispatch_runtime;
 
     VkFence last_submit;
 
@@ -1059,6 +1130,12 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 {
     state_t* _state = (state_t*)_pstate;
 
+    _state->dispatch_graph = TestDispatchGraph();
+    for (DispatchNodeInfo const& node : _state->dispatch_graph.nodes)
+        _state->dispatch_runtime.nodes_static.push_back(
+            GenerateDispatchStaticRuntime(node, _vulkan)
+            );
+
     //_state->region = DeserialiseRegion("../r.-1.6.mca");
     _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
     LoadRegion(_state, _vulkan);
@@ -1310,7 +1387,6 @@ void RenderResources(void* _pstate,
 {
     state_t* _state = (state_t*)_pstate;
 
-    TestDispatchGraph();
     DispatchNodeInfo main_world_dispatch = MainWorldDispatchInfo();
     DispatchNodeRuntime main_world_runtime = {};
     {
@@ -1370,7 +1446,7 @@ void RenderResources(void* _pstate,
             {
                 DispatchStageRuntime::BindingGroupRuntime descriptor = {};
                 std::vector<vktk::Context::DescriptorSetBindingPoint> bindings = {};
-                for (DispatchStageInfo::ResourceBindingInfo const& binding : binding_group.resources)
+                for (DispatchStageInfo::BindingInfo const& binding : binding_group.bindings)
                 {
                     bindings.push_back(vktk::Context::DescriptorSetBindingPoint{
                         binding.type,
