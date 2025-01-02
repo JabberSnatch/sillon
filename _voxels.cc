@@ -173,19 +173,14 @@ struct DispatchNodeStatic
     std::vector<DispatchStageStatic> stages;
 };
 
-struct DispatchStageFramebuffer
-{
-    VkPipeline pipeline;
-};
-
 struct DispatchNodeFramebuffer
 {
     struct GraphicsDetails {
         VkRenderPass render_pass;
-        VkFramebuffer framebuffer;
+        //VkFramebuffer framebuffer;
     };
 
-    std::vector<DispatchStageFramebuffer> stages;
+    std::vector<VkPipeline> stages;
     std::variant<GraphicsDetails> details;
 };
 
@@ -450,6 +445,69 @@ DispatchNodeStatic GenerateDispatchStaticRuntime(DispatchNodeInfo const& _node,
     }
 
     return static_runtime;
+}
+
+DispatchNodeFramebuffer GenerateDispatchFramebufferRuntime(
+    DispatchNodeInfo const& _node,
+    DispatchNodeStatic const& _static_runtime,
+    vktk::Context* _vulkan,
+    VkRenderPass _render_pass)
+{
+    DispatchNodeFramebuffer framebuffer_runtime = {};
+
+    for (uint32_t stage_index = 0; stage_index < (uint32_t)_node.sequence.size(); ++stage_index)
+    {
+        DispatchStageInfo const& stage = _node.sequence[stage_index];
+        DispatchStageStatic const& runtime = _static_runtime.stages[stage_index];
+
+        std::vector<vktk::Context::PipelineStage> pipeline_stages = {};
+        for (DispatchStageInfo::ShaderStage const& shader : stage.shaders)
+        {
+            std::string shader_name = stage.name;
+            switch (shader.stage)
+            {
+            case VK_SHADER_STAGE_VERTEX_BIT: shader_name += "_vertex"; break;
+            case VK_SHADER_STAGE_FRAGMENT_BIT: shader_name += "_fragment"; break;
+            default: shader_name += "_unknown"; break;
+            }
+
+            VkShaderModule shader_module =
+                _vulkan->CompileShader_GLSL(shader.stage, shader_name.c_str(), shader.source);
+
+            pipeline_stages.push_back(vktk::Context::PipelineStage{ shader_module, shader.stage });
+        }
+
+        if (_node.mode == DispatchNodeInfo::DispatchMode_Graphics)
+        {
+            DispatchStageInfo::GraphicsStageInfo const& graphics_info =
+                std::get<DispatchStageInfo::GraphicsStageInfo>(stage.details);
+
+            VkPipeline pipeline = _vulkan->CreatePipeline(
+                runtime.pipeline_layout,
+                _render_pass,
+                pipeline_stages,
+                graphics_info.state_overrides,
+                graphics_info.topology,
+                graphics_info.input_layout
+                );
+
+            framebuffer_runtime.stages.push_back(pipeline);
+        }
+
+        for (vktk::Context::PipelineStage const& pipeline_stage : pipeline_stages)
+            vkDestroyShaderModule(_vulkan->device, pipeline_stage.module, nullptr);
+
+    }
+
+    if (_node.mode == DispatchNodeInfo::DispatchMode_Graphics)
+    {
+        DispatchNodeFramebuffer::GraphicsDetails& runtime_details =
+            std::get<DispatchNodeFramebuffer::GraphicsDetails>(framebuffer_runtime.details);
+
+        runtime_details.render_pass = _render_pass;
+    }
+
+    return framebuffer_runtime;
 }
 
 struct HalfMemoryBarrier
@@ -1387,6 +1445,16 @@ void RenderResources(void* _pstate,
 {
     state_t* _state = (state_t*)_pstate;
 
+    for (uint32_t node_index = 0; node_index < (uint32_t)_state->dispatch_graph.nodes.size(); ++node_index)
+    {
+        DispatchNodeInfo const& node = _state->dispatch_graph.nodes[node_index];
+        DispatchNodeStatic const& node_static = _state->dispatch_runtime.nodes_static[node_index];
+        _state->dispatch_runtime.nodes_framebuffer.push_back(
+            GenerateDispatchFramebufferRuntime(node, node_static, _vulkan, _swapchain.render_pass)
+            );
+    }
+
+#if 0
     DispatchNodeInfo main_world_dispatch = MainWorldDispatchInfo();
     DispatchNodeRuntime main_world_runtime = {};
     {
@@ -1535,6 +1603,7 @@ void RenderResources(void* _pstate,
             dispatch_runtime.stages.push_back(stage_runtime);
         }
     }
+#endif
 
     {
         _state->primary_pass_color = _vulkan->CreateTexture(
