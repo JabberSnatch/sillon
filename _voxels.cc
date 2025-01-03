@@ -1249,6 +1249,13 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
     _state->dispatch_graph = TestDispatchGraph();
     //_state->dispatch_runtime.vulkan = _vulkan;
+    _state->dispatch_runtime.graph = &_state->dispatch_graph;
+
+    //_state->region = DeserialiseRegion("../r.-1.6.mca");
+    _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
+    LoadRegion(_state, _vulkan);
+    LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
+
     for (DispatchNodeInfo const& node : _state->dispatch_graph.nodes)
     {
         std::unordered_map<std::string, void*> pNext_map = {};
@@ -1271,11 +1278,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
             GenerateDispatchStaticRuntime(node, _vulkan, pNext_map)
             );
     }
-
-    //_state->region = DeserialiseRegion("../r.-1.6.mca");
-    _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
-    LoadRegion(_state, _vulkan);
-    LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
 
     {
         _state->descriptor_pool = _vulkan->CreateDescriptorPool(64u, {
@@ -1425,9 +1427,10 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                               return node.name == "MainWorldDispatch";
                           });
 
-        std::vector<VkWriteDescriptorSet> desc_writes = {};
         for (uint32_t index = 0; index < 64; ++index)
         {
+            std::vector<VkWriteDescriptorSet> desc_writes = {};
+
             VkWriteDescriptorSet region_binding =
                 _state->dispatch_runtime.BindShaderResource(
                     NodeBindingPoint{
@@ -1488,9 +1491,11 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
             desc_writes.push_back(region_binding);
             desc_writes.push_back(matrix_binding);
             desc_writes.push_back(section_bindings);
+
+            vkUpdateDescriptorSets(_vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
         }
 
-        vkUpdateDescriptorSets(_vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
+        //vkUpdateDescriptorSets(_vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
     }
 
     for (uint32_t index = 0; index < 64; ++index)
@@ -2117,6 +2122,49 @@ void Draw(void* _pstate,
     rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rp_begin_info.pNext = nullptr;
 
+    rp_begin_info.renderPass = _swapchain.render_pass;
+    rp_begin_info.framebuffer = _swapchain.framebuffers[_swapchain.index];
+
+    rp_begin_info.renderArea = VkRect2D{
+        { (int32_t)render_area.min.x(), (int32_t)render_area.min.y() },
+        { render_area.extent.x(), render_area.extent.y() }
+    };
+    rp_begin_info.clearValueCount = 2;
+    rp_begin_info.pClearValues = clear_values;
+
+    vkCmdBeginRenderPass(command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+
+    numtk::vec3f sun_dir{
+        std::cos(_state->sun_spherical[1]) * std::cos(_state->sun_spherical[0]),
+        std::sin(_state->sun_spherical[1]),
+        std::cos(_state->sun_spherical[1]) * std::sin(_state->sun_spherical[0])
+    };
+
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      _state->dispatch_runtime.nodes_framebuffer[0].stages[0]);
+    for (uint32_t index = 0; index < 64; ++index)
+    {
+        vkCmdBindDescriptorSets(command_buffer,
+                                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                _state->dispatch_runtime.nodes_static[0].stages[0].pipeline_layout,
+                                0u,
+                                1u, &_state->dispatch_runtime.nodes_static[0].stages[0].binding_groups[0].sets[0],
+                                0u, nullptr);
+        vkCmdPushConstants(command_buffer,
+                           _state->dispatch_runtime.nodes_static[0].stages[0].pipeline_layout,
+                           VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0, sizeof(numtk::vec3f), (void*)&sun_dir);
+
+        vkCmdDraw(command_buffer, 36u, 1u, 0u, 0u);
+    }
+
+    vkCmdEndRenderPass(command_buffer);
+
+#if 0
+    VkRenderPassBeginInfo rp_begin_info{};
+    rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rp_begin_info.pNext = nullptr;
+
     if (!_state->pixel_cycling_enabled)
     {
         rp_begin_info.renderPass = _swapchain.render_pass;
@@ -2179,6 +2227,7 @@ void Draw(void* _pstate,
     }
 
     vkCmdEndRenderPass(command_buffer);
+#endif
 
     if (_state->pixel_cycling_enabled)
     {
