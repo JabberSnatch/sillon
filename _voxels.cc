@@ -12,6 +12,7 @@
 
 #include <memory>
 #include <variant>
+#include <unordered_map>
 
 namespace {
 
@@ -186,7 +187,7 @@ struct DispatchNodeFramebuffer
 
 struct ShaderBindingInfo
 {
-    uint32_t set_index;
+    uint32_t group_index;
     uint32_t binding_index;
 };
 
@@ -211,7 +212,7 @@ struct NodeBindingPoint
     union {
         ShaderBindingInfo shader;
         FramebufferBindingInfo framebuffer;
-    } location;
+    };// location;
 };
 
 struct GraphEdge
@@ -271,8 +272,8 @@ struct DispatchGraph
                             binding_point.node = &node;
                             binding_point.stage_index = stage_index;
                             binding_point.type = NodeBindingPoint::BindingType_Shader;
-                            binding_point.location.shader.set_index = group_index;
-                            binding_point.location.shader.binding_index = binding_index;
+                            binding_point.shader.group_index = group_index;
+                            binding_point.shader.binding_index = binding_index;
                             binding_points.push_back(binding_point);
                         }
 
@@ -334,8 +335,8 @@ struct DispatchGraph
                             binding_point.node = &node;
                             binding_point.stage_index = stage_index;
                             binding_point.type = NodeBindingPoint::BindingType_Shader;
-                            binding_point.location.shader.set_index = group_index;
-                            binding_point.location.shader.binding_index = binding_index;
+                            binding_point.shader.group_index = group_index;
+                            binding_point.shader.binding_index = binding_index;
                             binding_points.push_back(binding_point);
                         }
 
@@ -358,7 +359,7 @@ struct DispatchGraph
                     binding_point.node = &node;
                     binding_point.stage_index = -1;
                     binding_point.type = NodeBindingPoint::BindingType_Framebuffer;
-                    binding_point.location.framebuffer.attachment_index = attachment_index;
+                    binding_point.framebuffer.attachment_index = attachment_index;
                     binding_points.push_back(binding_point);
 
                     ++attachment_index;
@@ -370,15 +371,57 @@ struct DispatchGraph
     }
 };
 
+struct ShaderResourceBinding
+{
+    uint32_t descriptor_count;
+    union {
+        VkDescriptorImageInfo const* images;
+        VkDescriptorBufferInfo const* buffers;
+    };
+};
+
 struct DispatchRuntime
 {
+    //vktk::Context* vulkan;
     DispatchGraph const* graph;
     std::vector<DispatchNodeStatic> nodes_static;
     std::vector<DispatchNodeFramebuffer> nodes_framebuffer;
+
+    void GenerateStaticRuntime() {}
+    void GenerateFramebufferRuntime(VkRenderPass _render_pass) {}
+
+    VkWriteDescriptorSet BindShaderResource(NodeBindingPoint const& _location,
+                                            uint32_t _instance_index,
+                                            ShaderResourceBinding const& _resources)
+    {
+        uint32_t node_index = (uint32_t)(_location.node - graph->nodes.data());
+        DispatchNodeStatic const& static_runtime = nodes_static[node_index];
+        DispatchStageStatic const& stage_static = static_runtime.stages[_location.stage_index];
+        DispatchStageStatic::BindingGroup const& group_runtime = stage_static.binding_groups[_location.shader.group_index];
+
+        DispatchStageInfo const& stage = _location.node->sequence[_location.stage_index];
+        DispatchStageInfo::BindingGroupInfo const& binding_group = stage.binding_groups[_location.shader.group_index];
+        DispatchStageInfo::BindingInfo const& binding = binding_group.bindings[_location.shader.binding_index];
+
+        VkWriteDescriptorSet desc_write = {};
+        desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        desc_write.pNext = nullptr;
+        desc_write.dstSet = group_runtime.sets[_instance_index];
+        desc_write.dstBinding = _location.shader.binding_index;
+        desc_write.dstArrayElement = 0u;
+        desc_write.descriptorCount = _resources.descriptor_count;
+        desc_write.descriptorType = binding.type;
+        desc_write.pImageInfo = _resources.images;
+        desc_write.pBufferInfo = _resources.buffers;
+        desc_write.pTexelBufferView = nullptr;
+
+        return desc_write;
+    }
 };
 
 DispatchNodeStatic GenerateDispatchStaticRuntime(DispatchNodeInfo const& _node,
-                                                 vktk::Context* _vulkan)
+                                                 vktk::Context* _vulkan,
+                                                 std::unordered_map<std::string, void*> _pNext_map = {})
 {
     DispatchNodeStatic static_runtime = {};
 
@@ -387,6 +430,10 @@ DispatchNodeStatic GenerateDispatchStaticRuntime(DispatchNodeInfo const& _node,
         DispatchStageStatic stage_static = {};
         std::vector<VkDescriptorSetLayout> set_layouts = {};
         std::vector<VkPushConstantRange> push_constant_ranges = {};
+
+        void* stage_pnext = nullptr;
+        if (_pNext_map.count(stage.name))
+            stage_pnext = _pNext_map[stage.name];
 
         for (DispatchStageInfo::BindingGroupInfo const& binding_group : stage.binding_groups)
         {
@@ -406,9 +453,21 @@ DispatchNodeStatic GenerateDispatchStaticRuntime(DispatchNodeInfo const& _node,
             descriptor.pool = _vulkan->CreateDescriptorPool(binding_group.count, bindings);
 
             descriptor.sets.resize(binding_group.count);
+
+            void* pnext_begin = nullptr;
+            void* desc_count_alloc_ptr = vktk::PNextLookup(
+                (VkBaseOutStructure*)stage_pnext,
+                VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO);
+            VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc =
+                desc_count_alloc_ptr
+                ? *(VkDescriptorSetVariableDescriptorCountAllocateInfo const*)desc_count_alloc_ptr
+                : VkDescriptorSetVariableDescriptorCountAllocateInfo{};
+            desc_count_alloc.pNext = nullptr;
+            pnext_begin = desc_count_alloc_ptr ? &desc_count_alloc : nullptr;
+
             VkDescriptorSetAllocateInfo descset_allocate{};
             descset_allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-            descset_allocate.pNext = nullptr;
+            descset_allocate.pNext = pnext_begin;
             descset_allocate.descriptorPool = descriptor.pool.pool;
             descset_allocate.descriptorSetCount = 1u;
             descset_allocate.pSetLayouts = &descriptor.pool.layout;
@@ -1189,10 +1248,29 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     state_t* _state = (state_t*)_pstate;
 
     _state->dispatch_graph = TestDispatchGraph();
+    //_state->dispatch_runtime.vulkan = _vulkan;
     for (DispatchNodeInfo const& node : _state->dispatch_graph.nodes)
+    {
+        std::unordered_map<std::string, void*> pNext_map = {};
+
+        if (node.name == "MainWorldDispatch")
+        {
+            static uint32_t desc_count = 0u;
+            static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc = {};
+            desc_count = (uint32_t)_state->section_textures.size();
+            desc_count_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+            desc_count_alloc.pNext = nullptr;
+            desc_count_alloc.descriptorSetCount = 1;
+            desc_count_alloc.pDescriptorCounts = &desc_count;
+            void* pnext_begin = &desc_count_alloc;
+
+            pNext_map.emplace("render_region", pnext_begin);
+        }
+
         _state->dispatch_runtime.nodes_static.push_back(
-            GenerateDispatchStaticRuntime(node, _vulkan)
+            GenerateDispatchStaticRuntime(node, _vulkan, pNext_map)
             );
+    }
 
     //_state->region = DeserialiseRegion("../r.-1.6.mca");
     _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");

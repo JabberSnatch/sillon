@@ -45,6 +45,7 @@ namespace vktk
 
 char const* VkResultToStr(VkResult _vkResult);
 uint32_t VkFormatBytesPerUnit(VkFormat _format);
+void* PNextLookup(VkBaseOutStructure* _out_struct, VkStructureType _type);
 
 struct FPTable
 {

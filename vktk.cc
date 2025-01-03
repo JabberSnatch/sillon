@@ -1914,4 +1914,15 @@ uint32_t VkFormatBytesPerUnit(VkFormat _format)
     }
 }
 
+void* PNextLookup(VkBaseOutStructure* _out_struct, VkStructureType _type)
+{
+    while (_out_struct)
+    {
+        if (_out_struct->sType == _type)
+            return _out_struct;
+        _out_struct = _out_struct->pNext;
+    }
+    return nullptr;
+}
+
 } // namespace vktk
