@@ -212,7 +212,7 @@ struct NodeBindingPoint
     union {
         ShaderBindingInfo shader;
         FramebufferBindingInfo framebuffer;
-    };// location;
+    };
 };
 
 struct GraphEdge
@@ -1418,6 +1418,81 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     region_image_info.imageView = _state->region_texture.view;
     region_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
+    {
+        DispatchNodeInfo const& main_world_node =
+            *std::find_if(_state->dispatch_graph.nodes.begin(), _state->dispatch_graph.nodes.end(),
+                          [](DispatchNodeInfo const& node) {
+                              return node.name == "MainWorldDispatch";
+                          });
+
+        std::vector<VkWriteDescriptorSet> desc_writes = {};
+        for (uint32_t index = 0; index < 64; ++index)
+        {
+            VkWriteDescriptorSet region_binding =
+                _state->dispatch_runtime.BindShaderResource(
+                    NodeBindingPoint{
+                        .node = &main_world_node,
+                        .stage_index = 0,
+                        .type = NodeBindingPoint::BindingType_Shader,
+                        .shader = ShaderBindingInfo{ 0, 0 }
+                    },
+                    index,
+                    ShaderResourceBinding{
+                        .descriptor_count = 1,
+                        .images = &region_image_info
+                    });
+
+            VkDescriptorBufferInfo buffer_info = {};
+            buffer_info.buffer = _state->matrix_buffer;
+            buffer_info.offset = sizeof(MatrixBlock) * index;
+            buffer_info.range = sizeof(MatrixBlock);
+            VkWriteDescriptorSet matrix_binding =
+                _state->dispatch_runtime.BindShaderResource(
+                    NodeBindingPoint{
+                        .node = &main_world_node,
+                        .stage_index = 0,
+                        .type = NodeBindingPoint::BindingType_Shader,
+                        .shader = ShaderBindingInfo{ 0, 1 }
+                    },
+                    index,
+                    ShaderResourceBinding{
+                        .descriptor_count = 1,
+                        .buffers = &buffer_info
+                    });
+
+            std::vector<VkDescriptorImageInfo> section_images_info(_state->section_textures.size());
+            for (uint32_t section_index = 0u;
+                 section_index < _state->section_textures.size();
+                 ++section_index)
+            {
+                VkDescriptorImageInfo& image_info = section_images_info[section_index];
+                image_info.sampler = _state->sampler;
+                image_info.imageView = _state->section_textures[section_index].view;
+                image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            }
+
+            VkWriteDescriptorSet section_bindings =
+                _state->dispatch_runtime.BindShaderResource(
+                    NodeBindingPoint{
+                        .node = &main_world_node,
+                        .stage_index = 0,
+                        .type = NodeBindingPoint::BindingType_Shader,
+                        .shader = ShaderBindingInfo{ 0, 2 }
+                    },
+                    index,
+                    ShaderResourceBinding{
+                        .descriptor_count = (uint32_t)section_images_info.size(),
+                        .images = section_images_info.data()
+                    });
+
+            desc_writes.push_back(region_binding);
+            desc_writes.push_back(matrix_binding);
+            desc_writes.push_back(section_bindings);
+        }
+
+        vkUpdateDescriptorSets(_vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
+    }
+
     for (uint32_t index = 0; index < 64; ++index)
     {
         {
@@ -1435,7 +1510,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                 desc_write.pBufferInfo = nullptr;
                 desc_write.pTexelBufferView = nullptr;
             }
-
 
             VkDescriptorBufferInfo buffer_info = {};
             buffer_info.buffer = _state->matrix_buffer;
