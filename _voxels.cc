@@ -196,6 +196,11 @@ struct FramebufferBindingInfo
     uint32_t attachment_index;
 };
 
+struct PushConstantsBindingInfo
+{
+    uint32_t range_index;
+};
+
 struct NodeBindingPoint
 {
     DispatchNodeInfo const* node;
@@ -212,6 +217,7 @@ struct NodeBindingPoint
     union {
         ShaderBindingInfo shader;
         FramebufferBindingInfo framebuffer;
+        PushConstantsBindingInfo push_constants;
     };
 };
 
@@ -380,15 +386,87 @@ struct ShaderResourceBinding
     };
 };
 
+struct GraphicsCommandBinding
+{
+    enum DispatchCommand
+    {
+        DispatchCommand_Draw,
+        DispatchCommand_DrawIndexed,
+    };
+
+    DispatchCommand command;
+    uint32_t vertex_count;
+    uint32_t instance_count;
+};
+
+struct FramebufferAreaBinding
+{
+    VkFramebuffer framebuffer;
+    VkRect2D render_area;
+};
+
+struct DispatchStageBindings
+{
+    struct DispatchInstance {
+        GraphicsCommandBinding graphics;
+        std::vector<std::unique_ptr<uint8_t[]>> push_constants;
+    };
+    std::vector<DispatchInstance> instances;
+};
+
+struct DispatchNodeBindings
+{
+    FramebufferAreaBinding framebuffer;
+    std::vector<DispatchStageBindings> stages;
+};
+
 struct DispatchRuntime
 {
     //vktk::Context* vulkan;
     DispatchGraph const* graph;
     std::vector<DispatchNodeStatic> nodes_static;
     std::vector<DispatchNodeFramebuffer> nodes_framebuffer;
+    std::vector<DispatchNodeBindings> nodes_bindings;
 
     void GenerateStaticRuntime() {}
     void GenerateFramebufferRuntime(VkRenderPass _render_pass) {}
+
+    void BindFramebuffer(DispatchNodeInfo const* _node,
+                         FramebufferAreaBinding const& _framebuffer)
+    {
+        uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
+        DispatchNodeBindings& node_bindings = nodes_bindings[node_index];
+        node_bindings.framebuffer = _framebuffer;
+    }
+
+    void BindGraphicsCommand(DispatchNodeInfo const* _node,
+                             uint32_t _stage_index,
+                             uint32_t _instance_index,
+                             GraphicsCommandBinding const& _command)
+    {
+        uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
+        DispatchNodeBindings& node_bindings = nodes_bindings[node_index];
+        GraphicsCommandBinding& graphics = node_bindings.stages[_stage_index].instances[_instance_index].graphics;
+        graphics = _command;
+    }
+
+    void* BindPushConstants(NodeBindingPoint const& _location,
+                            uint32_t _instance_index)
+    {
+        DispatchStageInfo const& stage = _location.node->sequence[_location.stage_index];
+        DispatchStageInfo::PushConstantRange const& range = stage.push_constants[_location.push_constants.range_index];
+
+        uint32_t node_index = (uint32_t)(_location.node - graph->nodes.data());
+        DispatchNodeBindings& node_bindings = nodes_bindings[node_index];
+        DispatchStageBindings& stage_bindings = node_bindings.stages[_location.stage_index];
+        DispatchStageBindings::DispatchInstance& instance = stage_bindings.instances[_instance_index];
+
+        if (instance.push_constants.size() < _location.push_constants.range_index)
+            instance.push_constants.resize(_location.push_constants.range_index+1);
+        instance.push_constants[_location.push_constants.range_index].reset(new uint8_t[range.size]);
+
+        return instance.push_constants[_location.push_constants.range_index].get();
+    }
 
     VkWriteDescriptorSet BindShaderResource(NodeBindingPoint const& _location,
                                             uint32_t _instance_index,
@@ -757,8 +835,10 @@ DispatchGraph TestDispatchGraph()
     }
 #endif
 
+#if 0
     std::vector<NodeBindingPoint> inputs = output.Inputs();
     std::vector<NodeBindingPoint> outputs = output.Outputs();
+#endif
 
     return output;
 }
@@ -1279,6 +1359,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
             );
     }
 
+#if 1
     {
         _state->descriptor_pool = _vulkan->CreateDescriptorPool(64u, {
             { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -1323,6 +1404,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         CHECKCALL(vkCreatePipelineLayout, _vulkan->device, &pipeline_create, nullptr,
                   &_state->region_pipeline_layout);
     }
+#endif
 
     {
         VkPushConstantRange push_constant_range = {};
@@ -1498,6 +1580,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         //vkUpdateDescriptorSets(_vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
     }
 
+#if 1
     for (uint32_t index = 0; index < 64; ++index)
     {
         {
@@ -1565,6 +1648,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
             vkUpdateDescriptorSets(_vulkan->device, 1u, &desc_write, 0u, nullptr);
         }
     }
+#endif
 
     vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
     command_buffer.Begin();
@@ -1856,6 +1940,7 @@ void RenderResources(void* _pstate,
         layout_commands.Submit();
     }
 
+#if 1
     {
         {
             VkShaderModule vmodule =
@@ -1907,6 +1992,7 @@ void RenderResources(void* _pstate,
             vkDestroyShaderModule(_vulkan->device, fmodule, nullptr);
         }
     }
+#endif
 
     {
         VkShaderModule skybox_vertex =
@@ -2118,17 +2204,69 @@ void Draw(void* _pstate,
         clear_value.depthStencil.stencil = 0;
     }
 
+#if 1
+    {
+        DispatchNodeInfo const& main_world_node =
+            *std::find_if(_state->dispatch_graph.nodes.begin(), _state->dispatch_graph.nodes.end(),
+                          [](DispatchNodeInfo const& node) {
+                              return node.name == "MainWorldDispatch";
+                          });
+
+        _state->dispatch_runtime.BindFramebuffer(
+            &main_world_node,
+            FramebufferAreaBinding{
+                _swapchain.framebuffers[_swapchain.index],
+                VkRect2D{
+                    { (int32_t)render_area.min.x(), (int32_t)render_area.min.y() },
+                    { render_area.extent.x(), render_area.extent.y() }
+                }
+            });
+
+        GraphicsCommandBinding command = {};
+        command.command = GraphicsCommandBinding::DispatchCommand_Draw;
+        command.vertex_count = 36;
+        command.instance_count = 1;
+
+        numtk::vec3f sun_dir{
+            std::cos(_state->sun_spherical[1]) * std::cos(_state->sun_spherical[0]),
+            std::sin(_state->sun_spherical[1]),
+            std::cos(_state->sun_spherical[1]) * std::sin(_state->sun_spherical[0])
+        };
+
+        for (uint32_t index = 0; index < 64; ++index)
+        {
+            _state->dispatch_runtime.BindGraphicsCommand(
+                &main_world_node,
+                0, index,
+                command);
+
+            numtk::vec3f* push_constants =
+                (numtk::vec3f*)_state->dispatch_runtime.BindPushConstants(
+                    NodeBindingPoint{
+                        .node = &main_world_node,
+                        .stage_index = 0,
+                        .type = NodeBindingPoint::BindingType_PushConstantRange,
+                        .push_constants = PushConstantsBindingInfo{ 0 }
+                    },
+                    index);
+            *push_constants = sun_dir;
+        }
+    }
+
+#else
+
     VkRenderPassBeginInfo rp_begin_info{};
     rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rp_begin_info.pNext = nullptr;
 
     rp_begin_info.renderPass = _swapchain.render_pass;
-    rp_begin_info.framebuffer = _swapchain.framebuffers[_swapchain.index];
 
+    rp_begin_info.framebuffer = _swapchain.framebuffers[_swapchain.index];
     rp_begin_info.renderArea = VkRect2D{
         { (int32_t)render_area.min.x(), (int32_t)render_area.min.y() },
         { render_area.extent.x(), render_area.extent.y() }
     };
+
     rp_begin_info.clearValueCount = 2;
     rp_begin_info.pClearValues = clear_values;
 
@@ -2148,17 +2286,18 @@ void Draw(void* _pstate,
                                 VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 _state->dispatch_runtime.nodes_static[0].stages[0].pipeline_layout,
                                 0u,
-                                1u, &_state->dispatch_runtime.nodes_static[0].stages[0].binding_groups[0].sets[0],
+                                1u, &_state->dispatch_runtime.nodes_static[0].stages[0].binding_groups[0].sets[index],
                                 0u, nullptr);
+
         vkCmdPushConstants(command_buffer,
                            _state->dispatch_runtime.nodes_static[0].stages[0].pipeline_layout,
                            VK_SHADER_STAGE_FRAGMENT_BIT,
                            0, sizeof(numtk::vec3f), (void*)&sun_dir);
-
         vkCmdDraw(command_buffer, 36u, 1u, 0u, 0u);
     }
 
     vkCmdEndRenderPass(command_buffer);
+#endif
 
 #if 0
     VkRenderPassBeginInfo rp_begin_info{};
