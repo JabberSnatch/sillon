@@ -851,116 +851,6 @@ MemoryBarrier GenerateEdgeBarrier(GraphEdge const& edge)
 }
 #endif
 
-DispatchStageInfo RegionPassDispatchStageInfo()
-{
-    DispatchStageInfo output{};
-    output.name = "render_region";
-
-    output.shaders = std::vector<DispatchStageInfo::ShaderStage>{
-        {
-            VK_SHADER_STAGE_VERTEX_BIT,
-            {
-                "#version 450",
-                "#define CW_CUBE",
-                #include "shaders/cube_vertices.vert.h"
-                ,
-                #include "shaders/draw_cube.vert.h"
-            }
-        },
-        {
-            VK_SHADER_STAGE_FRAGMENT_BIT,
-            {
-                "#version 450",
-                #include "shaders/voxel_traversal.h"
-                ,
-                #include "shaders/render_region.frag.h"
-            }
-        }
-    };
-
-    output.group_instance_count = 64;
-    output.binding_groups = std::vector<DispatchStageInfo::BindingGroupInfo>{
-        {
-            {
-                { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                  0, 1 },
-                { VK_SHADER_STAGE_ALL, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                  0, 1 },
-                { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                  VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT, 32*32*32 },
-            }
-        }
-    };
-
-    output.push_constants = std::vector<DispatchStageInfo::PushConstantRange>{
-        { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(numtk::vec3f) }
-    };
-
-    DispatchStageInfo::GraphicsStageInfo& details = std::get<DispatchStageInfo::GraphicsStageInfo>(output.details);
-    details.state_overrides = std::vector<vktk::Context::StateOverride>{};
-    details.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    details.input_layout = std::vector<vktk::Context::VertexInput>{};
-
-    return output;
-}
-
-DispatchNodeInfo MainWorldDispatchInfo()
-{
-    DispatchNodeInfo output{};
-    output.name = "MainWorldDispatch";
-    output.mode = DispatchNodeInfo::DispatchMode_Graphics;
-    output.sequence = std::vector<DispatchStageInfo>{
-        RegionPassDispatchStageInfo()
-    };
-
-    DispatchNodeInfo::GraphicsDetails& details = std::get<DispatchNodeInfo::GraphicsDetails>(output.details);
-    details.attachments = std::vector<DispatchNodeInfo::RenderAttachment>{
-        {
-            VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
-            numtk::vec4f{ 0.f, 1.f, 1.f, 0.f }
-        },
-        {
-            VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
-            DispatchNodeInfo::ClearValue{ 1.f, 0u }
-        }
-    };
-
-    return output;
-}
-
-DispatchGraph TestDispatchGraph()
-{
-    DispatchGraph output = {};
-    output.nodes.push_back(MainWorldDispatchInfo());
-
-    DispatchNodeInfo const* main_world_node = &output.nodes.back();
-
-#if 0
-    {
-        GraphEdge edge = {};
-        edge.type = GraphEdge::EdgeType_Image;
-
-        edge.source.node = main_world_node;
-        edge.source.type = NodeBindingPoint::BindingType_Framebuffer;
-        edge.source.location.framebuffer = FramebufferBindingInfo{
-            FramebufferBindingInfo::AttachmentType_Color, 0
-        };
-
-        edge.target.node = nullptr;
-        edge.target.type = NodeBindingPoint::BindingType_Swapchain;
-
-        output.InsertEdge(edge);
-    }
-#endif
-
-#if 0
-    std::vector<NodeBindingPoint> inputs = output.Inputs();
-    std::vector<NodeBindingPoint> outputs = output.Outputs();
-#endif
-
-    return output;
-}
-
 struct state_t
 {
     float time = 0.f;
@@ -1030,6 +920,127 @@ struct SkyboxPushConstants
     numtk::vec4f position;
     numtk::vec3f light_dir;
 };
+
+DispatchStageInfo RegionPassDispatchStageInfo()
+{
+    DispatchStageInfo output{};
+    output.name = "render_region";
+
+    output.shaders = std::vector<DispatchStageInfo::ShaderStage>{
+        {
+            VK_SHADER_STAGE_VERTEX_BIT,
+            {
+                "#version 450",
+                "#define CW_CUBE",
+                #include "shaders/cube_vertices.vert.h"
+                ,
+                #include "shaders/draw_cube.vert.h"
+            }
+        },
+        {
+            VK_SHADER_STAGE_FRAGMENT_BIT,
+            {
+                "#version 450",
+                #include "shaders/voxel_traversal.h"
+                ,
+                #include "shaders/render_region.frag.h"
+            }
+        }
+    };
+
+    output.group_instance_count = 64;
+    output.binding_groups = std::vector<DispatchStageInfo::BindingGroupInfo>{
+        {
+            {
+                { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                  0, 1 },
+                { VK_SHADER_STAGE_ALL, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                  0, 1 },
+                { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                  VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT, 32*32*32 },
+            }
+        }
+    };
+
+    output.push_constants = std::vector<DispatchStageInfo::PushConstantRange>{
+        { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(numtk::vec3f) }
+    };
+
+    DispatchStageInfo::GraphicsStageInfo& details = std::get<DispatchStageInfo::GraphicsStageInfo>(output.details);
+    details.state_overrides = std::vector<vktk::Context::StateOverride>{};
+    details.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    details.input_layout = std::vector<vktk::Context::VertexInput>{};
+
+    return output;
+}
+
+DispatchStageInfo SkyboxDispatchStageInfo()
+{
+    DispatchStageInfo output = {};
+    output.name = "skybox";
+
+    output.shaders = std::vector<DispatchStageInfo::ShaderStage>{
+        {
+            VK_SHADER_STAGE_VERTEX_BIT,
+            {
+                "#version 450",
+                #include "shaders/full_screen.vert.h"
+            }
+        },
+        {
+            VK_SHADER_STAGE_FRAGMENT_BIT,
+            {
+                "#version 450",
+                #include "shaders/skybox.frag.h"
+            }
+        }
+    };
+
+    output.group_instance_count = 1;
+    output.binding_groups = std::vector<DispatchStageInfo::BindingGroupInfo>{};
+    output.push_constants = std::vector<DispatchStageInfo::PushConstantRange>{
+        { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SkyboxPushConstants) }
+    };
+
+    DispatchStageInfo::GraphicsStageInfo& details = std::get<DispatchStageInfo::GraphicsStageInfo>(output.details);
+    details.state_overrides = std::vector<vktk::Context::StateOverride>{};
+    details.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    details.input_layout = std::vector<vktk::Context::VertexInput>{};
+
+    return output;
+}
+
+DispatchNodeInfo MainWorldDispatchInfo()
+{
+    DispatchNodeInfo output{};
+    output.name = "MainWorldDispatch";
+    output.mode = DispatchNodeInfo::DispatchMode_Graphics;
+    output.sequence = std::vector<DispatchStageInfo>{
+        RegionPassDispatchStageInfo(),
+        SkyboxDispatchStageInfo()
+    };
+
+    DispatchNodeInfo::GraphicsDetails& details = std::get<DispatchNodeInfo::GraphicsDetails>(output.details);
+    details.attachments = std::vector<DispatchNodeInfo::RenderAttachment>{
+        {
+            VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
+            numtk::vec4f{ 0.f, 1.f, 1.f, 0.f }
+        },
+        {
+            VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
+            DispatchNodeInfo::ClearValue{ 1.f, 0u }
+        }
+    };
+
+    return output;
+}
+
+DispatchGraph TestDispatchGraph()
+{
+    DispatchGraph output = {};
+    output.nodes.push_back(MainWorldDispatchInfo());
+    return output;
+}
 
 void DecodeChunk(voxtk::Region<uint8_t>& region,
                  mctk::MCAChunkData const& chunk_data,
@@ -2323,6 +2334,18 @@ void Draw(void* _pstate,
     }
 
 #if 1
+    numtk::vec3f sun_dir{
+        std::cos(_state->sun_spherical[1]) * std::cos(_state->sun_spherical[0]),
+        std::sin(_state->sun_spherical[1]),
+        std::cos(_state->sun_spherical[1]) * std::sin(_state->sun_spherical[0])
+    };
+
+    SkyboxPushConstants skybox_params = {};
+    skybox_params.projection = numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how);
+    skybox_params.view = _state->camera.Matrix();
+    skybox_params.position = numtk::vec4f{ 0.f, 20.f, 0.f };
+    skybox_params.light_dir = sun_dir;
+
     {
         DispatchNodeInfo const& main_world_node =
             *std::find_if(_state->dispatch_graph.nodes.begin(), _state->dispatch_graph.nodes.end(),
@@ -2340,34 +2363,52 @@ void Draw(void* _pstate,
                 }
             });
 
-        GraphicsCommandBinding command = {};
-        command.command = GraphicsCommandBinding::DispatchCommand_Draw;
-        command.vertex_count = 36;
-        command.instance_count = 1;
-
-        numtk::vec3f sun_dir{
-            std::cos(_state->sun_spherical[1]) * std::cos(_state->sun_spherical[0]),
-            std::sin(_state->sun_spherical[1]),
-            std::cos(_state->sun_spherical[1]) * std::sin(_state->sun_spherical[0])
-        };
-
-        for (uint32_t index = 0; index < 64; ++index)
         {
+            GraphicsCommandBinding command = {};
+            command.command = GraphicsCommandBinding::DispatchCommand_Draw;
+            command.vertex_count = 36;
+            command.instance_count = 1;
+
+            for (uint32_t index = 0; index < 64; ++index)
+            {
+                _state->dispatch_runtime.BindGraphicsCommand(
+                    &main_world_node,
+                    0, index,
+                    command);
+
+                numtk::vec3f* push_constants =
+                    (numtk::vec3f*)_state->dispatch_runtime.BindPushConstants(
+                        NodeBindingPoint{
+                            .node = &main_world_node,
+                            .stage_index = 0,
+                            .type = NodeBindingPoint::BindingType_PushConstantRange,
+                            .push_constants = PushConstantsBindingInfo{ 0 }
+                        },
+                        index);
+                *push_constants = sun_dir;
+            }
+        }
+
+        {
+            GraphicsCommandBinding command = {};
+            command.command = GraphicsCommandBinding::DispatchCommand_Draw;
+            command.vertex_count = 3;
+            command.instance_count = 1;
+
             _state->dispatch_runtime.BindGraphicsCommand(
                 &main_world_node,
-                0, index,
+                1, 0,
                 command);
 
-            numtk::vec3f* push_constants =
-                (numtk::vec3f*)_state->dispatch_runtime.BindPushConstants(
+            SkyboxPushConstants* push_constants =
+                (SkyboxPushConstants*)_state->dispatch_runtime.BindPushConstants(
                     NodeBindingPoint{
                         .node = &main_world_node,
-                        .stage_index = 0,
+                        .stage_index = 1,
                         .type = NodeBindingPoint::BindingType_PushConstantRange,
                         .push_constants = PushConstantsBindingInfo{ 0 }
-                    },
-                    index);
-            *push_constants = sun_dir;
+                    }, 0);
+            *push_constants = skybox_params;
         }
     }
 
