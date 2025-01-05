@@ -203,22 +203,144 @@ struct GraphEdge
     NodeBindingPoint target;
 };
 
+struct BindingPointSync
+{
+    VkPipelineStageFlags stage;
+    VkAccessFlags access;
+    VkImageLayout layout;
+};
+
+BindingPointSync BindingPointSyncRequirements(GraphEdge::EdgeType type, NodeBindingPoint const& binding_point)
+{
+    BindingPointSync output = {};
+    output.access = VK_ACCESS_NONE;
+    output.layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    output.stage = 0;
+
+    if (type == GraphEdge::EdgeType_Image)
+    {
+        switch (binding_point.type)
+        {
+
+        case NodeBindingPoint::BindingType_Shader:
+        {
+            ShaderBindingInfo const& location = binding_point.shader;
+            DispatchStageInfo const& stage_info =
+                binding_point.node->sequence[binding_point.stage_index];
+            DispatchStageInfo::BindingInfo const& binding = stage_info
+                .binding_groups[location.group_index]
+                .bindings[location.binding_index];
+
+            switch (binding.type)
+            {
+
+            case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER: {
+                output.access = VK_ACCESS_SHADER_READ_BIT;
+                output.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            } break;
+
+            case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE: {
+                output.access = VK_ACCESS_SHADER_READ_BIT;
+                output.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            } break;
+
+            case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE: {
+                output.access = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+                output.layout = VK_IMAGE_LAYOUT_GENERAL;
+            } break;
+
+            default: break;
+            }
+        } break;
+
+        case NodeBindingPoint::BindingType_Framebuffer:
+        {
+            FramebufferBindingInfo const& location = binding_point.framebuffer;
+            DispatchNodeInfo::RenderAttachment const& attachment_info =
+                binding_point.node->graphics.attachments[location.attachment_index];
+
+            if (attachment_info.type >= VK_FORMAT_D16_UNORM
+                && attachment_info.type < VK_FORMAT_BC1_RGB_UNORM_BLOCK)
+            {
+                output.access = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT
+                    | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+                output.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            }
+            else
+            {
+                output.access = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT
+                    | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+                output.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            }
+        } break;
+
+        case NodeBindingPoint::BindingType_Present:
+        {
+            output.access = 0;
+            output.layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        } break;
+
+        default: break;
+        }
+    }
+
+    return output;
+}
+
 struct DispatchGraph
 {
     std::vector<DispatchNodeInfo> nodes;
 
     std::vector<GraphEdge> edges;
-    std::unordered_map<DispatchNodeInfo const*, std::vector<GraphEdge const*>> edges_in;
-    std::unordered_map<DispatchNodeInfo const*, std::vector<GraphEdge const*>> edges_out;
+    std::unordered_map<DispatchNodeInfo const*, std::vector<uint32_t>> edges_in;
+    std::unordered_map<DispatchNodeInfo const*, std::vector<uint32_t>> edges_out;
 
     void InsertEdge(GraphEdge const& edge)
     {
+        uint32_t index = edges.size();
         edges.push_back(edge);
         GraphEdge const* pEdge = &edges.back();
         if (pEdge->source.node)
-            edges_out[pEdge->source.node].push_back(pEdge);
+            edges_out[pEdge->source.node].push_back(index);
         if (pEdge->target.node)
-            edges_in[pEdge->target.node].push_back(pEdge);
+            edges_in[pEdge->target.node].push_back(index);
+    }
+
+    std::vector<vktk::Context::RenderPassAttachment> RenderPassDescription(uint32_t node_index)
+    {
+        std::vector<vktk::Context::RenderPassAttachment> output = {};
+
+        DispatchNodeInfo const& node = nodes[node_index];
+        for (DispatchNodeInfo::RenderAttachment const& attachment : node.graphics.attachments)
+            output.push_back(vktk::Context::RenderPassAttachment{
+                attachment.format,
+                VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_UNDEFINED
+            });
+
+        for (uint32_t edge_index : edges_out[&node])
+        {
+            GraphEdge const& edge = edges[edge_index];
+            if (edge.source.type != NodeBindingPoint::BindingType_Framebuffer)
+                continue;
+
+            vktk::Context::RenderPassAttachment& desc = output[edge.source.framebuffer.attachment_index];
+            BindingPointSync sync_reqs = BindingPointSyncRequirements(edge.type, edge.target);
+            desc.finalLayout = sync_reqs.layout;
+        }
+
+        for (uint32_t edge_index : edges_in[&node])
+        {
+            GraphEdge const& edge = edges[edge_index];
+            if (edge.source.type != NodeBindingPoint::BindingType_Framebuffer)
+                continue;
+
+            vktk::Context::RenderPassAttachment& desc = output[edge.source.framebuffer.attachment_index];
+            BindingPointSync sync_reqs = BindingPointSyncRequirements(edge.type, edge.source);
+            desc.initialLayout = sync_reqs.layout;
+        }
+
+        return output;
     }
 
     std::vector<NodeBindingPoint> Inputs() const
@@ -722,92 +844,6 @@ DispatchNodeFramebuffer GenerateDispatchFramebufferRuntime(
     return framebuffer_runtime;
 }
 
-struct HalfMemoryBarrier
-{
-    VkPipelineStageFlags stage;
-    VkAccessFlags access;
-    VkImageLayout layout;
-};
-
-struct MemoryBarrier
-{
-    HalfMemoryBarrier src;
-    HalfMemoryBarrier dst;
-};
-
-#if 0
-HalfMemoryBarrier HalfEdgeBarrier(GraphEdge::EdgeType type, NodeBindingPoint const& binding_point)
-{
-    HalfMemoryBarrier output = {};
-    output.access = VK_ACCESS_NONE;
-    output.layout = VK_IMAGE_LAYOUT_UNDEFINED;
-    output.stage = 0;
-
-    if (type == GraphEdge::EdgeType_Image)
-    {
-        switch (binding_point.type)
-        {
-
-        case NodeBindingPoint::BindingType_Shader:
-        {
-            ShaderBindingInfo const& location = binding_point.location.shader;
-            DispatchStageInfo const& stage_info =
-                binding_point.node->sequence[binding_point.stage_index];
-
-            switch (location.type)
-            {
-
-            case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER: {
-                output.access = VK_ACCESS_SHADER_READ_BIT;
-                output.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            } break;
-
-            case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE: {
-                output.access = VK_ACCESS_SHADER_READ_BIT;
-                output.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            } break;
-
-            case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE: {
-                output.access = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-                output.layout = VK_IMAGE_LAYOUT_GENERAL;
-            } break;
-
-            default: break;
-            }
-        } break;
-
-        case NodeBindingPoint::BindingType_Framebuffer:
-        {
-            FramebufferBindingInfo const& location = binding_point.location.framebuffer;
-
-            if (location.type == FramebufferBindingInfo::AttachmentType_Color) {
-                output.access = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT
-                    | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-                output.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-            }
-
-            if (location.type == FramebufferBindingInfo::AttachmentType_DepthStencil) {
-                output.access = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT
-                    | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-                output.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-            }
-
-        } break;
-
-        default: break;
-        }
-    }
-}
-
-MemoryBarrier GenerateEdgeBarrier(GraphEdge const& edge)
-{
-    MemoryBarrier output = {};
-    output.src = HalfEdgeBarrier(edge.type, edge.source);
-    output.dst = HalfEdgeBarrier(edge.type, edge.target);
-    return output;
-}
-#endif
-
 struct state_t
 {
     float time = 0.f;
@@ -1058,6 +1094,22 @@ DispatchGraph FullFrameRenderGraph()
 {
     DispatchGraph output = {};
     output.nodes.push_back(MainWorldDispatchInfo());
+
+    output.InsertEdge(GraphEdge{
+        GraphEdge::EdgeType_Image,
+        NodeBindingPoint{
+            .node = &output.nodes[0],
+            .stage_index = (uint32_t)-1,
+            .type = NodeBindingPoint::BindingType_Framebuffer,
+            .framebuffer = { 0 }
+        },
+        NodeBindingPoint{
+            .node = nullptr,
+            .stage_index = (uint32_t)-1,
+            .type = NodeBindingPoint::BindingType_Present
+        }
+    });
+
     return output;
 }
 
@@ -1067,11 +1119,11 @@ DispatchGraph PixelCyclingRenderGraph()
     output.nodes.push_back(MainWorldDispatchInfo());
     output.nodes.push_back(ResolveDispatchInfo());
 
-    output.InsertEdge({
+    output.InsertEdge(GraphEdge{
         GraphEdge::EdgeType_Image,
         NodeBindingPoint{
             .node = &output.nodes[0],
-            .stage_index = 0,
+            .stage_index = (uint32_t)-1,
             .type = NodeBindingPoint::BindingType_Framebuffer,
             .framebuffer = { 0 }
         },
@@ -1083,20 +1135,23 @@ DispatchGraph PixelCyclingRenderGraph()
         }
     });
 
-    output.InsertEdge({
+    output.InsertEdge(GraphEdge{
         GraphEdge::EdgeType_Image,
         NodeBindingPoint{
             .node = &output.nodes[1],
-            .stage_index = 0,
+            .stage_index = (uint32_t)-1,
             .type = NodeBindingPoint::BindingType_Framebuffer,
             .framebuffer = { 0 }
         },
         NodeBindingPoint{
             .node = nullptr,
-            .stage_index = 0,
+            .stage_index = (uint32_t)-1,
             .type = NodeBindingPoint::BindingType_Present
         }
     });
+
+    auto renderpass0 = output.RenderPassDescription(0);
+    auto renderpass1 = output.RenderPassDescription(1);
 
     return output;
 }
@@ -1516,6 +1571,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     state_t* _state = (state_t*)_pstate;
 
     _state->dispatch_graph = FullFrameRenderGraph();
+    PixelCyclingRenderGraph();
     //_state->dispatch_runtime.vulkan = _vulkan;
     _state->dispatch_runtime.graph = &_state->dispatch_graph;
 
