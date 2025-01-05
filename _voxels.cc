@@ -75,8 +75,8 @@ struct DispatchStageInfo
     };
     struct BindingGroupInfo {
         std::vector<BindingInfo> bindings;
-        uint32_t count;
     };
+    uint32_t group_instance_count;
     std::vector<BindingGroupInfo> binding_groups;
 
     // push constants
@@ -125,11 +125,11 @@ struct DispatchNodeInfo
         ClearValue clear_value;
     };
 
-    struct GraphicsNodeInfo {
+    struct GraphicsDetails {
         std::vector<RenderAttachment> attachments;
     };
 
-    std::variant<GraphicsNodeInfo> details;
+    std::variant<GraphicsDetails> details;
 };
 
 struct DispatchStageRuntime
@@ -357,7 +357,7 @@ struct DispatchGraph
 
             if (node.mode == DispatchNodeInfo::DispatchMode_Graphics)
             {
-                auto const& details = std::get<DispatchNodeInfo::GraphicsNodeInfo>(node.details);
+                auto const& details = std::get<DispatchNodeInfo::GraphicsDetails>(node.details);
                 uint32_t attachment_index = 0;
                 for (DispatchNodeInfo::RenderAttachment const& attachment : details.attachments)
                 {
@@ -431,10 +431,113 @@ struct DispatchRuntime
     void GenerateStaticRuntime() {}
     void GenerateFramebufferRuntime(VkRenderPass _render_pass) {}
 
+    void Dispatch(vktk::CommandBuffer& _command_buffer)
+    {
+        for (uint32_t node_index = 0u;
+             node_index < (uint32_t)graph->nodes.size();
+             ++node_index)
+        {
+            DispatchNodeInfo const& node_info = graph->nodes[node_index];
+            DispatchNodeBindings const& bindings = nodes_bindings[node_index];
+            DispatchNodeFramebuffer const& framebuffer = nodes_framebuffer[node_index];
+            DispatchNodeStatic const& runtime = nodes_static[node_index];
+
+            DispatchNodeInfo::GraphicsDetails const& graphics_info =
+                std::get<DispatchNodeInfo::GraphicsDetails>(node_info.details);
+
+            VkRenderPass render_pass =
+                std::get<DispatchNodeFramebuffer::GraphicsDetails>(framebuffer.details).render_pass;
+            std::vector<VkClearValue> clear_values = {};
+            for(DispatchNodeInfo::RenderAttachment const& attachment : graphics_info.attachments)
+            {
+                VkClearValue clear_value = {};
+                std::memcpy(&clear_value, &attachment.clear_value, sizeof(VkClearValue));
+                clear_values.push_back(clear_value);
+            }
+
+            VkRenderPassBeginInfo rp_begin_info{};
+            rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            rp_begin_info.pNext = nullptr;
+            rp_begin_info.renderPass = render_pass;
+            rp_begin_info.framebuffer = bindings.framebuffer.framebuffer;
+            rp_begin_info.renderArea = bindings.framebuffer.render_area;
+            rp_begin_info.clearValueCount = graphics_info.attachments.size();
+            rp_begin_info.clearValueCount = clear_values.size();
+            rp_begin_info.pClearValues = clear_values.data();
+            vkCmdBeginRenderPass(_command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+
+            for (uint32_t stage_index = 0u;
+                 stage_index < (uint32_t)node_info.sequence.size();
+                 ++stage_index)
+            {
+                vkCmdBindPipeline(_command_buffer,
+                                  VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                  framebuffer.stages[stage_index]);
+
+                for (uint32_t dispatch_index = 0u;
+                     dispatch_index < node_info.sequence[stage_index].group_instance_count;
+                     ++dispatch_index)
+                {
+                    for (uint32_t group_index = 0u;
+                         group_index < (uint32_t)node_info.sequence[stage_index].binding_groups.size();
+                         ++group_index)
+                    {
+                        VkDescriptorSet descset =
+                            runtime.stages[stage_index].binding_groups[group_index].sets[dispatch_index];
+                        vkCmdBindDescriptorSets(_command_buffer,
+                                                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                                runtime.stages[stage_index].pipeline_layout,
+                                                0u,
+                                                1u, &descset,
+                                                0u, nullptr);
+                    }
+
+                    for (uint32_t range_index = 0;
+                         range_index < (uint32_t)node_info.sequence[stage_index].push_constants.size();
+                         ++range_index)
+                    {
+                        DispatchStageInfo::PushConstantRange const& range =
+                            node_info.sequence[stage_index].push_constants[range_index];
+                        void* memory = bindings
+                            .stages[stage_index]
+                            .instances[dispatch_index]
+                            .push_constants[range_index].get();
+                        vkCmdPushConstants(_command_buffer,
+                                           runtime.stages[stage_index].pipeline_layout,
+                                           range.stages,
+                                           range.offset,
+                                           range.size,
+                                           memory);
+                    }
+
+                    GraphicsCommandBinding const& graphics_command =
+                        bindings.stages[stage_index].instances[dispatch_index].graphics;
+
+                    switch(graphics_command.command)
+                    {
+                    case GraphicsCommandBinding::DispatchCommand_Draw:
+                    {
+                        vkCmdDraw(_command_buffer,
+                                  graphics_command.vertex_count,
+                                  graphics_command.instance_count,
+                                  0, 0);
+                    } break;
+                    default: break;
+                    }
+                }
+            }
+
+            vkCmdEndRenderPass(_command_buffer);
+        }
+    }
+
     void BindFramebuffer(DispatchNodeInfo const* _node,
                          FramebufferAreaBinding const& _framebuffer)
     {
         uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
+        if (nodes_bindings.size() < node_index+1)
+            nodes_bindings.resize(node_index+1);
+
         DispatchNodeBindings& node_bindings = nodes_bindings[node_index];
         node_bindings.framebuffer = _framebuffer;
     }
@@ -445,7 +548,15 @@ struct DispatchRuntime
                              GraphicsCommandBinding const& _command)
     {
         uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
+        if (nodes_bindings.size() < node_index+1)
+            nodes_bindings.resize(node_index+1);
+
         DispatchNodeBindings& node_bindings = nodes_bindings[node_index];
+        if (node_bindings.stages.size() < _stage_index+1)
+            node_bindings.stages.resize(_stage_index+1);
+        if (node_bindings.stages[_stage_index].instances.size() < _instance_index+1)
+            node_bindings.stages[_stage_index].instances.resize(_instance_index+1);
+
         GraphicsCommandBinding& graphics = node_bindings.stages[_stage_index].instances[_instance_index].graphics;
         graphics = _command;
     }
@@ -457,11 +568,19 @@ struct DispatchRuntime
         DispatchStageInfo::PushConstantRange const& range = stage.push_constants[_location.push_constants.range_index];
 
         uint32_t node_index = (uint32_t)(_location.node - graph->nodes.data());
+        if (nodes_bindings.size() < node_index+1)
+            nodes_bindings.resize(node_index+1);
+
         DispatchNodeBindings& node_bindings = nodes_bindings[node_index];
+        if (node_bindings.stages.size() < _location.stage_index+1)
+            node_bindings.stages.resize(_location.stage_index+1);
+        if (node_bindings.stages[_location.stage_index].instances.size() < _instance_index+1)
+            node_bindings.stages[_location.stage_index].instances.resize(_instance_index+1);
+
         DispatchStageBindings& stage_bindings = node_bindings.stages[_location.stage_index];
         DispatchStageBindings::DispatchInstance& instance = stage_bindings.instances[_instance_index];
 
-        if (instance.push_constants.size() < _location.push_constants.range_index)
+        if (instance.push_constants.size() < _location.push_constants.range_index+1)
             instance.push_constants.resize(_location.push_constants.range_index+1);
         instance.push_constants[_location.push_constants.range_index].reset(new uint8_t[range.size]);
 
@@ -528,9 +647,8 @@ DispatchNodeStatic GenerateDispatchStaticRuntime(DispatchNodeInfo const& _node,
                 });
             }
 
-            descriptor.pool = _vulkan->CreateDescriptorPool(binding_group.count, bindings);
-
-            descriptor.sets.resize(binding_group.count);
+            descriptor.pool = _vulkan->CreateDescriptorPool(stage.group_instance_count, bindings);
+            descriptor.sets.resize(stage.group_instance_count);
 
             void* pnext_begin = nullptr;
             void* desc_count_alloc_ptr = vktk::PNextLookup(
@@ -549,7 +667,7 @@ DispatchNodeStatic GenerateDispatchStaticRuntime(DispatchNodeInfo const& _node,
             descset_allocate.descriptorPool = descriptor.pool.pool;
             descset_allocate.descriptorSetCount = 1u;
             descset_allocate.pSetLayouts = &descriptor.pool.layout;
-            for (uint32_t index = 0; index < binding_group.count; ++index)
+            for (uint32_t index = 0; index < stage.group_instance_count; ++index)
                 CHECKCALL(vkAllocateDescriptorSets, _vulkan->device,
                           &descset_allocate, &descriptor.sets[index]);
 
@@ -760,6 +878,7 @@ DispatchStageInfo RegionPassDispatchStageInfo()
         }
     };
 
+    output.group_instance_count = 64;
     output.binding_groups = std::vector<DispatchStageInfo::BindingGroupInfo>{
         {
             {
@@ -769,8 +888,7 @@ DispatchStageInfo RegionPassDispatchStageInfo()
                   0, 1 },
                 { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                   VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT, 32*32*32 },
-            },
-            64
+            }
         }
     };
 
@@ -795,7 +913,7 @@ DispatchNodeInfo MainWorldDispatchInfo()
         RegionPassDispatchStageInfo()
     };
 
-    DispatchNodeInfo::GraphicsNodeInfo& details = std::get<DispatchNodeInfo::GraphicsNodeInfo>(output.details);
+    DispatchNodeInfo::GraphicsDetails& details = std::get<DispatchNodeInfo::GraphicsDetails>(output.details);
     details.attachments = std::vector<DispatchNodeInfo::RenderAttachment>{
         {
             VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
@@ -1706,8 +1824,8 @@ void RenderResources(void* _pstate,
         {
             DispatchNodeRuntime::GraphicsNodeRuntime& graphics_runtime =
                 std::get<DispatchNodeRuntime::GraphicsNodeRuntime>(dispatch_runtime.details);
-            DispatchNodeInfo::GraphicsNodeInfo& graphics_info =
-                std::get<DispatchNodeInfo::GraphicsNodeInfo>(dispatch_info.details);
+            DispatchNodeInfo::GraphicsDetails& graphics_info =
+                std::get<DispatchNodeInfo::GraphicsDetails>(dispatch_info.details);
 
             std::vector<vktk::Context::RenderPassAttachment> attachments{};
             std::vector<VkImageView> views{};
@@ -2253,50 +2371,7 @@ void Draw(void* _pstate,
         }
     }
 
-#else
-
-    VkRenderPassBeginInfo rp_begin_info{};
-    rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rp_begin_info.pNext = nullptr;
-
-    rp_begin_info.renderPass = _swapchain.render_pass;
-
-    rp_begin_info.framebuffer = _swapchain.framebuffers[_swapchain.index];
-    rp_begin_info.renderArea = VkRect2D{
-        { (int32_t)render_area.min.x(), (int32_t)render_area.min.y() },
-        { render_area.extent.x(), render_area.extent.y() }
-    };
-
-    rp_begin_info.clearValueCount = 2;
-    rp_begin_info.pClearValues = clear_values;
-
-    vkCmdBeginRenderPass(command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-
-    numtk::vec3f sun_dir{
-        std::cos(_state->sun_spherical[1]) * std::cos(_state->sun_spherical[0]),
-        std::sin(_state->sun_spherical[1]),
-        std::cos(_state->sun_spherical[1]) * std::sin(_state->sun_spherical[0])
-    };
-
-    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                      _state->dispatch_runtime.nodes_framebuffer[0].stages[0]);
-    for (uint32_t index = 0; index < 64; ++index)
-    {
-        vkCmdBindDescriptorSets(command_buffer,
-                                VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                _state->dispatch_runtime.nodes_static[0].stages[0].pipeline_layout,
-                                0u,
-                                1u, &_state->dispatch_runtime.nodes_static[0].stages[0].binding_groups[0].sets[index],
-                                0u, nullptr);
-
-        vkCmdPushConstants(command_buffer,
-                           _state->dispatch_runtime.nodes_static[0].stages[0].pipeline_layout,
-                           VK_SHADER_STAGE_FRAGMENT_BIT,
-                           0, sizeof(numtk::vec3f), (void*)&sun_dir);
-        vkCmdDraw(command_buffer, 36u, 1u, 0u, 0u);
-    }
-
-    vkCmdEndRenderPass(command_buffer);
+    _state->dispatch_runtime.Dispatch(command_buffer);
 #endif
 
 #if 0
