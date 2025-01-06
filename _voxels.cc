@@ -306,11 +306,13 @@ struct DispatchGraph
             edges_in[pEdge->target.node].push_back(index);
     }
 
-    std::vector<vktk::Context::RenderPassAttachment> RenderPassDescription(uint32_t node_index)
+    std::vector<vktk::Context::RenderPassAttachment> RenderPassDescription(
+        uint32_t _node_index,
+        VkFormat const* _swapchain_format = nullptr) const
     {
         std::vector<vktk::Context::RenderPassAttachment> output = {};
 
-        DispatchNodeInfo const& node = nodes[node_index];
+        DispatchNodeInfo const& node = nodes[_node_index];
         for (DispatchNodeInfo::RenderAttachment const& attachment : node.graphics.attachments)
             output.push_back(vktk::Context::RenderPassAttachment{
                 attachment.format,
@@ -318,7 +320,7 @@ struct DispatchGraph
                 VK_IMAGE_LAYOUT_UNDEFINED
             });
 
-        for (uint32_t edge_index : edges_out[&node])
+        for (uint32_t edge_index : (edges_out.count(&node) ? edges_out.at(&node) : std::vector<uint32_t>{}))
         {
             GraphEdge const& edge = edges[edge_index];
             if (edge.source.type != NodeBindingPoint::BindingType_Framebuffer)
@@ -327,12 +329,15 @@ struct DispatchGraph
             vktk::Context::RenderPassAttachment& desc = output[edge.source.framebuffer.attachment_index];
             BindingPointSync sync_reqs = BindingPointSyncRequirements(edge.type, edge.target);
             desc.finalLayout = sync_reqs.layout;
+
+            if (_swapchain_format && edge.target.type == NodeBindingPoint::BindingType_Present)
+                desc.format = *_swapchain_format;
         }
 
-        for (uint32_t edge_index : edges_in[&node])
+        for (uint32_t edge_index : (edges_in.count(&node) ? edges_in.at(&node) : std::vector<uint32_t>{}))
         {
             GraphEdge const& edge = edges[edge_index];
-            if (edge.source.type != NodeBindingPoint::BindingType_Framebuffer)
+            if (edge.target.type != NodeBindingPoint::BindingType_Framebuffer)
                 continue;
 
             vktk::Context::RenderPassAttachment& desc = output[edge.source.framebuffer.attachment_index];
@@ -512,14 +517,72 @@ struct DispatchNodeBindings
 
 struct DispatchRuntime
 {
-    //vktk::Context* vulkan;
+    vktk::Context* vulkan;
     DispatchGraph const* graph;
     std::vector<DispatchNodeStatic> nodes_static;
     std::vector<DispatchNodeFramebuffer> nodes_framebuffer;
     std::vector<DispatchNodeBindings> nodes_bindings;
 
-    void GenerateStaticRuntime() {}
-    void GenerateFramebufferRuntime(VkRenderPass _render_pass) {}
+    void GenerateStaticRuntime()
+    {
+    }
+
+    void GenerateFramebufferRuntime(VkFormat const* _swapchain_format = nullptr)
+    {
+        for (uint32_t node_index = 0; node_index < (uint32_t)graph->nodes.size(); ++node_index)
+        {
+            DispatchNodeInfo const& node = graph->nodes[node_index];
+            DispatchNodeStatic const& node_static = nodes_static[node_index];
+            DispatchNodeFramebuffer framebuffer_runtime = {};
+
+            if (node.mode == DispatchNodeInfo::DispatchMode_Graphics)
+                framebuffer_runtime.graphics.render_pass =
+                    vulkan->CreateRenderPass(
+                        graph->RenderPassDescription(node_index, _swapchain_format));
+
+            for (uint32_t stage_index = 0; stage_index < (uint32_t)node.sequence.size(); ++stage_index)
+            {
+                DispatchStageInfo const& stage = node.sequence[stage_index];
+                DispatchStageStatic const& runtime = node_static.stages[stage_index];
+
+                std::vector<vktk::Context::PipelineStage> pipeline_stages = {};
+                for (DispatchStageInfo::ShaderStage const& shader : stage.shaders)
+                {
+                    std::string shader_name = stage.name;
+                    switch (shader.stage)
+                    {
+                    case VK_SHADER_STAGE_VERTEX_BIT: shader_name += "_vertex"; break;
+                    case VK_SHADER_STAGE_FRAGMENT_BIT: shader_name += "_fragment"; break;
+                    default: shader_name += "_unknown"; break;
+                    }
+
+                    VkShaderModule shader_module =
+                        vulkan->CompileShader_GLSL(shader.stage, shader_name.c_str(), shader.source);
+
+                    pipeline_stages.push_back(vktk::Context::PipelineStage{ shader_module, shader.stage });
+                }
+
+                if (node.mode == DispatchNodeInfo::DispatchMode_Graphics)
+                {
+                    VkPipeline pipeline = vulkan->CreatePipeline(
+                        runtime.pipeline_layout,
+                        framebuffer_runtime.graphics.render_pass,
+                        pipeline_stages,
+                        stage.graphics.state_overrides,
+                        stage.graphics.topology,
+                        stage.graphics.input_layout
+                        );
+
+                    framebuffer_runtime.stages.push_back(pipeline);
+                }
+
+                for (vktk::Context::PipelineStage const& pipeline_stage : pipeline_stages)
+                    vkDestroyShaderModule(vulkan->device, pipeline_stage.module, nullptr);
+            }
+
+            nodes_framebuffer.push_back(framebuffer_runtime);
+        }
+    }
 
     void Dispatch(vktk::CommandBuffer& _command_buffer)
     {
@@ -797,6 +860,9 @@ DispatchNodeFramebuffer GenerateDispatchFramebufferRuntime(
 {
     DispatchNodeFramebuffer framebuffer_runtime = {};
 
+    if (_node.mode == DispatchNodeInfo::DispatchMode_Graphics)
+        framebuffer_runtime.graphics.render_pass = _render_pass;
+
     for (uint32_t stage_index = 0; stage_index < (uint32_t)_node.sequence.size(); ++stage_index)
     {
         DispatchStageInfo const& stage = _node.sequence[stage_index];
@@ -837,9 +903,6 @@ DispatchNodeFramebuffer GenerateDispatchFramebufferRuntime(
             vkDestroyShaderModule(_vulkan->device, pipeline_stage.module, nullptr);
 
     }
-
-    if (_node.mode == DispatchNodeInfo::DispatchMode_Graphics)
-        framebuffer_runtime.graphics.render_pass = _render_pass;
 
     return framebuffer_runtime;
 }
@@ -1139,6 +1202,22 @@ DispatchGraph PixelCyclingRenderGraph()
         GraphEdge::EdgeType_Image,
         NodeBindingPoint{
             .node = &output.nodes[1],
+            .stage_index = 0,
+            .type = NodeBindingPoint::BindingType_Shader,
+            .shader = { 0, 0 }
+        },
+        NodeBindingPoint{
+            .node = &output.nodes[0],
+            .stage_index = (uint32_t)-1,
+            .type = NodeBindingPoint::BindingType_Framebuffer,
+            .framebuffer = { 0 }
+        }
+    });
+
+    output.InsertEdge(GraphEdge{
+        GraphEdge::EdgeType_Image,
+        NodeBindingPoint{
+            .node = &output.nodes[1],
             .stage_index = (uint32_t)-1,
             .type = NodeBindingPoint::BindingType_Framebuffer,
             .framebuffer = { 0 }
@@ -1149,9 +1228,6 @@ DispatchGraph PixelCyclingRenderGraph()
             .type = NodeBindingPoint::BindingType_Present
         }
     });
-
-    auto renderpass0 = output.RenderPassDescription(0);
-    auto renderpass1 = output.RenderPassDescription(1);
 
     return output;
 }
@@ -1572,7 +1648,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
     _state->dispatch_graph = FullFrameRenderGraph();
     PixelCyclingRenderGraph();
-    //_state->dispatch_runtime.vulkan = _vulkan;
+    _state->dispatch_runtime.vulkan = _vulkan;
     _state->dispatch_runtime.graph = &_state->dispatch_graph;
 
     //_state->region = DeserialiseRegion("../r.-1.6.mca");
@@ -1930,6 +2006,8 @@ void RenderResources(void* _pstate,
 {
     state_t* _state = (state_t*)_pstate;
 
+    _state->dispatch_runtime.GenerateFramebufferRuntime(&_swapchain.format);
+#if 0
     for (uint32_t node_index = 0; node_index < (uint32_t)_state->dispatch_graph.nodes.size(); ++node_index)
     {
         DispatchNodeInfo const& node = _state->dispatch_graph.nodes[node_index];
@@ -1938,6 +2016,7 @@ void RenderResources(void* _pstate,
             GenerateDispatchFramebufferRuntime(node, node_static, _vulkan, _swapchain.render_pass)
             );
     }
+#endif
 
     {
         _state->primary_pass_color = _vulkan->CreateTexture(
