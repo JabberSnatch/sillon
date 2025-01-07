@@ -884,6 +884,28 @@ VkRenderPass Context::CreateRenderPass(std::vector<RenderPassAttachment> const& 
     return render_pass;
 }
 
+
+VkFramebuffer Context::CreateFramebuffer(VkRenderPass _render_pass,
+                                         numtk::vec2u _size,
+                                         std::vector<VkImageView> const& _attachments)
+{
+    VkFramebufferCreateInfo framebufferInfo{};
+    framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    framebufferInfo.pNext = nullptr;
+    framebufferInfo.flags = 0u;
+    framebufferInfo.renderPass = _render_pass;
+    framebufferInfo.attachmentCount = _attachments.size();
+    framebufferInfo.pAttachments = _attachments.data();
+    framebufferInfo.width = _size[0];
+    framebufferInfo.height = _size[1];
+    framebufferInfo.layers = 1;
+
+    VkFramebuffer framebuffer{};
+    CHECKCALL(vkCreateFramebuffer, device, &framebufferInfo, nullptr,
+              &framebuffer);
+    return framebuffer;
+}
+
 VkPipeline Context::CreatePipeline(VkPipelineLayout _layout,
                                    VkRenderPass _renderPass,
                                    std::vector<PipelineStage> const& _stages)

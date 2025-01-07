@@ -258,6 +258,10 @@ struct Context
     VkRenderPass CreateRenderPass(std::vector<RenderPassAttachment> const& _attachments,
                                   RenderPassAttachment const* _depth_attachment);
 
+    VkFramebuffer CreateFramebuffer(VkRenderPass _render_pass,
+                                    numtk::vec2u _size,
+                                    std::vector<VkImageView> const& _attachments);
+
     struct PipelineStage {
         VkShaderModule module;
         VkShaderStageFlagBits stage;

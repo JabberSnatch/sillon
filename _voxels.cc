@@ -496,7 +496,7 @@ struct GraphicsCommandBinding
 
 struct FramebufferAreaBinding
 {
-    VkFramebuffer framebuffer;
+    uint32_t framebuffer_index;
     VkRect2D render_area;
 };
 
@@ -511,7 +511,8 @@ struct DispatchStageBindings
 
 struct DispatchNodeBindings
 {
-    FramebufferAreaBinding framebuffer;
+    FramebufferAreaBinding area_binding;
+    std::vector<VkFramebuffer> framebuffers;
     std::vector<DispatchStageBindings> stages;
 };
 
@@ -609,8 +610,8 @@ struct DispatchRuntime
             rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
             rp_begin_info.pNext = nullptr;
             rp_begin_info.renderPass = framebuffer.graphics.render_pass;
-            rp_begin_info.framebuffer = bindings.framebuffer.framebuffer;
-            rp_begin_info.renderArea = bindings.framebuffer.render_area;
+            rp_begin_info.framebuffer = bindings.framebuffers[bindings.area_binding.framebuffer_index];
+            rp_begin_info.renderArea = bindings.area_binding.render_area;
             rp_begin_info.clearValueCount = graphics_info.attachments.size();
             rp_begin_info.clearValueCount = clear_values.size();
             rp_begin_info.pClearValues = clear_values.data();
@@ -681,15 +682,51 @@ struct DispatchRuntime
         }
     }
 
+    void BindSwapchain(DispatchNodeInfo const* _node,
+                       vktk::Swapchain const& _swapchain)
+    {
+        uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
+        if (nodes_bindings.size() < node_index+1)
+            nodes_bindings.resize(node_index+1);
+
+        DispatchNodeFramebuffer const& framebuffer = nodes_framebuffer[node_index];
+        DispatchNodeBindings& node_bindings = nodes_bindings[node_index];
+
+        for (uint32_t index = 0u; index < (uint32_t)_swapchain.framebuffers.size(); ++index)
+        {
+            node_bindings.framebuffers.push_back(
+                vulkan->CreateFramebuffer(framebuffer.graphics.render_pass,
+                                          { _swapchain.size.width, _swapchain.size.height },
+                                          { _swapchain.views[index*2], _swapchain.views[index*2 + 1] })
+                );
+        }
+    }
+
+    void BindFramebufferAttachments(DispatchNodeInfo const* _node,
+                                    numtk::vec2u const& _size,
+                                    std::vector<VkImageView> const& _attachments)
+    {
+        uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
+        if (nodes_bindings.size() < node_index+1)
+            nodes_bindings.resize(node_index+1);
+
+        DispatchNodeFramebuffer const& framebuffer = nodes_framebuffer[node_index];
+        DispatchNodeBindings& node_bindings = nodes_bindings[node_index];
+        node_bindings.framebuffers.push_back(
+            vulkan->CreateFramebuffer(framebuffer.graphics.render_pass,
+                                      _size,
+                                      _attachments));
+    }
+
     void BindFramebuffer(DispatchNodeInfo const* _node,
-                         FramebufferAreaBinding const& _framebuffer)
+                         FramebufferAreaBinding const& _area_binding)
     {
         uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
         if (nodes_bindings.size() < node_index+1)
             nodes_bindings.resize(node_index+1);
 
         DispatchNodeBindings& node_bindings = nodes_bindings[node_index];
-        node_bindings.framebuffer = _framebuffer;
+        node_bindings.area_binding = _area_binding;
     }
 
     void BindGraphicsCommand(DispatchNodeInfo const* _node,
@@ -2007,6 +2044,17 @@ void RenderResources(void* _pstate,
     state_t* _state = (state_t*)_pstate;
 
     _state->dispatch_runtime.GenerateFramebufferRuntime(&_swapchain.format);
+
+    {
+        DispatchNodeInfo const& main_world_node =
+            *std::find_if(_state->dispatch_graph.nodes.begin(), _state->dispatch_graph.nodes.end(),
+                          [](DispatchNodeInfo const& node) {
+                              return node.name == "MainWorldDispatch";
+                          });
+
+        _state->dispatch_runtime.BindSwapchain(&main_world_node,
+                                               _swapchain);
+    }
 #if 0
     for (uint32_t node_index = 0; node_index < (uint32_t)_state->dispatch_graph.nodes.size(); ++node_index)
     {
@@ -2399,7 +2447,7 @@ void Draw(void* _pstate,
         _state->dispatch_runtime.BindFramebuffer(
             &main_world_node,
             FramebufferAreaBinding{
-                _swapchain.framebuffers[_swapchain.index],
+                _swapchain.index,
                 VkRect2D{
                     { (int32_t)render_area.min.x(), (int32_t)render_area.min.y() },
                     { render_area.extent.x(), render_area.extent.y() }
