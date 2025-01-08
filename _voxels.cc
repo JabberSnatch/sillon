@@ -728,8 +728,8 @@ struct DispatchRuntime
                                       _attachments));
     }
 
-    void BindFramebuffer(DispatchNodeInfo const* _node,
-                         FramebufferAreaBinding const& _area_binding)
+    void BindFramebufferArea(DispatchNodeInfo const* _node,
+                             FramebufferAreaBinding const& _area_binding)
     {
         uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
         if (nodes_bindings.size() < node_index+1)
@@ -899,61 +899,6 @@ DispatchNodeStatic GenerateDispatchStaticRuntime(DispatchNodeInfo const& _node,
     return static_runtime;
 }
 
-DispatchNodeFramebuffer GenerateDispatchFramebufferRuntime(
-    DispatchNodeInfo const& _node,
-    DispatchNodeStatic const& _static_runtime,
-    vktk::Context* _vulkan,
-    VkRenderPass _render_pass)
-{
-    DispatchNodeFramebuffer framebuffer_runtime = {};
-
-    if (_node.mode == DispatchNodeInfo::DispatchMode_Graphics)
-        framebuffer_runtime.graphics.render_pass = _render_pass;
-
-    for (uint32_t stage_index = 0; stage_index < (uint32_t)_node.sequence.size(); ++stage_index)
-    {
-        DispatchStageInfo const& stage = _node.sequence[stage_index];
-        DispatchStageStatic const& runtime = _static_runtime.stages[stage_index];
-
-        std::vector<vktk::Context::PipelineStage> pipeline_stages = {};
-        for (DispatchStageInfo::ShaderStage const& shader : stage.shaders)
-        {
-            std::string shader_name = stage.name;
-            switch (shader.stage)
-            {
-            case VK_SHADER_STAGE_VERTEX_BIT: shader_name += "_vertex"; break;
-            case VK_SHADER_STAGE_FRAGMENT_BIT: shader_name += "_fragment"; break;
-            default: shader_name += "_unknown"; break;
-            }
-
-            VkShaderModule shader_module =
-                _vulkan->CompileShader_GLSL(shader.stage, shader_name.c_str(), shader.source);
-
-            pipeline_stages.push_back(vktk::Context::PipelineStage{ shader_module, shader.stage });
-        }
-
-        if (_node.mode == DispatchNodeInfo::DispatchMode_Graphics)
-        {
-            VkPipeline pipeline = _vulkan->CreatePipeline(
-                runtime.pipeline_layout,
-                _render_pass,
-                pipeline_stages,
-                stage.graphics.state_overrides,
-                stage.graphics.topology,
-                stage.graphics.input_layout
-                );
-
-            framebuffer_runtime.stages.push_back(pipeline);
-        }
-
-        for (vktk::Context::PipelineStage const& pipeline_stage : pipeline_stages)
-            vkDestroyShaderModule(_vulkan->device, pipeline_stage.module, nullptr);
-
-    }
-
-    return framebuffer_runtime;
-}
-
 struct state_t
 {
     float time = 0.f;
@@ -986,8 +931,12 @@ struct state_t
     VkPipelineLayout resolve_pipeline_layout;
     VkPipeline resolve_pipeline;
 
-    DispatchGraph dispatch_graph;
-    DispatchRuntime dispatch_runtime;
+    DispatchGraph forward_graph;
+    DispatchRuntime forward_runtime;
+    DispatchGraph pixel_cycling_graph;
+    DispatchRuntime pixel_cycling_runtime;
+
+    DispatchRuntime* current_runtime;
 
     VkFence last_submit;
 
@@ -1693,17 +1642,20 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 {
     state_t* _state = (state_t*)_pstate;
 
-    _state->dispatch_graph = FullFrameRenderGraph();
-    PixelCyclingRenderGraph();
-    _state->dispatch_runtime.vulkan = _vulkan;
-    _state->dispatch_runtime.graph = &_state->dispatch_graph;
+    _state->forward_graph = FullFrameRenderGraph();
+    _state->forward_runtime.vulkan = _vulkan;
+    _state->forward_runtime.graph = &_state->forward_graph;
+
+    _state->pixel_cycling_graph = PixelCyclingRenderGraph();
+    _state->pixel_cycling_runtime.vulkan = _vulkan;
+    _state->pixel_cycling_runtime.graph = &_state->pixel_cycling_graph;
 
     //_state->region = DeserialiseRegion("../r.-1.6.mca");
     _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
     LoadRegion(_state, _vulkan);
     LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
 
-    for (DispatchNodeInfo const& node : _state->dispatch_graph.nodes)
+    for (DispatchNodeInfo const& node : _state->forward_graph.nodes)
     {
         std::unordered_map<std::string, void*> pNext_map = {};
 
@@ -1721,7 +1673,30 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
             pNext_map.emplace("render_region", pnext_begin);
         }
 
-        _state->dispatch_runtime.nodes_static.push_back(
+        _state->forward_runtime.nodes_static.push_back(
+            GenerateDispatchStaticRuntime(node, _vulkan, pNext_map)
+            );
+    }
+
+    for (DispatchNodeInfo const& node : _state->pixel_cycling_graph.nodes)
+    {
+        std::unordered_map<std::string, void*> pNext_map = {};
+
+        if (node.name == "MainWorldDispatch")
+        {
+            static uint32_t desc_count = 0u;
+            static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc = {};
+            desc_count = (uint32_t)_state->section_textures.size();
+            desc_count_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+            desc_count_alloc.pNext = nullptr;
+            desc_count_alloc.descriptorSetCount = 1;
+            desc_count_alloc.pDescriptorCounts = &desc_count;
+            void* pnext_begin = &desc_count_alloc;
+
+            pNext_map.emplace("render_region", pnext_begin);
+        }
+
+        _state->pixel_cycling_runtime.nodes_static.push_back(
             GenerateDispatchStaticRuntime(node, _vulkan, pNext_map)
             );
     }
@@ -1871,7 +1846,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
     {
         DispatchNodeInfo const& main_world_node =
-            *std::find_if(_state->dispatch_graph.nodes.begin(), _state->dispatch_graph.nodes.end(),
+            *std::find_if(_state->forward_graph.nodes.begin(), _state->forward_graph.nodes.end(),
                           [](DispatchNodeInfo const& node) {
                               return node.name == "MainWorldDispatch";
                           });
@@ -1881,7 +1856,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
             std::vector<VkWriteDescriptorSet> desc_writes = {};
 
             VkWriteDescriptorSet region_binding =
-                _state->dispatch_runtime.BindShaderResource(
+                _state->forward_runtime.BindShaderResource(
                     NodeBindingPoint{
                         .node = &main_world_node,
                         .stage_index = 0,
@@ -1899,7 +1874,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
             buffer_info.offset = sizeof(MatrixBlock) * index;
             buffer_info.range = sizeof(MatrixBlock);
             VkWriteDescriptorSet matrix_binding =
-                _state->dispatch_runtime.BindShaderResource(
+                _state->forward_runtime.BindShaderResource(
                     NodeBindingPoint{
                         .node = &main_world_node,
                         .stage_index = 0,
@@ -1924,7 +1899,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
             }
 
             VkWriteDescriptorSet section_bindings =
-                _state->dispatch_runtime.BindShaderResource(
+                _state->forward_runtime.BindShaderResource(
                     NodeBindingPoint{
                         .node = &main_world_node,
                         .stage_index = 0,
@@ -1943,8 +1918,82 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
             vkUpdateDescriptorSets(_vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
         }
+    }
 
-        //vkUpdateDescriptorSets(_vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
+    {
+        DispatchNodeInfo const& main_world_node =
+            *std::find_if(_state->pixel_cycling_graph.nodes.begin(), _state->pixel_cycling_graph.nodes.end(),
+                          [](DispatchNodeInfo const& node) {
+                              return node.name == "MainWorldDispatch";
+                          });
+
+        for (uint32_t index = 0; index < 64; ++index)
+        {
+            std::vector<VkWriteDescriptorSet> desc_writes = {};
+
+            VkWriteDescriptorSet region_binding =
+                _state->pixel_cycling_runtime.BindShaderResource(
+                    NodeBindingPoint{
+                        .node = &main_world_node,
+                        .stage_index = 0,
+                        .type = NodeBindingPoint::BindingType_Shader,
+                        .shader = ShaderBindingInfo{ 0, 0 }
+                    },
+                    index,
+                    ShaderResourceBinding{
+                        .descriptor_count = 1,
+                        .images = &region_image_info
+                    });
+
+            VkDescriptorBufferInfo buffer_info = {};
+            buffer_info.buffer = _state->matrix_buffer;
+            buffer_info.offset = sizeof(MatrixBlock) * index;
+            buffer_info.range = sizeof(MatrixBlock);
+            VkWriteDescriptorSet matrix_binding =
+                _state->pixel_cycling_runtime.BindShaderResource(
+                    NodeBindingPoint{
+                        .node = &main_world_node,
+                        .stage_index = 0,
+                        .type = NodeBindingPoint::BindingType_Shader,
+                        .shader = ShaderBindingInfo{ 0, 1 }
+                    },
+                    index,
+                    ShaderResourceBinding{
+                        .descriptor_count = 1,
+                        .buffers = &buffer_info
+                    });
+
+            std::vector<VkDescriptorImageInfo> section_images_info(_state->section_textures.size());
+            for (uint32_t section_index = 0u;
+                 section_index < _state->section_textures.size();
+                 ++section_index)
+            {
+                VkDescriptorImageInfo& image_info = section_images_info[section_index];
+                image_info.sampler = _state->sampler;
+                image_info.imageView = _state->section_textures[section_index].view;
+                image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            }
+
+            VkWriteDescriptorSet section_bindings =
+                _state->pixel_cycling_runtime.BindShaderResource(
+                    NodeBindingPoint{
+                        .node = &main_world_node,
+                        .stage_index = 0,
+                        .type = NodeBindingPoint::BindingType_Shader,
+                        .shader = ShaderBindingInfo{ 0, 2 }
+                    },
+                    index,
+                    ShaderResourceBinding{
+                        .descriptor_count = (uint32_t)section_images_info.size(),
+                        .images = section_images_info.data()
+                    });
+
+            desc_writes.push_back(region_binding);
+            desc_writes.push_back(matrix_binding);
+            desc_writes.push_back(section_bindings);
+
+            vkUpdateDescriptorSets(_vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
+        }
     }
 
 #if 1
@@ -2053,17 +2102,16 @@ void RenderResources(void* _pstate,
 {
     state_t* _state = (state_t*)_pstate;
 
-    _state->dispatch_runtime.GenerateFramebufferRuntime(&_swapchain.format);
-
     {
+        _state->forward_runtime.GenerateFramebufferRuntime(&_swapchain.format);
+
         DispatchNodeInfo const& main_world_node =
-            *std::find_if(_state->dispatch_graph.nodes.begin(), _state->dispatch_graph.nodes.end(),
+            *std::find_if(_state->forward_graph.nodes.begin(), _state->forward_graph.nodes.end(),
                           [](DispatchNodeInfo const& node) {
                               return node.name == "MainWorldDispatch";
                           });
 
-        _state->dispatch_runtime.BindSwapchain(&main_world_node,
-                                               _swapchain);
+        _state->forward_runtime.BindSwapchain(&main_world_node, _swapchain);
     }
 
     {
@@ -2080,7 +2128,61 @@ void RenderResources(void* _pstate,
             VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
             VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
         );
+    }
 
+    {
+        _state->pixel_cycling_runtime.GenerateFramebufferRuntime(&_swapchain.format);
+
+        DispatchNodeInfo const& main_world_node =
+            *std::find_if(_state->pixel_cycling_graph.nodes.begin(), _state->pixel_cycling_graph.nodes.end(),
+                          [](DispatchNodeInfo const& node) {
+                              return node.name == "MainWorldDispatch";
+                          });
+
+        DispatchNodeInfo const& resolve_node =
+            *std::find_if(_state->pixel_cycling_graph.nodes.begin(), _state->pixel_cycling_graph.nodes.end(),
+                          [](DispatchNodeInfo const& node) {
+                              return node.name == "ResolveDispatch";
+                          });
+
+        numtk::vec2u size = { _swapchain.size.width, _swapchain.size.height };
+        _state->pixel_cycling_runtime.BindFramebufferAttachments(
+            &main_world_node, size,
+            { _state->primary_pass_color.view, _state->primary_pass_depth.view }
+            );
+        _state->pixel_cycling_runtime.BindSwapchain(&resolve_node, _swapchain);
+
+        VkDescriptorImageInfo image_info{};
+        image_info.sampler = _state->sampler;
+        image_info.imageView = _state->primary_pass_color.view;
+        image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkWriteDescriptorSet desc_write = _state->pixel_cycling_runtime.BindShaderResource(
+            NodeBindingPoint{
+                .node = &resolve_node,
+                .stage_index = 0,
+                .type = NodeBindingPoint::BindingType_Shader,
+                .shader = ShaderBindingInfo{ 0, 0 }
+            },
+            0,
+            ShaderResourceBinding{
+                .descriptor_count = 1,
+                .images = &image_info
+            });
+        vkUpdateDescriptorSets(_vulkan->device, 1, &desc_write, 0u, nullptr);
+
+        numtk::vec2i screen_size{ (int32_t)_swapchain.size.width, (int32_t)_swapchain.size.height };
+        numtk::vec2i* push_constants =
+            (numtk::vec2i*)_state->pixel_cycling_runtime.BindPushConstants(
+                NodeBindingPoint{
+                    .node = &resolve_node,
+                    .stage_index = 0,
+                    .type = NodeBindingPoint::BindingType_PushConstantRange,
+                    .push_constants = PushConstantsBindingInfo{ 0 }
+                }, 0);
+        *push_constants = screen_size;
+    }
+
+    {
         _state->primary_pass = _vulkan->CreateRenderPass(
             {{ _state->primary_pass_color.format,
                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -2132,7 +2234,9 @@ void RenderResources(void* _pstate,
 
             vkUpdateDescriptorSets(_vulkan->device, 1, &desc_write, 0u, nullptr);
         }
+    }
 
+    {
         vktk::CommandBuffer layout_commands = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
         layout_commands.Begin();
 
@@ -2145,13 +2249,13 @@ void RenderResources(void* _pstate,
                     VK_ACCESS_NONE, VK_ACCESS_NONE,
                     VK_IMAGE_LAYOUT_UNDEFINED,
                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                    //VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                     VK_IMAGE_ASPECT_COLOR_BIT
                 },
                 {
                     _state->primary_pass_depth.image,
                     VK_ACCESS_NONE, VK_ACCESS_NONE,
-                    VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                    VK_IMAGE_LAYOUT_UNDEFINED,
+                    VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
                     VK_IMAGE_ASPECT_DEPTH_BIT
                 }
             });
@@ -2328,20 +2432,24 @@ void Draw(void* _pstate,
 
     if (_state->pixel_cycling_enabled)
     {
-         scissor = numtk::bounds2u{
+        _state->current_runtime = &_state->pixel_cycling_runtime;
+
+        scissor = numtk::bounds2u{
             { ((_swapchain.size.width) / 2) * sample_index.x(),
               ((_swapchain.size.height) / 2) * sample_index.y() },
             { (_swapchain.size.width) / 2,
               (_swapchain.size.height) / 2 },
         };
 
-         viewport = numtk::bounds2f{
+        viewport = numtk::bounds2f{
             { 0.f + float(sample_index.x()) * ((float)scissor.extent.x() - 0.5f),
               0.f + float(sample_index.y()) * ((float)scissor.extent.y() - 0.5f) },
             { (float)scissor.extent.x(),
               (float)scissor.extent.y() }
         };
     }
+    else
+        _state->current_runtime = &_state->forward_runtime;
 
     numtk::bounds2u render_area = scissor;
 
@@ -2439,15 +2547,16 @@ void Draw(void* _pstate,
 
     {
         DispatchNodeInfo const& main_world_node =
-            *std::find_if(_state->dispatch_graph.nodes.begin(), _state->dispatch_graph.nodes.end(),
+            *std::find_if(_state->current_runtime->graph->nodes.begin(),
+                          _state->current_runtime->graph->nodes.end(),
                           [](DispatchNodeInfo const& node) {
                               return node.name == "MainWorldDispatch";
                           });
 
-        _state->dispatch_runtime.BindFramebuffer(
+        _state->current_runtime->BindFramebufferArea(
             &main_world_node,
             FramebufferAreaBinding{
-                _swapchain.index,
+                !_state->pixel_cycling_enabled ? _swapchain.index : 0,
                 VkRect2D{
                     { (int32_t)render_area.min.x(), (int32_t)render_area.min.y() },
                     { render_area.extent.x(), render_area.extent.y() }
@@ -2462,13 +2571,13 @@ void Draw(void* _pstate,
 
             for (uint32_t index = 0; index < 64; ++index)
             {
-                _state->dispatch_runtime.BindGraphicsCommand(
+                _state->current_runtime->BindGraphicsCommand(
                     &main_world_node,
                     0, index,
                     command);
 
                 numtk::vec3f* push_constants =
-                    (numtk::vec3f*)_state->dispatch_runtime.BindPushConstants(
+                    (numtk::vec3f*)_state->current_runtime->BindPushConstants(
                         NodeBindingPoint{
                             .node = &main_world_node,
                             .stage_index = 0,
@@ -2486,13 +2595,13 @@ void Draw(void* _pstate,
             command.vertex_count = 3;
             command.instance_count = 1;
 
-            _state->dispatch_runtime.BindGraphicsCommand(
+            _state->current_runtime->BindGraphicsCommand(
                 &main_world_node,
                 1, 0,
                 command);
 
             SkyboxPushConstants* push_constants =
-                (SkyboxPushConstants*)_state->dispatch_runtime.BindPushConstants(
+                (SkyboxPushConstants*)_state->current_runtime->BindPushConstants(
                     NodeBindingPoint{
                         .node = &main_world_node,
                         .stage_index = 1,
@@ -2503,7 +2612,34 @@ void Draw(void* _pstate,
         }
     }
 
-    _state->dispatch_runtime.Dispatch(command_buffer);
+    if (_state->pixel_cycling_enabled)
+    {
+        DispatchNodeInfo const& resolve_node =
+            *std::find_if(_state->current_runtime->graph->nodes.begin(),
+                          _state->current_runtime->graph->nodes.end(),
+                          [](DispatchNodeInfo const& node) {
+                              return node.name == "ResolveDispatch";
+                          });
+
+        GraphicsCommandBinding command = {};
+        command.command = GraphicsCommandBinding::DispatchCommand_Draw;
+        command.vertex_count = 3;
+        command.instance_count = 1;
+
+        _state->current_runtime->BindGraphicsCommand(
+            &resolve_node,
+            0, 0,
+            command);
+
+        _state->current_runtime->BindFramebufferArea(
+            &resolve_node,
+            FramebufferAreaBinding{
+                _swapchain.index,
+                VkRect2D{ { 0, 0 }, _swapchain.size }
+            });
+    }
+
+    _state->current_runtime->Dispatch(command_buffer);
 
 #else
 
