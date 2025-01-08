@@ -259,8 +259,8 @@ BindingPointSync BindingPointSyncRequirements(GraphEdge::EdgeType type, NodeBind
             DispatchNodeInfo::RenderAttachment const& attachment_info =
                 binding_point.node->graphics.attachments[location.attachment_index];
 
-            if (attachment_info.type >= VK_FORMAT_D16_UNORM
-                && attachment_info.type < VK_FORMAT_BC1_RGB_UNORM_BLOCK)
+            if (attachment_info.format >= VK_FORMAT_D16_UNORM
+                && attachment_info.format < VK_FORMAT_BC1_RGB_UNORM_BLOCK)
             {
                 output.access = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT
                     | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
@@ -313,12 +313,22 @@ struct DispatchGraph
         std::vector<vktk::Context::RenderPassAttachment> output = {};
 
         DispatchNodeInfo const& node = nodes[_node_index];
-        for (DispatchNodeInfo::RenderAttachment const& attachment : node.graphics.attachments)
+        for (uint32_t index = 0u; index < (uint32_t)node.graphics.attachments.size(); ++index)
+        {
+            NodeBindingPoint binding_point = {};
+            binding_point.node = &node;
+            binding_point.stage_index = -1;
+            binding_point.type = NodeBindingPoint::BindingType_Framebuffer;
+            binding_point.framebuffer.attachment_index = index;
+            BindingPointSync sync_reqs = BindingPointSyncRequirements(GraphEdge::EdgeType_Image,
+                                                                      binding_point);
+
             output.push_back(vktk::Context::RenderPassAttachment{
-                attachment.format,
+                node.graphics.attachments[index].format,
                 VK_IMAGE_LAYOUT_UNDEFINED,
-                VK_IMAGE_LAYOUT_UNDEFINED
+                sync_reqs.layout
             });
+        }
 
         for (uint32_t edge_index : (edges_out.count(&node) ? edges_out.at(&node) : std::vector<uint32_t>{}))
         {
@@ -2055,16 +2065,6 @@ void RenderResources(void* _pstate,
         _state->dispatch_runtime.BindSwapchain(&main_world_node,
                                                _swapchain);
     }
-#if 0
-    for (uint32_t node_index = 0; node_index < (uint32_t)_state->dispatch_graph.nodes.size(); ++node_index)
-    {
-        DispatchNodeInfo const& node = _state->dispatch_graph.nodes[node_index];
-        DispatchNodeStatic const& node_static = _state->dispatch_runtime.nodes_static[node_index];
-        _state->dispatch_runtime.nodes_framebuffer.push_back(
-            GenerateDispatchFramebufferRuntime(node, node_static, _vulkan, _swapchain.render_pass)
-            );
-    }
-#endif
 
     {
         _state->primary_pass_color = _vulkan->CreateTexture(

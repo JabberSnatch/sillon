@@ -759,7 +759,17 @@ VkRenderPass Context::CreateRenderPass(std::vector<RenderPassAttachment> const& 
                                    attachment.format >= VK_FORMAT_D16_UNORM
                                    && attachment.format < VK_FORMAT_BC1_RGB_UNORM_BLOCK);
                            });
-    return CreateRenderPass(_attachments, it == _attachments.end() ? nullptr : &*it);
+
+    bool has_depth = (it != _attachments.end());
+    if (has_depth)
+    {
+        std::vector<RenderPassAttachment> copy = _attachments;
+        uint32_t index = std::distance(_attachments.begin(), it);
+        copy.erase(copy.begin()+index);
+        return CreateRenderPass(copy, &*it);
+    }
+    else
+        return CreateRenderPass(_attachments, nullptr);
 }
 
 VkRenderPass Context::CreateRenderPass(std::vector<RenderPassAttachment> const& _attachments,
