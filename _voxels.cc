@@ -996,11 +996,11 @@ struct state_t
     vktk::Texture region_texture;
     RegionData region;
 
-    voxtk::Region<uint8_t> voxel_region{ { 512u, 512u, 512u }, (uint8_t)0 };
     std::vector<uint16_t> section_map{};
-
     uint32_t section_index = 0;
     std::vector<vktk::Texture> section_textures{};
+
+    voxtk::Region<uint8_t> voxel_region{ { 512u, 512u, 512u }, (uint8_t)0 };
 };
 
 struct MatrixBlock
@@ -1027,43 +1027,73 @@ DispatchStageInfo RegionPassDispatchStageInfo()
     output.name = "render_region";
 
     output.shaders = std::vector<DispatchStageInfo::ShaderStage>{
-        {
-            VK_SHADER_STAGE_VERTEX_BIT,
-            {
-                "#version 450",
-                "#define CW_CUBE",
-                #include "shaders/cube_vertices.vert.h"
-                ,
-                #include "shaders/draw_cube.vert.h"
-            }
+        { VK_SHADER_STAGE_VERTEX_BIT,
+          { "#version 450",
+            "#define CW_CUBE",
+            #include "shaders/cube_vertices.vert.h"
+            ,
+            #include "shaders/draw_cube.vert.h"
+          }
         },
-        {
-            VK_SHADER_STAGE_FRAGMENT_BIT,
-            {
-                "#version 450",
-                #include "shaders/voxel_traversal.h"
-                ,
-                #include "shaders/render_region.frag.h"
-            }
+        { VK_SHADER_STAGE_FRAGMENT_BIT,
+          { "#version 450",
+            #include "shaders/voxel_traversal.h"
+            ,
+            #include "shaders/render_region.frag.h"
+          }
         }
     };
 
     output.group_instance_count = 64;
-    output.binding_groups = std::vector<DispatchStageInfo::BindingGroupInfo>{
+    output.binding_groups.push_back(DispatchStageInfo::BindingGroupInfo{
         {
-            {
-                { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                  0, 1 },
-                { VK_SHADER_STAGE_ALL, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                  0, 1 },
-                { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                  VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT, 32*32*32 },
-            }
+            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              0, 1 },
+            { VK_SHADER_STAGE_ALL, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+              0, 1 },
+            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT, 32*32*32 },
         }
-    };
+    });
 
     output.push_constants = std::vector<DispatchStageInfo::PushConstantRange>{
         { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(numtk::vec3f) }
+    };
+
+    output.graphics.state_overrides = std::vector<vktk::Context::StateOverride>{};
+    output.graphics.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    output.graphics.input_layout = std::vector<vktk::Context::VertexInput>{};
+
+    return output;
+}
+
+DispatchStageInfo SparseRegionDispatchStageInfo()
+{
+    DispatchStageInfo output = {};
+    output.name = "sparse_region";
+
+    output.shaders = std::vector<DispatchStageInfo::ShaderStage>{
+        { VK_SHADER_STAGE_VERTEX_BIT,
+          { "#version 450",
+            "#define CW_CUBE",
+            #include "shaders/cube_vertices.vert.h"
+            ,
+            #include "shaders/draw_cube.vert.h"
+          }
+        },
+        { VK_SHADER_STAGE_FRAGMENT_BIT,
+          { "#version 450",
+            #include "shaders/voxel_traversal.h"
+            ,
+            #include "shaders/render_region.frag.h"
+          }
+        }
+    };
+
+    output.group_instance_count = 0;
+    output.binding_groups = std::vector<DispatchStageInfo::BindingGroupInfo>{
+    };
+    output.push_constants = std::vector<DispatchStageInfo::PushConstantRange>{
     };
 
     output.graphics.state_overrides = std::vector<vktk::Context::StateOverride>{};
@@ -1079,19 +1109,15 @@ DispatchStageInfo SkyboxDispatchStageInfo()
     output.name = "skybox";
 
     output.shaders = std::vector<DispatchStageInfo::ShaderStage>{
-        {
-            VK_SHADER_STAGE_VERTEX_BIT,
-            {
-                "#version 450",
-                #include "shaders/full_screen.vert.h"
-            }
+        { VK_SHADER_STAGE_VERTEX_BIT,
+          { "#version 450",
+            #include "shaders/full_screen.vert.h"
+          }
         },
-        {
-            VK_SHADER_STAGE_FRAGMENT_BIT,
-            {
-                "#version 450",
-                #include "shaders/skybox.frag.h"
-            }
+        { VK_SHADER_STAGE_FRAGMENT_BIT,
+          { "#version 450",
+            #include "shaders/skybox.frag.h"
+          }
         }
     };
 
@@ -1114,31 +1140,26 @@ DispatchStageInfo ResolveDispatchStageInfo()
     output.name = "resolve";
 
     output.shaders = std::vector<DispatchStageInfo::ShaderStage>{
-        {
-            VK_SHADER_STAGE_VERTEX_BIT,
-            {
-                "#version 450",
-                #include "shaders/full_screen.vert.h"
-            }
+        { VK_SHADER_STAGE_VERTEX_BIT,
+          { "#version 450",
+            #include "shaders/full_screen.vert.h"
+          }
         },
-        {
-            VK_SHADER_STAGE_FRAGMENT_BIT,
-            {
-                "#version 450",
-                #include "shaders/resolve.frag.h"
-            }
+        { VK_SHADER_STAGE_FRAGMENT_BIT,
+          { "#version 450",
+            #include "shaders/resolve.frag.h"
+          }
         }
     };
 
     output.group_instance_count = 1;
-    output.binding_groups = std::vector<DispatchStageInfo::BindingGroupInfo>{
+    output.binding_groups.push_back(DispatchStageInfo::BindingGroupInfo{
         {
-            {
-                { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                  0, 1 }
-            }
+            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              0, 1 }
         }
-    };
+    });
+
     output.push_constants = std::vector<DispatchStageInfo::PushConstantRange>{
         { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(numtk::vec2i) }
     };
