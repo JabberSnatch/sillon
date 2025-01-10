@@ -507,7 +507,8 @@ struct GraphicsCommandBinding
 struct FramebufferAreaBinding
 {
     uint32_t framebuffer_index;
-    VkRect2D render_area;
+    numtk::bounds2u scissor;
+    numtk::bounds2f viewport;
 };
 
 struct DispatchStageBindings
@@ -616,12 +617,34 @@ struct DispatchRuntime
                 clear_values.push_back(clear_value);
             }
 
+            VkRect2D scissor{
+                VkOffset2D{
+                    (int32_t)bindings.area_binding.scissor.min.x(),
+                    (int32_t)bindings.area_binding.scissor.min.y()
+                },
+                VkExtent2D{
+                    bindings.area_binding.scissor.extent.x(),
+                    bindings.area_binding.scissor.extent.y()
+                }
+            };
+
+            VkViewport viewport{
+                bindings.area_binding.viewport.min.x(),
+                bindings.area_binding.viewport.min.y(),
+                bindings.area_binding.viewport.extent.x(),
+                bindings.area_binding.viewport.extent.y(),
+                0.f, 1.f
+            };
+
+            vkCmdSetViewport(_command_buffer, 0, 1, &viewport);
+            vkCmdSetScissor(_command_buffer, 0, 1, &scissor);
+
             VkRenderPassBeginInfo rp_begin_info{};
             rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
             rp_begin_info.pNext = nullptr;
             rp_begin_info.renderPass = framebuffer.graphics.render_pass;
             rp_begin_info.framebuffer = bindings.framebuffers[bindings.area_binding.framebuffer_index];
-            rp_begin_info.renderArea = bindings.area_binding.render_area;
+            rp_begin_info.renderArea = scissor;
             rp_begin_info.clearValueCount = graphics_info.attachments.size();
             rp_begin_info.clearValueCount = clear_values.size();
             rp_begin_info.pClearValues = clear_values.data();
@@ -2557,10 +2580,8 @@ void Draw(void* _pstate,
             &main_world_node,
             FramebufferAreaBinding{
                 !_state->pixel_cycling_enabled ? _swapchain.index : 0,
-                VkRect2D{
-                    { (int32_t)render_area.min.x(), (int32_t)render_area.min.y() },
-                    { render_area.extent.x(), render_area.extent.y() }
-                }
+                scissor,
+                viewport,
             });
 
         {
@@ -2635,7 +2656,14 @@ void Draw(void* _pstate,
             &resolve_node,
             FramebufferAreaBinding{
                 _swapchain.index,
-                VkRect2D{ { 0, 0 }, _swapchain.size }
+                numtk::bounds2u{
+                    { 0, 0 },
+                    { _swapchain.size.width, _swapchain.size.height }
+                },
+                numtk::bounds2f{
+                    { 0.f, 0.f },
+                    { (float)_swapchain.size.width, (float)_swapchain.size.height }
+                }
             });
     }
 
