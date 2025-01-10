@@ -535,8 +535,50 @@ struct DispatchRuntime
     std::vector<DispatchNodeFramebuffer> nodes_framebuffer;
     std::vector<DispatchNodeBindings> nodes_bindings;
 
-    void GenerateStaticRuntime()
+    void ClearStaticRuntime()
     {
+        for (DispatchNodeStatic& node_runtime : nodes_static)
+        {
+            for (DispatchStageStatic& stage_runtime : node_runtime.stages)
+            {
+                vkDestroyPipelineLayout(vulkan->device, stage_runtime.pipeline_layout, nullptr);
+                stage_runtime.pipeline_layout = VK_NULL_HANDLE;
+
+                for (DispatchStageStatic::BindingGroup& group : stage_runtime.binding_groups)
+                {
+                    vkFreeDescriptorSets(vulkan->device,
+                                         group.pool.pool,
+                                         group.sets.size(),
+                                         group.sets.data());
+                    group.sets.clear();
+
+                    vulkan->DestroyDescriptorPool(group.pool);
+                    group.pool.pool = VK_NULL_HANDLE;
+                    group.pool.layout = VK_NULL_HANDLE;
+                }
+            }
+        }
+    }
+
+    void ClearFramebufferRuntime()
+    {
+        for (DispatchNodeBindings& bindings : nodes_bindings)
+        {
+            for (VkFramebuffer framebuffer : bindings.framebuffers)
+                vkDestroyFramebuffer(vulkan->device, framebuffer, nullptr);
+            bindings.framebuffers.clear();
+        }
+
+        for (DispatchNodeFramebuffer& runtime : nodes_framebuffer)
+        {
+            for (VkPipeline pipeline : runtime.stages)
+                vkDestroyPipeline(vulkan->device, pipeline, nullptr);
+            runtime.stages.clear();
+
+            vkDestroyRenderPass(vulkan->device, runtime.graphics.render_pass, nullptr);
+            runtime.graphics.render_pass = VK_NULL_HANDLE;
+        }
+        nodes_framebuffer.clear();
     }
 
     void GenerateFramebufferRuntime(VkFormat const* _swapchain_format = nullptr)
@@ -2126,6 +2168,7 @@ void RenderResources(void* _pstate,
     state_t* _state = (state_t*)_pstate;
 
     {
+        _state->forward_runtime.ClearFramebufferRuntime();
         _state->forward_runtime.GenerateFramebufferRuntime(&_swapchain.format);
 
         DispatchNodeInfo const& main_world_node =
@@ -2154,6 +2197,7 @@ void RenderResources(void* _pstate,
     }
 
     {
+        _state->pixel_cycling_runtime.ClearFramebufferRuntime();
         _state->pixel_cycling_runtime.GenerateFramebufferRuntime(&_swapchain.format);
 
         DispatchNodeInfo const& main_world_node =
@@ -2794,6 +2838,12 @@ void Shutdown(void* _pstate,
               vktk::Context* _vulkan)
 {
     state_t* _state = (state_t*)_pstate;
+    _state->forward_runtime.ClearFramebufferRuntime();
+    _state->forward_runtime.ClearStaticRuntime();
+
+    _state->pixel_cycling_runtime.ClearFramebufferRuntime();
+    _state->pixel_cycling_runtime.ClearStaticRuntime();
+
     vkDestroyPipeline(_vulkan->device, _state->region_pipeline_full, nullptr);
     _state->region_pipeline_full = VK_NULL_HANDLE;
     vkDestroyPipeline(_vulkan->device, _state->region_pipeline_cycling, nullptr);
