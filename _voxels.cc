@@ -976,25 +976,8 @@ struct state_t
     uint32_t frame_index = 0;
     bool pixel_cycling_enabled = false;
 
-    VkPipelineLayout region_pipeline_layout;
-    vktk::DescriptorPool descriptor_pool;
-    VkDescriptorSet descriptor_set[64];
-    VkPipeline region_pipeline_full;
-    VkPipeline region_pipeline_cycling;
-
-    VkPipelineLayout skybox_pipeline_layout;
-    VkPipeline skybox_pipeline_full;
-    VkPipeline skybox_pipeline_cycling;
-
-    VkRenderPass primary_pass;
     vktk::Texture primary_pass_color;
     vktk::Texture primary_pass_depth;
-    VkFramebuffer primary_pass_framebuffer;
-
-    vktk::DescriptorPool resolve_descriptor_pool;
-    VkDescriptorSet resolve_descriptor_set;
-    VkPipelineLayout resolve_pipeline_layout;
-    VkPipeline resolve_pipeline;
 
     DispatchGraph forward_graph;
     DispatchRuntime forward_runtime;
@@ -1766,103 +1749,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
             );
     }
 
-#if 1
-    {
-        _state->descriptor_pool = _vulkan->CreateDescriptorPool(64u, {
-            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              0, VK_SHADER_STAGE_FRAGMENT_BIT, 1 },
-            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-              0, VK_SHADER_STAGE_ALL, 1 },
-            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT,
-              VK_SHADER_STAGE_FRAGMENT_BIT, 32 * 32 * 32 }
-        });
-
-        uint32_t desc_count = (uint32_t)_state->section_textures.size();
-        VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc = {};
-        desc_count_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
-        desc_count_alloc.pNext = nullptr;
-        desc_count_alloc.descriptorSetCount = 1;
-        desc_count_alloc.pDescriptorCounts = &desc_count;
-
-        VkDescriptorSetAllocateInfo descset_allocate{};
-        descset_allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        descset_allocate.pNext = &desc_count_alloc;
-        descset_allocate.descriptorPool = _state->descriptor_pool.pool;
-        descset_allocate.descriptorSetCount = 1u;
-        descset_allocate.pSetLayouts = &_state->descriptor_pool.layout;
-        for (uint32_t index = 0; index < 64; ++index)
-            CHECKCALL(vkAllocateDescriptorSets, _vulkan->device,
-                      &descset_allocate, &_state->descriptor_set[index]);
-
-        VkPushConstantRange push_constant_range = {};
-        push_constant_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        push_constant_range.offset = 0;
-        push_constant_range.size = sizeof(numtk::vec3f);
-
-        VkPipelineLayoutCreateInfo pipeline_create{};
-        pipeline_create.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        pipeline_create.pNext = nullptr;
-        pipeline_create.flags = 0u;
-        pipeline_create.setLayoutCount = 1u;
-        pipeline_create.pSetLayouts = &_state->descriptor_pool.layout;
-        pipeline_create.pushConstantRangeCount = 1;
-        pipeline_create.pPushConstantRanges = &push_constant_range;
-        CHECKCALL(vkCreatePipelineLayout, _vulkan->device, &pipeline_create, nullptr,
-                  &_state->region_pipeline_layout);
-    }
-#endif
-
-    {
-        VkPushConstantRange push_constant_range = {};
-        push_constant_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        push_constant_range.offset = 0;
-        push_constant_range.size = sizeof(SkyboxPushConstants);
-
-        VkPipelineLayoutCreateInfo pipeline_create{};
-        pipeline_create.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        pipeline_create.pNext = nullptr;
-        pipeline_create.flags = 0u;
-        pipeline_create.setLayoutCount = 0u;
-        pipeline_create.pSetLayouts = nullptr;
-        pipeline_create.pushConstantRangeCount = 1;
-        pipeline_create.pPushConstantRanges = &push_constant_range;
-        CHECKCALL(vkCreatePipelineLayout, _vulkan->device, &pipeline_create, nullptr,
-                  &_state->skybox_pipeline_layout);
-    }
-
-    {
-        _state->resolve_descriptor_pool = _vulkan->CreateDescriptorPool(1u, {
-            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              0, VK_SHADER_STAGE_FRAGMENT_BIT, 1 }
-        });
-
-        VkDescriptorSetAllocateInfo descset_allocate{};
-        descset_allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        descset_allocate.pNext = nullptr;
-        descset_allocate.descriptorPool = _state->resolve_descriptor_pool.pool;
-        descset_allocate.descriptorSetCount = 1u;
-        descset_allocate.pSetLayouts = &_state->resolve_descriptor_pool.layout;
-        CHECKCALL(vkAllocateDescriptorSets, _vulkan->device,
-                  &descset_allocate, &_state->resolve_descriptor_set);
-
-        VkPushConstantRange push_constant_range = {};
-        push_constant_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        push_constant_range.offset = 0;
-        push_constant_range.size = sizeof(numtk::vec2i);
-
-        VkPipelineLayoutCreateInfo pipeline_create{};
-        pipeline_create.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        pipeline_create.pNext = nullptr;
-        pipeline_create.flags = 0u;
-        pipeline_create.setLayoutCount = 1;
-        pipeline_create.pSetLayouts = &_state->resolve_descriptor_pool.layout;
-        pipeline_create.pushConstantRangeCount = 1;
-        pipeline_create.pPushConstantRanges = &push_constant_range;
-        CHECKCALL(vkCreatePipelineLayout, _vulkan->device, &pipeline_create, nullptr,
-                  &_state->resolve_pipeline_layout);
-    }
-
     _state->staging_buffer = _vulkan->CreateBuffer(
         sizeof(MatrixBlock) * 64,
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
@@ -2061,76 +1947,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         }
     }
 
-#if 1
-    for (uint32_t index = 0; index < 64; ++index)
-    {
-        {
-            VkWriteDescriptorSet desc_writes[2];
-            {
-                VkWriteDescriptorSet& desc_write = desc_writes[0];
-                desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                desc_write.pNext = nullptr;
-                desc_write.dstSet = _state->descriptor_set[index];
-                desc_write.dstBinding = 0u;
-                desc_write.dstArrayElement = 0u;
-                desc_write.descriptorCount = 1u;
-                desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-                desc_write.pImageInfo = &region_image_info;
-                desc_write.pBufferInfo = nullptr;
-                desc_write.pTexelBufferView = nullptr;
-            }
-
-            VkDescriptorBufferInfo buffer_info = {};
-            buffer_info.buffer = _state->matrix_buffer;
-            buffer_info.offset = sizeof(MatrixBlock) * index;
-            buffer_info.range = sizeof(MatrixBlock);
-
-            {
-                VkWriteDescriptorSet& desc_write = desc_writes[1];
-                desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                desc_write.pNext = nullptr;
-                desc_write.dstSet = _state->descriptor_set[index];
-                desc_write.dstBinding = 1u;
-                desc_write.dstArrayElement = 0u;
-                desc_write.descriptorCount = 1u;
-                desc_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-                desc_write.pImageInfo = nullptr;
-                desc_write.pBufferInfo = &buffer_info;
-                desc_write.pTexelBufferView = nullptr;
-            }
-
-            vkUpdateDescriptorSets(_vulkan->device, 2u, desc_writes, 0u, nullptr);
-        }
-
-        {
-            std::vector<VkDescriptorImageInfo> section_images_info(_state->section_textures.size());
-            for (uint32_t section_index = 0u;
-                 section_index < _state->section_textures.size();
-                 ++section_index)
-            {
-                VkDescriptorImageInfo& image_info = section_images_info[section_index];
-                image_info.sampler = _state->sampler;
-                image_info.imageView = _state->section_textures[section_index].view;
-                image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            }
-
-            VkWriteDescriptorSet desc_write = {};
-            desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            desc_write.pNext = nullptr;
-            desc_write.dstSet = _state->descriptor_set[index];
-            desc_write.dstBinding = 2u;
-            desc_write.dstArrayElement = 0u;
-            desc_write.descriptorCount = (uint32_t)_state->section_textures.size();
-            desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            desc_write.pImageInfo = section_images_info.data();
-            desc_write.pBufferInfo = nullptr;
-            desc_write.pTexelBufferView = nullptr;
-
-            vkUpdateDescriptorSets(_vulkan->device, 1u, &desc_write, 0u, nullptr);
-        }
-    }
-#endif
-
     vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
     command_buffer.Begin();
 
@@ -2181,6 +1997,7 @@ void RenderResources(void* _pstate,
     }
 
     {
+        _vulkan->DestroyTexture(_state->primary_pass_color);
         _state->primary_pass_color = _vulkan->CreateTexture(
             _swapchain.size.width, _swapchain.size.height, 1,
             VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
@@ -2189,6 +2006,7 @@ void RenderResources(void* _pstate,
             | VK_IMAGE_USAGE_SAMPLED_BIT
         );
 
+        _vulkan->DestroyTexture(_state->primary_pass_depth);
         _state->primary_pass_depth = _vulkan->CreateTexture(
             _swapchain.size.width, _swapchain.size.height, 1,
             VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
@@ -2250,60 +2068,6 @@ void RenderResources(void* _pstate,
     }
 
     {
-        _state->primary_pass = _vulkan->CreateRenderPass(
-            {{ _state->primary_pass_color.format,
-               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-               //VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-               //VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
-               }},
-            { _state->primary_pass_depth.format,
-              VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-              VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL }
-        );
-
-        VkImageView pass_views[2] = {
-            _state->primary_pass_color.view,
-            _state->primary_pass_depth.view
-        };
-
-        VkFramebufferCreateInfo fb_info{};
-        fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-        fb_info.pNext = nullptr;
-        fb_info.flags = 0u;
-        fb_info.renderPass = _state->primary_pass;
-        fb_info.attachmentCount = 2u;
-        fb_info.pAttachments = pass_views;
-        fb_info.width = _swapchain.size.width;
-        fb_info.height = _swapchain.size.height;
-        fb_info.layers = 1;
-
-        CHECKCALL(vkCreateFramebuffer, _vulkan->device, &fb_info, nullptr,
-                  &_state->primary_pass_framebuffer);
-
-        {
-            VkDescriptorImageInfo image_info{};
-            image_info.sampler = _state->sampler;
-            image_info.imageView = _state->primary_pass_color.view;
-            image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-            VkWriteDescriptorSet desc_write = {};
-            desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            desc_write.pNext = nullptr;
-            desc_write.dstSet = _state->resolve_descriptor_set;
-            desc_write.dstBinding = 0u;
-            desc_write.dstArrayElement = 0u;
-            desc_write.descriptorCount = 1u;
-            desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            desc_write.pImageInfo = &image_info;
-            desc_write.pBufferInfo = nullptr;
-            desc_write.pTexelBufferView = nullptr;
-
-            vkUpdateDescriptorSets(_vulkan->device, 1, &desc_write, 0u, nullptr);
-        }
-    }
-
-    {
         vktk::CommandBuffer layout_commands = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
         layout_commands.Begin();
 
@@ -2329,124 +2093,6 @@ void RenderResources(void* _pstate,
 
         layout_commands.End();
         layout_commands.Submit();
-    }
-
-#if 1
-    {
-        {
-            VkShaderModule vmodule =
-                _vulkan->CompileShader_GLSL(VK_SHADER_STAGE_VERTEX_BIT,
-                                            "draw_cube_vshader_cw",
-                                            {
-                                                "#version 450",
-                                                "#define CW_CUBE",
-                                                #include "shaders/cube_vertices.vert.h"
-                                                ,
-                                                #include "shaders/draw_cube.vert.h"
-                                            });
-
-            VkShaderModule fmodule =
-                _vulkan->CompileShader_GLSL(VK_SHADER_STAGE_FRAGMENT_BIT,
-                                            "region_fshader",
-                                            {
-                                                "#version 450",
-                                                #include "shaders/voxel_traversal.h"
-                                                ,
-                                                #include "shaders/render_region.frag.h"
-                                            });
-
-            if (_state->region_pipeline_full != VK_NULL_HANDLE)
-            {
-                vkDestroyPipeline(_vulkan->device, _state->region_pipeline_full, nullptr);
-                vkDestroyPipeline(_vulkan->device, _state->region_pipeline_cycling, nullptr);
-            }
-
-            _state->region_pipeline_full = _vulkan->CreatePipeline(
-                _state->region_pipeline_layout,
-                _swapchain.render_pass,
-                {
-                    { vmodule, VK_SHADER_STAGE_VERTEX_BIT },
-                    { fmodule, VK_SHADER_STAGE_FRAGMENT_BIT }
-                },
-                VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, {});
-
-            _state->region_pipeline_cycling = _vulkan->CreatePipeline(
-                _state->region_pipeline_layout,
-                _state->primary_pass,
-                {
-                    { vmodule, VK_SHADER_STAGE_VERTEX_BIT },
-                    { fmodule, VK_SHADER_STAGE_FRAGMENT_BIT }
-                },
-                VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, {});
-
-            vkDestroyShaderModule(_vulkan->device, vmodule, nullptr);
-            vkDestroyShaderModule(_vulkan->device, fmodule, nullptr);
-        }
-    }
-#endif
-
-    {
-        VkShaderModule skybox_vertex =
-            _vulkan->CompileShader_GLSL(VK_SHADER_STAGE_VERTEX_BIT,
-                                        "skybox_vertex",
-                                        {
-                                            "#version 450",
-                                            #include "shaders/full_screen.vert.h"
-                                        });
-
-        VkShaderModule skybox_fragment =
-            _vulkan->CompileShader_GLSL(VK_SHADER_STAGE_FRAGMENT_BIT,
-                                        "skybox_fragment",
-                                        {
-                                            "#version 450",
-                                            #include "shaders/skybox.frag.h"
-                                        });
-
-        _state->skybox_pipeline_full = _vulkan->CreatePipeline(
-            _state->skybox_pipeline_layout,
-            _swapchain.render_pass,
-            { { skybox_vertex, VK_SHADER_STAGE_VERTEX_BIT },
-              { skybox_fragment, VK_SHADER_STAGE_FRAGMENT_BIT } },
-            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, {});
-
-        _state->skybox_pipeline_cycling = _vulkan->CreatePipeline(
-            _state->skybox_pipeline_layout,
-            _state->primary_pass,
-            { { skybox_vertex, VK_SHADER_STAGE_VERTEX_BIT },
-              { skybox_fragment, VK_SHADER_STAGE_FRAGMENT_BIT } },
-            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, {});
-
-        vkDestroyShaderModule(_vulkan->device, skybox_vertex, nullptr);
-        vkDestroyShaderModule(_vulkan->device, skybox_fragment, nullptr);
-    }
-
-
-    {
-        VkShaderModule resolve_vertex =
-            _vulkan->CompileShader_GLSL(VK_SHADER_STAGE_VERTEX_BIT,
-                                        "resolve_vertex",
-                                        {
-                                            "#version 450",
-                                            #include "shaders/full_screen.vert.h"
-                                        });
-
-        VkShaderModule resolve_fragment =
-            _vulkan->CompileShader_GLSL(VK_SHADER_STAGE_FRAGMENT_BIT,
-                                        "resolve_fragment",
-                                        {
-                                            "#version 450",
-                                            #include "shaders/resolve.frag.h"
-                                        });
-
-        _state->resolve_pipeline = _vulkan->CreatePipeline(
-            _state->resolve_pipeline_layout,
-            _swapchain.render_pass,
-            { { resolve_vertex, VK_SHADER_STAGE_VERTEX_BIT },
-              { resolve_fragment, VK_SHADER_STAGE_FRAGMENT_BIT } },
-            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, {});
-
-        vkDestroyShaderModule(_vulkan->device, resolve_vertex, nullptr);
-        vkDestroyShaderModule(_vulkan->device, resolve_fragment, nullptr);
     }
 }
 
@@ -2569,37 +2215,6 @@ void Draw(void* _pstate,
             { _state->matrix_buffer, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_UNIFORM_READ_BIT }
         });
 
-    {
-        VkViewport vk_viewport{};
-        vk_viewport.x = viewport.min.x();
-        vk_viewport.y = viewport.min.y();
-        vk_viewport.width = (float)viewport.extent.x();
-        vk_viewport.height = (float)viewport.extent.y();
-        vk_viewport.minDepth = 0.f; vk_viewport.maxDepth = 1.f;
-        vkCmdSetViewport(command_buffer, 0, 1, &vk_viewport);
-    }
-
-    {
-        VkRect2D vk_scissor{
-            { (int32_t)scissor.min.x(), (int32_t)scissor.min.y() },
-            { scissor.extent.x(), scissor.extent.y() }
-        };
-        vkCmdSetScissor(command_buffer, 0, 1, &vk_scissor);
-    }
-
-    VkClearValue clear_values[2];
-    {
-        VkClearValue& clear_value = clear_values[0];
-        clear_value.color.float32[0] = 0.f; clear_value.color.float32[1] = 1.f;
-        clear_value.color.float32[2] = 1.f; clear_value.color.float32[3] = 0.f;
-    }
-    {
-        VkClearValue& clear_value = clear_values[1];
-        clear_value.depthStencil.depth = 1.f;
-        clear_value.depthStencil.stencil = 0;
-    }
-
-#if 1
     numtk::vec3f sun_dir{
         std::cos(_state->sun_spherical[1]) * std::cos(_state->sun_spherical[0]),
         std::sin(_state->sun_spherical[1]),
@@ -2713,101 +2328,6 @@ void Draw(void* _pstate,
 
     _state->current_runtime->Dispatch(command_buffer);
 
-#else
-
-    VkRenderPassBeginInfo rp_begin_info{};
-    rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rp_begin_info.pNext = nullptr;
-
-    if (!_state->pixel_cycling_enabled)
-    {
-        rp_begin_info.renderPass = _swapchain.render_pass;
-        rp_begin_info.framebuffer = _swapchain.framebuffers[_swapchain.index];
-    }
-    else
-    {
-        rp_begin_info.renderPass = _state->primary_pass;
-        rp_begin_info.framebuffer = _state->primary_pass_framebuffer;
-    }
-
-    rp_begin_info.renderArea = VkRect2D{
-        { (int32_t)render_area.min.x(), (int32_t)render_area.min.y() },
-        { render_area.extent.x(), render_area.extent.y() }
-    };
-    rp_begin_info.clearValueCount = 2;
-    rp_begin_info.pClearValues = clear_values;
-
-    vkCmdBeginRenderPass(command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-
-    numtk::vec3f sun_dir{
-        std::cos(_state->sun_spherical[1]) * std::cos(_state->sun_spherical[0]),
-        std::sin(_state->sun_spherical[1]),
-        std::cos(_state->sun_spherical[1]) * std::sin(_state->sun_spherical[0])
-    };
-
-    {
-        SkyboxPushConstants push_constants = {};
-        push_constants.projection = numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how);
-        push_constants.view = _state->camera.Matrix();
-        push_constants.position = numtk::vec4f{ 0.f, 20.f, 0.f };
-        push_constants.light_dir = sun_dir;
-
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                          !_state->pixel_cycling_enabled
-                          ? _state->skybox_pipeline_full
-                          : _state->skybox_pipeline_cycling);
-        vkCmdPushConstants(command_buffer, _state->skybox_pipeline_layout,
-                           VK_SHADER_STAGE_FRAGMENT_BIT,
-                           0, sizeof(SkyboxPushConstants), (void*)&push_constants);
-        vkCmdDraw(command_buffer, 3u, 1u, 0u, 0u);
-    }
-
-    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                      !_state->pixel_cycling_enabled
-                      ? _state->region_pipeline_full
-                      : _state->region_pipeline_cycling);
-    for (uint32_t index = 0; index < 64; ++index)
-    {
-        vkCmdBindDescriptorSets(command_buffer,
-                                VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                _state->region_pipeline_layout, 0u,
-                                1u, &_state->descriptor_set[index],
-                                0u, nullptr);
-        vkCmdPushConstants(command_buffer, _state->region_pipeline_layout,
-                           VK_SHADER_STAGE_FRAGMENT_BIT,
-                           0, sizeof(numtk::vec3f), (void*)&sun_dir);
-
-        vkCmdDraw(command_buffer, 36u, 1u, 0u, 0u);
-    }
-
-    vkCmdEndRenderPass(command_buffer);
-
-    if (_state->pixel_cycling_enabled)
-    {
-        command_buffer.BeginRenderPass(_swapchain.size,
-                                       _swapchain.framebuffers[_swapchain.index],
-                                       _swapchain.render_pass,
-                                       { { 0.f, 1.f, 1.f, 0.f }, { 1.f, 0.f, 0.f, 0.f } });
-
-        {
-            numtk::vec2i screen_size{ (int32_t)_swapchain.size.width, (int32_t)_swapchain.size.height };
-
-            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, _state->resolve_pipeline);
-            vkCmdPushConstants(command_buffer, _state->resolve_pipeline_layout,
-                               VK_SHADER_STAGE_FRAGMENT_BIT,
-                               0, sizeof(numtk::vec2i), (void*)&screen_size);
-            vkCmdBindDescriptorSets(command_buffer,
-                                    VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                    _state->resolve_pipeline_layout, 0u,
-                                    1u, &_state->resolve_descriptor_set,
-                                    0u, nullptr);
-            vkCmdDraw(command_buffer, 3u, 1u, 0u, 0u);
-        }
-
-        vkCmdEndRenderPass(command_buffer);
-    }
-#endif
-
     command_buffer.End();
 
     if (_state->last_submit != VK_NULL_HANDLE)
@@ -2844,19 +2364,16 @@ void Shutdown(void* _pstate,
     _state->pixel_cycling_runtime.ClearFramebufferRuntime();
     _state->pixel_cycling_runtime.ClearStaticRuntime();
 
-    vkDestroyPipeline(_vulkan->device, _state->region_pipeline_full, nullptr);
-    _state->region_pipeline_full = VK_NULL_HANDLE;
-    vkDestroyPipeline(_vulkan->device, _state->region_pipeline_cycling, nullptr);
-    _state->region_pipeline_cycling = VK_NULL_HANDLE;
-    vkDestroyPipelineLayout(_vulkan->device, _state->region_pipeline_layout, nullptr);
-    _state->region_pipeline_layout = VK_NULL_HANDLE;
     vkDestroySampler(_vulkan->device, _state->sampler, nullptr);
     _state->sampler = VK_NULL_HANDLE;
 
-    vkFreeDescriptorSets(_vulkan->device, _state->descriptor_pool.pool, 64, _state->descriptor_set);
-    for (uint32_t index = 0; index < 64; ++index)
-        _state->descriptor_set[index] = VK_NULL_HANDLE;
-    _vulkan->DestroyDescriptorPool(_state->descriptor_pool);
+    _vulkan->DestroyTexture(_state->primary_pass_color);
+    _state->primary_pass_color.image = VK_NULL_HANDLE;
+    _state->primary_pass_color.view = VK_NULL_HANDLE;
+
+    _vulkan->DestroyTexture(_state->primary_pass_depth);
+    _state->primary_pass_depth.image = VK_NULL_HANDLE;
+    _state->primary_pass_depth.view = VK_NULL_HANDLE;
 
     _vulkan->DestroyTexture(_state->region_texture);
     _state->region_texture = vktk::Texture{};
