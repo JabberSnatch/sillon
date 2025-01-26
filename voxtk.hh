@@ -204,7 +204,11 @@ struct VoxelMask
         }
     }
 
-    uint64_t Kernel4(numtk::vec3u const& base) const;
+    uint64_t ExtractKernel(numtk::vec3u const& base) const
+    {
+        uint32_t const pack_index = (base.x >> 2u) + ((base.y >> 1u) & ~0x1u) + (base.z & ~0x3u);
+        return bits[pack_index];
+    }
 
     bool Full() const {
         return
@@ -270,7 +274,7 @@ struct Region
         while (current_node)
         {
             numtk::vec3u local_point =
-                (point >> (3 * current_node->depth))//point / (1u << (3 * current_node->depth))
+                (point >> (3 * current_node->depth))
                 - current_node->Begin();
             if (current_node->child_mask.Test(local_point))
             {
@@ -305,8 +309,8 @@ struct Region
         while (current_node)
         {
             numtk::vec3u local_point =
-                (point >> (3*current_node->depth))//(point / (1u<<(3*current_node->depth)))
-                & VoxelMask::kSizeMask;//% VoxelMask::kSize;
+                (point >> (3 * current_node->depth))
+                & VoxelMask::kSizeMask;
             if (current_node->child_mask.Test(local_point))
             {
                 uint16_t point_index = current_node->ChildIndex(local_point);
@@ -337,8 +341,8 @@ struct Region
         while (current_node)
         {
             numtk::vec3u local_point =
-                (point >> (3*current_node->depth))//(point / (1u<<(3*current_node->depth)))
-                & VoxelMask::kSizeMask;//% VoxelMask::kSize;
+                (point >> (3*current_node->depth))
+                & VoxelMask::kSizeMask;
             uint16_t point_index = current_node->ChildIndex(local_point);
 
             if (current_node->depth == 0)
@@ -388,8 +392,8 @@ struct Region
         while (current_node)
         {
             numtk::vec3u local_point =
-                (point >> (3*current_node->depth))//(point / (1u<<(3*current_node->depth)))
-                & VoxelMask::kSizeMask;//% VoxelMask::kSize;
+                (point >> (3*current_node->depth))
+                & VoxelMask::kSizeMask;
             uint16_t point_index = current_node->ChildIndex(local_point);
 
             if (current_node->depth == 0)
@@ -449,10 +453,10 @@ struct Region
             else
             {
                 numtk::vec3u const children_begin =
-                    numtk::max(begin >> (3*(current_node->depth)),/// (1u<<(3*(current_node->depth))),
+                    numtk::max(begin >> (3*(current_node->depth)),
                                current_node->Begin());
                 numtk::vec3u const children_end =
-                    numtk::min((end >> (3*(current_node->depth)))/// (1u<<(3*(current_node->depth))))
+                    numtk::min((end >> (3*(current_node->depth)))
                                + numtk::vec3u::Constant(1u),
                                current_node->End());
 
@@ -502,10 +506,10 @@ struct Region
             else
             {
                 numtk::vec3u const children_begin =
-                    numtk::max(begin >> (3*(current_node->depth)),/// (1u<<(3*(current_node->depth))),
+                    numtk::max(begin >> (3*(current_node->depth)),
                                current_node->Begin());
                 numtk::vec3u const children_end =
-                    numtk::min((end >> (3*(current_node->depth)))/// (1u<<(3*(current_node->depth))))
+                    numtk::min((end >> (3*(current_node->depth)))
                                + numtk::vec3u::Constant(1u),
                                current_node->End());
 
@@ -542,6 +546,43 @@ struct Region
         }
     }
 
+    Node* FindLeaf(numtk::vec3u const& point) const
+    {
+        if (point.x >= size.x
+            || point.y >= size.y
+            || point.z >= size.z)
+            return nullptr;
+
+        if (!root)
+            return nullptr;
+
+        Node* current_node = root;
+        while (current_node)
+        {
+            numtk::vec3u local_point = current_node->LocalPoint(point);
+            if (!current_node->child_mask.Test(local_point))
+                break;
+            else
+            {
+                uint16_t point_index = current_node->ChildIndex(local_point);
+                current_node = current_node->children[point_index];
+            }
+        }
+
+        return current_node;
+    }
+
+    uint64_t ExtractKernel(numtk::vec3u const& base) const
+    {
+        Node const* leaf = FindLeaf(base);
+        if (!leaf->depth)
+            return leaf.data_mask.ExtractKernel(leaf->LocalPoint(base));
+        else
+            return leaf->child_mask.Test(leaf->LocalPoint(base))
+                ? ~(uint64_t)0
+                : 0;
+    }
+
     struct Node {
         Node* parent;
         numtk::vec3u location;
@@ -560,6 +601,10 @@ struct Region
                 && point.x < end.x
                 && point.y < end.y
                 && point.z < end.z;
+        }
+
+        numtk::vec3u LocalPoint(numtk::vec3u const& point) const {
+            return (point >> (3 * depth)) - Begin();
         }
 
         void SetData(numtk::vec3u const& point, DataType const& value) {
