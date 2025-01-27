@@ -966,15 +966,17 @@ DispatchStageInfo SparseRegionDispatchStageInfo()
           { "#version 450",
             #include "shaders/voxel_traversal.h"
             ,
-            #include "shaders/render_region.frag.h"
+            #include "shaders/sparse_region.frag.h"
           }
         }
     };
 
-    output.group_instance_count = 0;
+    output.group_instance_count = 1;
     output.binding_groups.push_back(DispatchStageInfo::BindingGroupInfo{
         {
             { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              0, 1 },
+            { VK_SHADER_STAGE_ALL, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
               0, 1 },
         }
     });
@@ -1639,6 +1641,24 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
                 }
             }
         });
+
+#if 0
+    vktk::CommandBuffer update_commands = vulkan->CreateCommandBuffer(vulkan->present_queue);
+    update_commands.Begin();
+    update_commands.ImageTransitions(
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        {
+            {
+                state->sparse_texture.image,
+                VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_IMAGE_ASPECT_COLOR_BIT
+            }
+        });
+    update_commands.End();
+    update_commands.Submit();
+#endif
 }
 
 void ConstantResources(void* _pstate, vktk::Context* _vulkan)
@@ -1910,6 +1930,35 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         }
     }
 
+    {
+        DispatchNodeInfo const& sparse_region_node =
+            *std::find_if(_state->sparse_graph.nodes.begin(), _state->sparse_graph.nodes.end(),
+                          [](DispatchNodeInfo const& node) {
+                              return node.name == "SparseRegionDispatch";
+                          });
+
+        VkDescriptorImageInfo region_image_info{};
+        region_image_info.sampler = _state->sampler;
+        region_image_info.imageView = _state->sparse_texture.view;
+        region_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        VkWriteDescriptorSet region_binding =
+            _state->sparse_runtime.BindShaderResource(
+                NodeBindingPoint{
+                    .node = &sparse_region_node,
+                    .stage_index = 0,
+                    .type = NodeBindingPoint::BindingType_Shader,
+                    .shader = ShaderBindingInfo{ 0, 0 }
+                },
+                0,
+                ShaderResourceBinding{
+                    .descriptor_count = 1,
+                    .images = &region_image_info
+                });
+
+        vkUpdateDescriptorSets(_vulkan->device, 1, &region_binding, 0u, nullptr);
+    }
+
     vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
     command_buffer.Begin();
 
@@ -2028,6 +2077,19 @@ void RenderResources(void* _pstate,
                     .push_constants = PushConstantsBindingInfo{ 0 }
                 }, 0);
         *push_constants = screen_size;
+    }
+
+    {
+        _state->sparse_runtime.ClearFramebufferRuntime();
+        _state->sparse_runtime.GenerateFramebufferRuntime(&_swapchain.format);
+
+        DispatchNodeInfo const& sparse_region_node =
+            *std::find_if(_state->sparse_graph.nodes.begin(), _state->sparse_graph.nodes.end(),
+                          [](DispatchNodeInfo const& node) {
+                              return node.name == "SparseRegionDispatch";
+                          });
+
+        _state->sparse_runtime.BindSwapchain(&sparse_region_node, _swapchain);
     }
 
     {
@@ -2289,7 +2351,38 @@ void Draw(void* _pstate,
             });
     }
 
-    _state->current_runtime->Dispatch(command_buffer);
+    {
+        DispatchNodeInfo const& sparse_region_node =
+            *std::find_if(_state->sparse_graph.nodes.begin(), _state->sparse_graph.nodes.end(),
+                          [](DispatchNodeInfo const& node) {
+                              return node.name == "SparseRegionDispatch";
+                          });
+
+        GraphicsCommandBinding command = {};
+        command.command = GraphicsCommandBinding::DispatchCommand_Draw;
+        command.vertex_count = 36;
+        command.instance_count = 1;
+
+        _state->sparse_runtime.BindGraphicsCommand(
+            &sparse_region_node, 0, 0, command);
+
+        _state->sparse_runtime.BindFramebufferArea(
+            &sparse_region_node,
+            FramebufferAreaBinding{
+                _swapchain.index,
+                numtk::bounds2u{
+                    { 0, 0 },
+                    { _swapchain.size.width, _swapchain.size.height }
+                },
+                numtk::bounds2f{
+                    { 0.f, 0.f },
+                    { (float)_swapchain.size.width, (float)_swapchain.size.height }
+                }
+            });
+    }
+
+    //_state->current_runtime->Dispatch(command_buffer);
+    _state->sparse_runtime.Dispatch(command_buffer);
 
     command_buffer.End();
 

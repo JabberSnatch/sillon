@@ -1,12 +1,21 @@
 R"(
 
-#extension GL_EXT_nonuiform_qualifier: enable
+#extension GL_EXT_nonuniform_qualifier: enable
 
 layout(location = 0) in vec3 iFS_volume_coords;
 layout(location = 1) in vec3 iFS_camera_position;
 layout(location = 0) out vec4 color;
 
 layout(set = 0, binding = 0) uniform usampler3D region;
+
+layout(std140, set = 0, binding = 1) uniform MatrixBlock {
+    mat4 projection;
+    mat4 view_model;
+    mat4 view;
+    vec2 screen_offset;
+    ivec2 screen_size;
+};
+
 #if 0
 layout(set = 0, binding = 1) uniform usampler3D masks[];
 struct NodePointer
@@ -36,11 +45,11 @@ vec3 RegionTraversal(vec3 org, vec3 dir)
 
             while (ctx.mask.w == 1.0)
             {
-                uvec3 int_coords = floor(ctx.voxel_coords * 4.0);
+                uvec3 int_coords = uvec3(floor(ctx.voxel_coords * 4.0));
                 uint side_index = int_coords.z / 2;
                 uint voxel_index = int_coords.x + int_coords.y * 4 + (int_coords.z%2)*16;
 
-                if (data[side_index] & (1<<voxel_index))
+                if ((data[side_index] & (1<<voxel_index)) != 0)
                     return HitNormalDDAContext(ctx);
 
                 StepDDAContext(ctx);
@@ -83,7 +92,8 @@ void main()
     vec3 org = root_org;
 
     vec3 trav = RegionTraversal(org, dir);
-    color = trav * 0.5 + vec3(0.5);
+    color.xyz = trav * 0.5 + vec3(0.5);
+    color.w = 1.0;
 }
 
 )"
