@@ -357,129 +357,6 @@ struct DispatchGraph
 
         return output;
     }
-
-    std::vector<NodeBindingPoint> Inputs() const
-    {
-        std::vector<NodeBindingPoint> binding_points = {};
-
-        for (DispatchNodeInfo const& node : nodes)
-        {
-            uint32_t stage_index = 0;
-            for (DispatchStageInfo const& stage : node.sequence)
-            {
-                uint32_t group_index = 0;
-                for (DispatchStageInfo::BindingGroupInfo const& binding_group : stage.binding_groups)
-                {
-                    uint32_t binding_index = 0;
-                    for (DispatchStageInfo::BindingInfo const& resource : binding_group.bindings)
-                    {
-                        if (resource.type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-                            || resource.type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
-                            || resource.type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
-                            || resource.type == VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER
-                            || resource.type == VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER
-                            || resource.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
-                            || resource.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                        {
-                            NodeBindingPoint binding_point = {};
-                            binding_point.node = &node;
-                            binding_point.stage_index = stage_index;
-                            binding_point.type = NodeBindingPoint::BindingType_Shader;
-                            binding_point.shader.group_index = group_index;
-                            binding_point.shader.binding_index = binding_index;
-                            binding_points.push_back(binding_point);
-                        }
-
-                        ++binding_index;
-                    }
-
-                    ++group_index;
-                }
-
-                for (DispatchStageInfo::PushConstantRange const& push_constants : stage.push_constants)
-                {
-                    NodeBindingPoint binding_point = {};
-                    binding_point.node = &node;
-                    binding_point.stage_index = stage_index;
-                    binding_point.type = NodeBindingPoint::BindingType_PushConstantRange;
-                    binding_points.push_back(binding_point);
-                }
-
-                if (node.mode == DispatchNodeInfo::DispatchMode_Graphics)
-                {
-                    for (vktk::Context::VertexInput const& vertex_input : stage.graphics.input_layout)
-                    {
-                        NodeBindingPoint binding_point = {};
-                        binding_point.node = &node;
-                        binding_point.stage_index = stage_index;
-                        binding_point.type = NodeBindingPoint::BindingType_VertexInput;
-                        binding_points.push_back(binding_point);
-                    }
-                }
-
-                ++stage_index;
-            }
-        }
-
-        return binding_points;
-    }
-
-    std::vector<NodeBindingPoint> Outputs() const
-    {
-        std::vector<NodeBindingPoint> binding_points = {};
-
-        for (DispatchNodeInfo const& node : nodes)
-        {
-            uint32_t stage_index = 0;
-            for (DispatchStageInfo const& stage : node.sequence)
-            {
-                uint32_t group_index = 0;
-                for (DispatchStageInfo::BindingGroupInfo const& binding_group : stage.binding_groups)
-                {
-                    uint32_t binding_index = 0;
-                    for (DispatchStageInfo::BindingInfo const& resource : binding_group.bindings)
-                    {
-                        if (resource.type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
-                            || resource.type == VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER
-                            || resource.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER)
-                        {
-                            NodeBindingPoint binding_point = {};
-                            binding_point.node = &node;
-                            binding_point.stage_index = stage_index;
-                            binding_point.type = NodeBindingPoint::BindingType_Shader;
-                            binding_point.shader.group_index = group_index;
-                            binding_point.shader.binding_index = binding_index;
-                            binding_points.push_back(binding_point);
-                        }
-
-                        ++binding_index;
-                    }
-
-                    ++group_index;
-                }
-
-                ++stage_index;
-            }
-
-            if (node.mode == DispatchNodeInfo::DispatchMode_Graphics)
-            {
-                uint32_t attachment_index = 0;
-                for (DispatchNodeInfo::RenderAttachment const& attachment : node.graphics.attachments)
-                {
-                    NodeBindingPoint binding_point = {};
-                    binding_point.node = &node;
-                    binding_point.stage_index = -1;
-                    binding_point.type = NodeBindingPoint::BindingType_Framebuffer;
-                    binding_point.framebuffer.attachment_index = attachment_index;
-                    binding_points.push_back(binding_point);
-
-                    ++attachment_index;
-                }
-            }
-        }
-
-        return binding_points;
-    }
 };
 
 struct ShaderResourceBinding
@@ -964,7 +841,7 @@ DispatchNodeStatic GenerateDispatchStaticRuntime(DispatchNodeInfo const& _node,
     return static_runtime;
 }
 
-struct state_t
+struct voxel_state_t
 {
     float time = 0.f;
 
@@ -984,6 +861,9 @@ struct state_t
     DispatchGraph pixel_cycling_graph;
     DispatchRuntime pixel_cycling_runtime;
 
+    DispatchGraph sparse_graph;
+    DispatchRuntime sparse_runtime;
+
     DispatchRuntime* current_runtime;
 
     VkFence last_submit;
@@ -1001,6 +881,7 @@ struct state_t
     std::vector<vktk::Texture> section_textures{};
 
     voxtk::Region<uint8_t> voxel_region{ { 512u, 512u, 512u }, (uint8_t)0 };
+    vktk::Texture sparse_texture;
 };
 
 struct MatrixBlock
@@ -1091,8 +972,13 @@ DispatchStageInfo SparseRegionDispatchStageInfo()
     };
 
     output.group_instance_count = 0;
-    output.binding_groups = std::vector<DispatchStageInfo::BindingGroupInfo>{
-    };
+    output.binding_groups.push_back(DispatchStageInfo::BindingGroupInfo{
+        {
+            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              0, 1 },
+        }
+    });
+
     output.push_constants = std::vector<DispatchStageInfo::PushConstantRange>{
     };
 
@@ -1238,6 +1124,31 @@ DispatchGraph FullFrameRenderGraph()
         }
     });
 
+    return output;
+}
+
+DispatchGraph SparseRegionRenderGraph()
+{
+    DispatchNodeInfo node{};
+    node.name = "SparseRegionDispatch";
+    node.mode = DispatchNodeInfo::DispatchMode_Graphics;
+    node.sequence = std::vector<DispatchStageInfo>{
+        SparseRegionDispatchStageInfo(),
+    };
+
+    node.graphics.attachments = std::vector<DispatchNodeInfo::RenderAttachment>{
+        {
+            VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
+            numtk::vec4f{ 0.f, 1.f, 1.f, 0.f }
+        },
+        {
+            VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
+            DispatchNodeInfo::ClearValue{ 1.f, 0u }
+        }
+    };
+
+    DispatchGraph output = {};
+    output.nodes.push_back(node);
     return output;
 }
 
@@ -1443,7 +1354,7 @@ voxtk::Region<uint8_t> DeserialiseRegion(std::string const& file_path)
     return output;
 }
 
-void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& update_commands,
+void LoadSection(voxel_state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& update_commands,
                  numtk::vec3<int32_t> const& coords)
 {
     std::vector<std::unique_ptr<uint8_t[]>> mip_levels = {};
@@ -1609,7 +1520,7 @@ void LoadSection(state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& upd
         });
 }
 
-void LoadArea(state_t* _state, vktk::Context* _vulkan,
+void LoadArea(voxel_state_t* _state, vktk::Context* _vulkan,
               numtk::vec3<int32_t> const& _begin,
               numtk::vec3<int32_t> const& _end)
 {
@@ -1638,7 +1549,7 @@ void LoadArea(state_t* _state, vktk::Context* _vulkan,
     update_commands.Submit();
 }
 
-void LoadRegion(state_t* state, vktk::Context* vulkan)
+void LoadRegion(voxel_state_t* state, vktk::Context* vulkan)
 {
     systk::Timer scope_time{ "LoadRegion",
         [](std::string const& tag, float time) {
@@ -1707,9 +1618,32 @@ void LoadRegion(state_t* state, vktk::Context* vulkan)
         });
 }
 
+void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
+{
+    state->sparse_texture = vulkan->CreateTexture(
+        128, 128, 128,
+        VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
+        VK_IMAGE_USAGE_SAMPLED_BIT,
+        [state](void* mapped_data) {
+            uint64_t* output = (uint64_t*)mapped_data;
+            for (uint32_t zindex = 0; zindex < 128; ++zindex)
+            {
+                for (uint32_t yindex = 0; yindex < 128; ++yindex)
+                {
+                    for (uint32_t xindex = 0; xindex < 128; ++xindex)
+                    {
+                        numtk::vec3u base{ xindex * 4, yindex * 4, zindex * 4 };
+                        uint64_t bits = state->voxel_region.ExtractKernel(base);
+                        output[xindex + yindex*128 + zindex*128*128] = bits;
+                    }
+                }
+            }
+        });
+}
+
 void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 {
-    state_t* _state = (state_t*)_pstate;
+    voxel_state_t* _state = (voxel_state_t*)_pstate;
 
     _state->forward_graph = FullFrameRenderGraph();
     _state->forward_runtime.vulkan = _vulkan;
@@ -1719,10 +1653,18 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->pixel_cycling_runtime.vulkan = _vulkan;
     _state->pixel_cycling_runtime.graph = &_state->pixel_cycling_graph;
 
+    _state->sparse_graph = SparseRegionRenderGraph();
+    _state->sparse_runtime.vulkan = _vulkan;
+    _state->sparse_runtime.graph = &_state->sparse_graph;
+
     //_state->region = DeserialiseRegion("../r.-1.6.mca");
     _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
     LoadRegion(_state, _vulkan);
     LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
+    LoadRegionSparse(_state, _vulkan);
+
+    for (DispatchNodeInfo const& node : _state->sparse_graph.nodes)
+        _state->sparse_runtime.nodes_static.push_back(GenerateDispatchStaticRuntime(node, _vulkan));
 
     for (DispatchNodeInfo const& node : _state->forward_graph.nodes)
     {
@@ -2002,7 +1944,7 @@ void RenderResources(void* _pstate,
                      vktk::Context* _vulkan,
                      vktk::Swapchain const& _swapchain)
 {
-    state_t* _state = (state_t*)_pstate;
+    voxel_state_t* _state = (voxel_state_t*)_pstate;
 
     {
         _state->forward_runtime.ClearFramebufferRuntime();
@@ -2121,7 +2063,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
             iotk::input_t const* _input,
             iotk::input_t const* _past_input)
 {
-    state_t* _state = (state_t*)_pstate;
+    voxel_state_t* _state = (voxel_state_t*)_pstate;
 
     std::cout << _input->time_delta << std::endl;
     _state->time += _input->time_delta;
@@ -2156,7 +2098,7 @@ void Draw(void* _pstate,
           vktk::Swapchain const& _swapchain,
           VkSemaphore _acquire_semaphore)
 {
-    state_t* _state = (state_t*)_pstate;
+    voxel_state_t* _state = (voxel_state_t*)_pstate;
 
     numtk::vec2u const sample_index{ (_state->frame_index%4)/2, _state->frame_index%2 };
     ++_state->frame_index;
@@ -2378,7 +2320,7 @@ void Draw(void* _pstate,
 void Shutdown(void* _pstate,
               vktk::Context* _vulkan)
 {
-    state_t* _state = (state_t*)_pstate;
+    voxel_state_t* _state = (voxel_state_t*)_pstate;
     _state->forward_runtime.ClearFramebufferRuntime();
     _state->forward_runtime.ClearStaticRuntime();
 
@@ -2579,14 +2521,14 @@ Interface::Interface()
     , Update{}
     , Draw{}
     , Shutdown{}
-    , state{ new state_t{} }
+    , state{ new voxel_state_t{} }
 {
     ReloadPointers();
 }
 
 Interface::~Interface()
 {
-    delete (state_t*)state;
+    delete (voxel_state_t*)state;
 }
 
 void Interface::ReloadPointers()

@@ -576,7 +576,7 @@ struct Region
     {
         Node const* leaf = FindLeaf(base);
         if (!leaf->depth)
-            return leaf.data_mask.ExtractKernel(leaf->LocalPoint(base));
+            return leaf->data_mask.ExtractKernel(leaf->LocalPoint(base));
         else
             return leaf->child_mask.Test(leaf->LocalPoint(base))
                 ? ~(uint64_t)0
@@ -604,7 +604,7 @@ struct Region
         }
 
         numtk::vec3u LocalPoint(numtk::vec3u const& point) const {
-            return (point >> (3 * depth)) - Begin();
+            return (point >> (3 * depth)) & VoxelMask::kSizeMask;
         }
 
         void SetData(numtk::vec3u const& point, DataType const& value) {
