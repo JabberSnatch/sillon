@@ -1937,12 +1937,13 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                               return node.name == "SparseRegionDispatch";
                           });
 
+        std::vector<VkWriteDescriptorSet> bindings = {};
+
         VkDescriptorImageInfo region_image_info{};
         region_image_info.sampler = _state->sampler;
         region_image_info.imageView = _state->sparse_texture.view;
         region_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-        VkWriteDescriptorSet region_binding =
+        bindings.push_back(
             _state->sparse_runtime.BindShaderResource(
                 NodeBindingPoint{
                     .node = &sparse_region_node,
@@ -1954,9 +1955,29 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                 ShaderResourceBinding{
                     .descriptor_count = 1,
                     .images = &region_image_info
-                });
+                })
+            );
 
-        vkUpdateDescriptorSets(_vulkan->device, 1, &region_binding, 0u, nullptr);
+        VkDescriptorBufferInfo buffer_info = {};
+        buffer_info.buffer = _state->matrix_buffer;
+        buffer_info.offset = 0;
+        buffer_info.range = sizeof(MatrixBlock);
+        bindings.push_back(
+            _state->sparse_runtime.BindShaderResource(
+                NodeBindingPoint{
+                    .node = &sparse_region_node,
+                    .stage_index = 0,
+                    .type = NodeBindingPoint::BindingType_Shader,
+                    .shader = ShaderBindingInfo{ 0, 1 }
+                },
+                0,
+                ShaderResourceBinding{
+                    .descriptor_count = 1,
+                    .buffers = &buffer_info
+                })
+            );
+
+        vkUpdateDescriptorSets(_vulkan->device, bindings.size(), bindings.data(), 0u, nullptr);
     }
 
     vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
