@@ -6,8 +6,6 @@ layout(location = 0) in vec3 iFS_volume_coords;
 layout(location = 1) in vec3 iFS_camera_position;
 layout(location = 0) out vec4 color;
 
-layout(set = 0, binding = 0) uniform usampler3D region;
-
 layout(std140, set = 0, binding = 1) uniform MatrixBlock {
     mat4 projection;
     mat4 view_model;
@@ -16,14 +14,18 @@ layout(std140, set = 0, binding = 1) uniform MatrixBlock {
     ivec2 screen_size;
 };
 
-#if 0
-layout(set = 0, binding = 1) uniform usampler3D masks[];
+//layout(set = 0, binding = 1) uniform usampler3D region;
+
+#if 1
+layout(set = 0, binding = 2) uniform usampler3D masks[];
 struct NodePointer
 {
     uint level;
     uint offset;
 };
-NodePointer pointers[];
+layout(std430, set = 0, binding = 0) buffer NodesBlock {
+    NodePointer pointers[];
+};
 #endif
 
 vec3 RegionTraversal(vec3 org, vec3 dir)
@@ -34,14 +36,16 @@ vec3 RegionTraversal(vec3 org, vec3 dir)
     DDAContext ctx = InitDDAContext(org, dir, 128.0);
     while (ctx.mask.w == 1.0)
     {
-        uvec2 data = texture(region, ctx.voxel_coords).xy;
+        uvec2 data = texture(masks[0], ctx.voxel_coords).xy;
 
         if (data != uvec2(0, 0))
         {
+            #if 1
             ctx_cache[0] = SaveDDAContext(ctx);
             org_cache[0] = org;
             org = RecursionPointDDAContext(ctx, org, dir, 128.0);
             ctx = InitDDAContext(org, dir, 4.0);
+            ctx.mask.xyz = ctx_cache[0].mask.xyz;
 
             while (ctx.mask.w == 1.0)
             {
@@ -57,6 +61,10 @@ vec3 RegionTraversal(vec3 org, vec3 dir)
 
             ctx = RestoreDDAContext(ctx_cache[0], dir, 128.0);
             org = org_cache[0];
+
+            #else
+            return HitNormalDDAContext(ctx);
+            #endif
         }
 
         StepDDAContext(ctx);

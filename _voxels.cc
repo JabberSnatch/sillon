@@ -881,7 +881,10 @@ struct voxel_state_t
     std::vector<vktk::Texture> section_textures{};
 
     voxtk::Region<uint8_t> voxel_region{ { 512u, 512u, 512u }, (uint8_t)0 };
+    voxtk::Region<uint8_t> tilemap_region{ { 512u, 512u, 512u, }, (uint8_t)0 };
+    vktk::Texture tilemap;
     vktk::Texture sparse_texture;
+    vktk::Buffer nodes_buffer;
 };
 
 struct MatrixBlock
@@ -974,10 +977,12 @@ DispatchStageInfo SparseRegionDispatchStageInfo()
     output.group_instance_count = 1;
     output.binding_groups.push_back(DispatchStageInfo::BindingGroupInfo{
         {
-            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
               0, 1 },
             { VK_SHADER_STAGE_ALL, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
               0, 1 },
+            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT, 512*512 },
         }
     });
 
@@ -1642,6 +1647,33 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
             }
         });
 
+    for (uint32_t index = 0; index < 64; ++index)
+        state->tilemap_region.Set(numtk::vec3u{ index % 8, index / 8, 0 }, (uint8_t)1);
+
+    state->tilemap = vulkan->CreateTexture(
+        128, 128, 128,
+        VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
+        VK_IMAGE_USAGE_SAMPLED_BIT,
+        [state](void* mapped_data) {
+            uint64_t* output = (uint64_t*)mapped_data;
+            for (uint32_t zindex = 0; zindex < 128; ++zindex)
+            {
+                for (uint32_t yindex = 0; yindex < 128; ++yindex)
+                {
+                    for (uint32_t xindex = 0; xindex < 128; ++xindex)
+                    {
+                        numtk::vec3u base{ xindex * 4, yindex * 4, zindex * 4 };
+                        uint64_t bits = state->tilemap_region.ExtractKernel(base);
+                        output[xindex + yindex*128 + zindex*128*128] = bits;
+                    }
+                }
+            }
+        });
+
+    state->nodes_buffer = vulkan->CreateBuffer(
+        sizeof(float),
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+
 #if 0
     vktk::CommandBuffer update_commands = vulkan->CreateCommandBuffer(vulkan->present_queue);
     update_commands.Begin();
@@ -1684,7 +1716,27 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     LoadRegionSparse(_state, _vulkan);
 
     for (DispatchNodeInfo const& node : _state->sparse_graph.nodes)
-        _state->sparse_runtime.nodes_static.push_back(GenerateDispatchStaticRuntime(node, _vulkan));
+    {
+        std::unordered_map<std::string, void*> pNext_map = {};
+
+        if (node.name == "SparseRegionDispatch")
+        {
+            static uint32_t desc_count = 0u;
+            static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc = {};
+            desc_count = 65;
+            desc_count_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+            desc_count_alloc.pNext = nullptr;
+            desc_count_alloc.descriptorSetCount = 1;
+            desc_count_alloc.pDescriptorCounts = &desc_count;
+            void* pnext_begin = &desc_count_alloc;
+
+            pNext_map.emplace("sparse_region", pnext_begin);
+        }
+
+        _state->sparse_runtime.nodes_static.push_back(
+            GenerateDispatchStaticRuntime(node, _vulkan, pNext_map)
+            );
+    }
 
     for (DispatchNodeInfo const& node : _state->forward_graph.nodes)
     {
@@ -1939,43 +1991,80 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
         std::vector<VkWriteDescriptorSet> bindings = {};
 
-        VkDescriptorImageInfo region_image_info{};
-        region_image_info.sampler = _state->sampler;
-        region_image_info.imageView = _state->sparse_texture.view;
-        region_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        std::vector<VkDescriptorImageInfo> nodes_info{};
+        {
+            VkDescriptorImageInfo info = {};
+            info.sampler = _state->sampler;
+            info.imageView = _state->tilemap.view;
+            info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            nodes_info.push_back(info);
+        }
+
+        for (uint32_t index = 0u; index < 64; ++index)
+        {
+            VkDescriptorImageInfo region_image_info{};
+            region_image_info.sampler = _state->sampler;
+            region_image_info.imageView = _state->sparse_texture.view;
+            region_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            nodes_info.push_back(region_image_info);
+        }
+
         bindings.push_back(
             _state->sparse_runtime.BindShaderResource(
                 NodeBindingPoint{
                     .node = &sparse_region_node,
                     .stage_index = 0,
                     .type = NodeBindingPoint::BindingType_Shader,
-                    .shader = ShaderBindingInfo{ 0, 0 }
+                    .shader = ShaderBindingInfo{ 0, 2 }
                 },
                 0,
                 ShaderResourceBinding{
-                    .descriptor_count = 1,
-                    .images = &region_image_info
+                    .descriptor_count = (uint32_t)nodes_info.size(),
+                    .images = nodes_info.data()
                 })
             );
 
-        VkDescriptorBufferInfo buffer_info = {};
-        buffer_info.buffer = _state->matrix_buffer;
-        buffer_info.offset = 0;
-        buffer_info.range = sizeof(MatrixBlock);
-        bindings.push_back(
-            _state->sparse_runtime.BindShaderResource(
-                NodeBindingPoint{
-                    .node = &sparse_region_node,
-                    .stage_index = 0,
-                    .type = NodeBindingPoint::BindingType_Shader,
-                    .shader = ShaderBindingInfo{ 0, 1 }
-                },
-                0,
-                ShaderResourceBinding{
-                    .descriptor_count = 1,
-                    .buffers = &buffer_info
-                })
-            );
+        {
+            VkDescriptorBufferInfo buffer_info = {};
+            buffer_info.buffer = _state->matrix_buffer;
+            buffer_info.offset = 0;
+            buffer_info.range = sizeof(MatrixBlock);
+            bindings.push_back(
+                _state->sparse_runtime.BindShaderResource(
+                    NodeBindingPoint{
+                        .node = &sparse_region_node,
+                        .stage_index = 0,
+                        .type = NodeBindingPoint::BindingType_Shader,
+                        .shader = ShaderBindingInfo{ 0, 1 }
+                    },
+                    0,
+                    ShaderResourceBinding{
+                        .descriptor_count = 1,
+                        .buffers = &buffer_info
+                    })
+                );
+        }
+
+        {
+            VkDescriptorBufferInfo buffer_info = {};
+            buffer_info.buffer = _state->nodes_buffer;
+            buffer_info.offset = 0;
+            buffer_info.range = sizeof(float);
+            bindings.push_back(
+                _state->sparse_runtime.BindShaderResource(
+                    NodeBindingPoint{
+                        .node = &sparse_region_node,
+                        .stage_index = 0,
+                        .type = NodeBindingPoint::BindingType_Shader,
+                        .shader = ShaderBindingInfo{ 0, 0 }
+                    },
+                    0,
+                    ShaderResourceBinding{
+                        .descriptor_count = 1,
+                        .buffers = &buffer_info
+                    })
+                );
+        }
 
         vkUpdateDescriptorSets(_vulkan->device, bindings.size(), bindings.data(), 0u, nullptr);
     }
