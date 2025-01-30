@@ -2319,14 +2319,14 @@ void Draw(void* _pstate,
     for (uint32_t index = 0; index < 64; ++index)
     {
         matrices[index].projection =
-            numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how);
+            numtk::mat4f::Perspective_VulkanNDC(0.1f, 10000.f, 90.f*numtk::kDegrees, how);
         matrices[index].view = _state->camera.Matrix();
         matrices[index].view_model =
             matrices[index].view
             * numtk::mat4f{
-            2.f, 0.f, 0.f, 0.f,
-            0.f, 2.f, 0.f, 0.f,
-            0.f, 0.f, 2.f, 0.f,
+            200.f, 0.f, 0.f, 0.f,
+            0.f, 200.f, 0.f, 0.f,
+            0.f, 0.f, 200.f, 0.f,
             0.f, 0.f, 0.f, 1.f}
             * numtk::mat4f{
             1.f, 0.f, 0.f, 0.f,
