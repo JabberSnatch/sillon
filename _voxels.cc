@@ -1156,6 +1156,22 @@ DispatchGraph SparseRegionRenderGraph()
 
     DispatchGraph output = {};
     output.nodes.push_back(node);
+
+    output.InsertEdge(GraphEdge{
+        GraphEdge::EdgeType_Image,
+        NodeBindingPoint{
+            .node = &output.nodes[0],
+            .stage_index = (uint32_t)-1,
+            .type = NodeBindingPoint::BindingType_Framebuffer,
+            .framebuffer = { 0 }
+        },
+        NodeBindingPoint{
+            .node = nullptr,
+            .stage_index = (uint32_t)-1,
+            .type = NodeBindingPoint::BindingType_Present
+        }
+    });
+
     return output;
 }
 
@@ -1648,7 +1664,7 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
         });
 
     for (uint32_t index = 0; index < 64; ++index)
-        state->tilemap_region.Set(numtk::vec3u{ index % 8, index / 8, 0 }, (uint8_t)1);
+        state->tilemap_region.Set(numtk::vec3u{ index % 8, 0, index / 8 }, (uint8_t)1);
 
     state->tilemap = vulkan->CreateTexture(
         128, 128, 128,
@@ -2024,47 +2040,43 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                 })
             );
 
-        {
-            VkDescriptorBufferInfo buffer_info = {};
-            buffer_info.buffer = _state->matrix_buffer;
-            buffer_info.offset = 0;
-            buffer_info.range = sizeof(MatrixBlock);
-            bindings.push_back(
-                _state->sparse_runtime.BindShaderResource(
-                    NodeBindingPoint{
-                        .node = &sparse_region_node,
-                        .stage_index = 0,
-                        .type = NodeBindingPoint::BindingType_Shader,
-                        .shader = ShaderBindingInfo{ 0, 1 }
-                    },
-                    0,
-                    ShaderResourceBinding{
-                        .descriptor_count = 1,
-                        .buffers = &buffer_info
-                    })
-                );
-        }
+        VkDescriptorBufferInfo matrix_buffer_info = {};
+        matrix_buffer_info.buffer = _state->matrix_buffer;
+        matrix_buffer_info.offset = 0;
+        matrix_buffer_info.range = sizeof(MatrixBlock);
+        bindings.push_back(
+            _state->sparse_runtime.BindShaderResource(
+                NodeBindingPoint{
+                    .node = &sparse_region_node,
+                    .stage_index = 0,
+                    .type = NodeBindingPoint::BindingType_Shader,
+                    .shader = ShaderBindingInfo{ 0, 1 }
+                },
+                0,
+                ShaderResourceBinding{
+                    .descriptor_count = 1,
+                    .buffers = &matrix_buffer_info
+                })
+            );
 
-        {
-            VkDescriptorBufferInfo buffer_info = {};
-            buffer_info.buffer = _state->nodes_buffer;
-            buffer_info.offset = 0;
-            buffer_info.range = sizeof(float);
-            bindings.push_back(
-                _state->sparse_runtime.BindShaderResource(
-                    NodeBindingPoint{
-                        .node = &sparse_region_node,
-                        .stage_index = 0,
-                        .type = NodeBindingPoint::BindingType_Shader,
-                        .shader = ShaderBindingInfo{ 0, 0 }
-                    },
-                    0,
-                    ShaderResourceBinding{
-                        .descriptor_count = 1,
-                        .buffers = &buffer_info
-                    })
-                );
-        }
+        VkDescriptorBufferInfo nodes_buffer_info = {};
+        nodes_buffer_info.buffer = _state->nodes_buffer;
+        nodes_buffer_info.offset = 0;
+        nodes_buffer_info.range = sizeof(float);
+        bindings.push_back(
+            _state->sparse_runtime.BindShaderResource(
+                NodeBindingPoint{
+                    .node = &sparse_region_node,
+                    .stage_index = 0,
+                    .type = NodeBindingPoint::BindingType_Shader,
+                    .shader = ShaderBindingInfo{ 0, 0 }
+                },
+                0,
+                ShaderResourceBinding{
+                    .descriptor_count = 1,
+                    .buffers = &nodes_buffer_info
+                })
+            );
 
         vkUpdateDescriptorSets(_vulkan->device, bindings.size(), bindings.data(), 0u, nullptr);
     }

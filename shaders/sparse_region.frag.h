@@ -14,19 +14,17 @@ layout(std140, set = 0, binding = 1) uniform MatrixBlock {
     ivec2 screen_size;
 };
 
-//layout(set = 0, binding = 1) uniform usampler3D region;
-
-#if 1
 layout(set = 0, binding = 2) uniform usampler3D masks[];
+
 struct NodePointer
 {
     uint level;
     uint offset;
 };
+
 layout(std430, set = 0, binding = 0) buffer NodesBlock {
     NodePointer pointers[];
 };
-#endif
 
 vec3 RegionTraversal(vec3 org, vec3 dir)
 {
