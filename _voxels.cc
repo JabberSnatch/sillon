@@ -599,7 +599,7 @@ struct DispatchRuntime
                         vkCmdBindDescriptorSets(_command_buffer,
                                                 VK_PIPELINE_BIND_POINT_GRAPHICS,
                                                 runtime.stages[stage_index].pipeline_layout,
-                                                0u,
+                                                group_index,
                                                 1u, &descset,
                                                 0u, nullptr);
                     }
@@ -799,15 +799,24 @@ DispatchNodeStatic GenerateDispatchStaticRuntime(DispatchNodeInfo const& _node,
             descriptor.sets.resize(stage.group_instance_count);
 
             void* pnext_begin = nullptr;
-            void* desc_count_alloc_ptr = vktk::PNextLookup(
-                (VkBaseOutStructure*)stage_pnext,
-                VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO);
-            VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc =
-                desc_count_alloc_ptr
-                ? *(VkDescriptorSetVariableDescriptorCountAllocateInfo const*)desc_count_alloc_ptr
-                : VkDescriptorSetVariableDescriptorCountAllocateInfo{};
-            desc_count_alloc.pNext = nullptr;
-            pnext_begin = desc_count_alloc_ptr ? &desc_count_alloc : nullptr;
+
+            VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc;
+            if (std::find_if(binding_group.bindings.begin(),
+                             binding_group.bindings.end(),
+                             [](DispatchStageInfo::BindingInfo const& binding) {
+                                 return binding.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
+                             })
+                != binding_group.bindings.end())
+            {
+                void* desc_count_alloc_ptr = vktk::PNextLookup(
+                    (VkBaseOutStructure*)stage_pnext,
+                    VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO);
+                desc_count_alloc = desc_count_alloc_ptr
+                    ? *(VkDescriptorSetVariableDescriptorCountAllocateInfo const*)desc_count_alloc_ptr
+                    : VkDescriptorSetVariableDescriptorCountAllocateInfo{};
+                desc_count_alloc.pNext = nullptr;
+                pnext_begin = desc_count_alloc_ptr ? &desc_count_alloc : nullptr;
+            }
 
             VkDescriptorSetAllocateInfo descset_allocate{};
             descset_allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -984,12 +993,18 @@ DispatchStageInfo SparseRegionDispatchStageInfo()
     };
 
     output.group_instance_count = 1;
+
     output.binding_groups.push_back(DispatchStageInfo::BindingGroupInfo{
         {
             { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
               0, 1 },
             { VK_SHADER_STAGE_ALL, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
               0, 1 },
+        }
+    });
+
+    output.binding_groups.push_back(DispatchStageInfo::BindingGroupInfo{
+        {
             { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
               VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT, 512*512 },
         }
@@ -2059,7 +2074,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                     .node = &sparse_region_node,
                     .stage_index = 0,
                     .type = NodeBindingPoint::BindingType_Shader,
-                    .shader = ShaderBindingInfo{ 0, 2 }
+                    .shader = ShaderBindingInfo{ 1, 0 }
                 },
                 0,
                 ShaderResourceBinding{

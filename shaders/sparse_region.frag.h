@@ -14,7 +14,7 @@ layout(std140, set = 0, binding = 1) uniform MatrixBlock {
     ivec2 screen_size;
 };
 
-layout(set = 0, binding = 2) uniform usampler3D masks[];
+layout(set = 1, binding = 0) uniform usampler3D masks[];
 
 struct NodePointer
 {
