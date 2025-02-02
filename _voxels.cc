@@ -13,6 +13,9 @@
 #include <memory>
 #include <unordered_map>
 
+#define TRAVERSAL_V1
+//#define TRAVERSAL_V2
+
 namespace {
 
 struct RegionData
@@ -45,8 +48,14 @@ struct TurntableCamera
 
 struct FlightCamera
 {
+#if defined(TRAVERSAL_V1)
+    numtk::vec2f forward_spherical = { .5f, -0.25f };
+    numtk::vec3f position = { 16.f, -0.3f, 16.f };
+#elif defined(TRAVERSAL_V2)
     numtk::vec2f forward_spherical = { 0.f, 0.f };
     numtk::vec3f position = { 0.f, 512.f, 0.f };
+#endif
+
     float velocity = 5.f;
 
     void Update(iotk::input_t const* _input,
@@ -848,7 +857,7 @@ struct voxel_state_t
     //TurntableCamera camera;
     FlightCamera camera;
 
-    numtk::vec2f sun_spherical = { 0.f, 0.f };
+    numtk::vec2f sun_spherical = { -2.f, 0.25f };
 
     uint32_t frame_index = 0;
     bool pixel_cycling_enabled = false;
@@ -2320,7 +2329,7 @@ void Draw(void* _pstate,
     {
         matrices[index].view = _state->camera.Matrix();
 
-#if 0
+#if defined(TRAVERSAL_V1)
         matrices[index].projection =
             numtk::mat4f::Perspective_VulkanNDC(0.1f, 1000.f, 90.f*numtk::kDegrees, how);
 
@@ -2337,7 +2346,7 @@ void Draw(void* _pstate,
             0.f, 0.f, 1.f, 0.f,
             (float)(index/8) * 2.f, 0.f, (float)(index%8) * 2.f, 1.f};
 
-#else
+#elif defined(TRAVERSAL_V2)
         matrices[index].projection =
             numtk::mat4f::Perspective_VulkanNDC(1.0f, 1000000.f, 90.f*numtk::kDegrees, how);
 
@@ -2524,8 +2533,11 @@ void Draw(void* _pstate,
             });
     }
 
-    //_state->current_runtime->Dispatch(command_buffer);
+#if defined(TRAVERSAL_V1)
+    _state->current_runtime->Dispatch(command_buffer);
+#elif defined(TRAVERSAL_V2)
     _state->sparse_runtime.Dispatch(command_buffer);
+#endif
 
     command_buffer.End();
 
