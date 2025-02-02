@@ -12,9 +12,11 @@ struct DDAContext
     float t;
 };
 
+#define EPSILON 1.0e-5
+
 DDAContext InitDDAContext(vec3 org, vec3 dir, float voxel_count)
 {
-    vec3 voxel_space_org = clamp(org, vec3(0.0), vec3(0.99999)) * voxel_count;
+    vec3 voxel_space_org = clamp(org, vec3(0.0), vec3(1.0-EPSILON)) * voxel_count;
 
     DDAContext ctx;
 
@@ -73,7 +75,7 @@ void StepDDAContext(inout DDAContext ctx)
 
 vec3 RecursionPointDDAContext(DDAContext ctx, vec3 org, vec3 dir, float region_size)
 {
-    return (org+dir*ctx.t) * region_size * (1.0 - 0.00001*ctx.step_sign)
+    return (org+dir*ctx.t) * region_size * (1.0 - EPSILON*ctx.step_sign)
         - floor(ctx.voxel_coords * region_size);
 }
 

@@ -13,8 +13,8 @@
 #include <memory>
 #include <unordered_map>
 
-#define TRAVERSAL_V1
-//#define TRAVERSAL_V2
+//#define TRAVERSAL_V1
+#define TRAVERSAL_V2
 
 namespace {
 
@@ -1652,44 +1652,63 @@ void LoadRegion(voxel_state_t* state, vktk::Context* vulkan)
 
 void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
 {
+#define AREA_SIZE 128
+#define NODE_SIZE 128
+#define SCALE_RATIO AREA_SIZE/NODE_SIZE
+
     state->sparse_texture = vulkan->CreateTexture(
-        128, 128, 128,
+        NODE_SIZE, NODE_SIZE, NODE_SIZE,
         VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
         VK_IMAGE_USAGE_SAMPLED_BIT,
         [state](void* mapped_data) {
             uint64_t* output = (uint64_t*)mapped_data;
-            for (uint32_t zindex = 0; zindex < 128; ++zindex)
+            for (uint32_t zindex = 0; zindex < NODE_SIZE; ++zindex)
             {
-                for (uint32_t yindex = 0; yindex < 128; ++yindex)
+                for (uint32_t yindex = 0; yindex < NODE_SIZE; ++yindex)
                 {
-                    for (uint32_t xindex = 0; xindex < 128; ++xindex)
+                    for (uint32_t xindex = 0; xindex < NODE_SIZE; ++xindex)
                     {
-                        numtk::vec3u base{ xindex * 4, yindex * 4, zindex * 4 };
+                        numtk::vec3u base{
+                            xindex * 4 * SCALE_RATIO,
+                            yindex * 4 * SCALE_RATIO,
+                            zindex * 4 * SCALE_RATIO
+                        };
+
                         uint64_t bits = state->voxel_region.ExtractKernel(base);
-                        output[xindex + yindex*128 + zindex*128*128] = bits;
+                        output[xindex + yindex*NODE_SIZE + zindex*NODE_SIZE*NODE_SIZE] = bits;
                     }
                 }
             }
         });
 
+#if 0
     for (uint32_t index = 0; index < 64; ++index)
         state->tilemap_region.Set(numtk::vec3u{ 252 + (index % 8), 256, 252 + (index / 8) }, (uint8_t)1);
+#else
+    for (uint32_t index = 0; index < 512*512; ++index)
+        state->tilemap_region.Set(numtk::vec3u{ 0 + (index % 512), 0, 0 + (index / 512) }, (uint8_t)1);
+#endif
 
     state->tilemap = vulkan->CreateTexture(
-        128, 128, 128,
+        NODE_SIZE, NODE_SIZE, NODE_SIZE,
         VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
         VK_IMAGE_USAGE_SAMPLED_BIT,
         [state](void* mapped_data) {
             uint64_t* output = (uint64_t*)mapped_data;
-            for (uint32_t zindex = 0; zindex < 128; ++zindex)
+            for (uint32_t zindex = 0; zindex < NODE_SIZE; ++zindex)
             {
-                for (uint32_t yindex = 0; yindex < 128; ++yindex)
+                for (uint32_t yindex = 0; yindex < NODE_SIZE; ++yindex)
                 {
-                    for (uint32_t xindex = 0; xindex < 128; ++xindex)
+                    for (uint32_t xindex = 0; xindex < NODE_SIZE; ++xindex)
                     {
-                        numtk::vec3u base{ xindex * 4, yindex * 4, zindex * 4 };
+                        numtk::vec3u base{
+                            xindex * 4 * SCALE_RATIO,
+                            yindex * 4 * SCALE_RATIO,
+                            zindex * 4 * SCALE_RATIO
+                        };
+
                         uint64_t bits = state->tilemap_region.ExtractKernel(base);
-                        output[xindex + yindex*128 + zindex*128*128] = bits;
+                        output[xindex + yindex*NODE_SIZE + zindex*NODE_SIZE*NODE_SIZE] = bits;
                     }
                 }
             }
