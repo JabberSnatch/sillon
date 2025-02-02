@@ -46,7 +46,7 @@ struct TurntableCamera
 struct FlightCamera
 {
     numtk::vec2f forward_spherical = { 0.f, 0.f };
-    numtk::vec3f position = { 0.f, 0.f, -3.f };
+    numtk::vec3f position = { 0.f, 512.f, 0.f };
     float velocity = 5.f;
 
     void Update(iotk::input_t const* _input,
@@ -1664,7 +1664,7 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
         });
 
     for (uint32_t index = 0; index < 64; ++index)
-        state->tilemap_region.Set(numtk::vec3u{ index % 8, 0, index / 8 }, (uint8_t)1);
+        state->tilemap_region.Set(numtk::vec3u{ 252 + (index % 8), 256, 252 + (index / 8) }, (uint8_t)1);
 
     state->tilemap = vulkan->CreateTexture(
         128, 128, 128,
@@ -2318,21 +2318,42 @@ void Draw(void* _pstate,
     MatrixBlock* matrices = (MatrixBlock*)_state->staging_area;
     for (uint32_t index = 0; index < 64; ++index)
     {
-        matrices[index].projection =
-            numtk::mat4f::Perspective_VulkanNDC(0.1f, 10000.f, 90.f*numtk::kDegrees, how);
         matrices[index].view = _state->camera.Matrix();
+
+#if 0
+        matrices[index].projection =
+            numtk::mat4f::Perspective_VulkanNDC(0.1f, 1000.f, 90.f*numtk::kDegrees, how);
+
         matrices[index].view_model =
             matrices[index].view
             * numtk::mat4f{
-            200.f, 0.f, 0.f, 0.f,
-            0.f, 200.f, 0.f, 0.f,
-            0.f, 0.f, 200.f, 0.f,
+            2.f, 0.f, 0.f, 0.f,
+            0.f, 2.f, 0.f, 0.f,
+            0.f, 0.f, 2.f, 0.f,
             0.f, 0.f, 0.f, 1.f}
             * numtk::mat4f{
             1.f, 0.f, 0.f, 0.f,
             0.f, 1.f, 0.f, 0.f,
             0.f, 0.f, 1.f, 0.f,
             (float)(index/8) * 2.f, 0.f, (float)(index%8) * 2.f, 1.f};
+
+#else
+        matrices[index].projection =
+            numtk::mat4f::Perspective_VulkanNDC(1.0f, 1000000.f, 90.f*numtk::kDegrees, how);
+
+        matrices[index].view_model =
+            matrices[index].view
+            * numtk::mat4f{
+            131072.f, 0.f, 0.f, 0.f,
+            0.f, 131072.f, 0.f, 0.f,
+            0.f, 0.f, 131072.f, 0.f,
+            0.f, 0.f, 0.f, 1.f}
+            * numtk::mat4f{
+            1.f, 0.f, 0.f, 0.f,
+            0.f, 1.f, 0.f, 0.f,
+            0.f, 0.f, 1.f, 0.f,
+            (float)(index/8) * 2.f, 0.f, (float)(index%8) * 2.f, 1.f};
+#endif
 
         matrices[index].screen_offset = viewport.min;
         matrices[index].screen_size = {

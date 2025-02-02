@@ -33,83 +33,101 @@ vec3 RegionTraversal(vec3 org, vec3 dir)
     DDAContextSave ctx_cache[3];
     vec3 org_cache[3];
     uint tex_index[3];
+    uvec2 data_stack[3];
 
     DDAContext ctx = InitDDAContext(org, dir, 128.0);
-    while (ctx.mask.w == 1.0) // entire stack
+    while (true) // entire stack
     {
-        bool found_chunk = false;
-
-        while (ctx.mask.w == 1.0) // current texture
+        if ((depth & 1) == 0)
         {
-            uvec2 data = texture(masks[current_tex], ctx.voxel_coords).xy;
+            bool found_bit = false;
 
-            if (data != uvec2(0, 0))
+            while (ctx.mask.w == 1.0)
             {
-                bool found_bit = false;
+                data_stack[depth] = texture(masks[current_tex], ctx.voxel_coords).xy;
 
-                ctx_cache[depth] = SaveDDAContext(ctx);
-                org_cache[depth] = org;
-                org = RecursionPointDDAContext(ctx, org, dir, 128.0);
-                ctx = InitDDAContext(org, dir, 4.0);
-                ctx.mask.xyz = ctx_cache[depth].mask.xyz;
-                tex_index[depth] = current_tex;
-                ++depth;
-
-                while (ctx.mask.w == 1.0) // current chunk
+                if (data_stack[depth] != uvec2(0, 0))
                 {
-                    uvec3 int_coords = uvec3(floor(ctx.voxel_coords * 4.0));
-                    uint side_index = int_coords.z / 2;
-                    uint voxel_index = int_coords.x + int_coords.y * 4 + (int_coords.z%2)*16;
-
-                    if ((data[side_index] & (1<<voxel_index)) != 0)
-                    {
-                        if (depth == 3)
-                            return HitNormalDDAContext(ctx);
-                        else
-                        {
-                            ctx_cache[depth] = SaveDDAContext(ctx);
-                            org_cache[depth] = org;
-                            org = RecursionPointDDAContext(ctx, org, dir, 4.0);
-                            ctx = InitDDAContext(org, dir, 128.0);
-                            ctx.mask.xyz = ctx_cache[depth].mask.xyz;
-                            tex_index[depth] = current_tex;
-                            ++depth;
-                            current_tex = 1;//int_coords.x + int_coords.z * 8;
-                            found_bit = true;
-                            found_chunk = true;
-                            break;
-                        }
-                    }
-
-                    StepDDAContext(ctx);
+                    found_bit = true;
+                    ctx_cache[depth] = SaveDDAContext(ctx);
+                    org_cache[depth] = org;
+                    org = RecursionPointDDAContext(ctx, org, dir, 128.0);
+                    ctx = InitDDAContext(org, dir, 4.0);
+                    ctx.mask.xyz = ctx_cache[depth].mask.xyz;
+                    tex_index[depth] = current_tex;
+                    data_stack[depth+1] = data_stack[depth];
+                    ++depth;
+                    break;
                 }
 
-                if (!found_bit) // nothing found in chunk
-                {
-                    --depth;
-                    ctx = RestoreDDAContext(ctx_cache[depth], dir, 128.0);
-                    org = org_cache[depth];
-                }
+                StepDDAContext(ctx);
             }
 
-            StepDDAContext(ctx);
+            if (!found_bit)
+            {
+                if (depth > 0)
+                {
+                    --depth;
+                    current_tex = tex_index[depth];
+                    ctx = RestoreDDAContext(ctx_cache[depth], dir, 4.0);
+                    org = org_cache[depth];
+                    StepDDAContext(ctx);
+                }
+                else
+                    break;
+            }
         }
-
-#if 1
-        //if (!found_chunk && depth > 0) // nothing found in texture
-        if (depth > 0)
+        else
         {
-            return vec3(1.0, 0.0, 1.0);
-            --depth;
-            current_tex = tex_index[depth];
-            ctx = RestoreDDAContext(ctx_cache[depth], dir, 4.0);
-            org = org_cache[depth];
-            StepDDAContext(ctx);
+            bool found_chunk = false;
+
+            while (ctx.mask.w == 1.0)
+            {
+                uvec3 int_coords = uvec3(floor(ctx.voxel_coords * 4.0));
+                uint side_index = int_coords.z / 2;
+                uint voxel_index = int_coords.x + int_coords.y * 4 + (int_coords.z%2)*16;
+
+                if ((data_stack[depth][side_index] & (1<<voxel_index)) != 0)
+                {
+                    if (depth != 3)
+                    {
+                        found_chunk = true;
+                        ctx_cache[depth] = SaveDDAContext(ctx);
+                        org_cache[depth] = org;
+                        org = RecursionPointDDAContext(ctx, org, dir, 4.0);
+                        ctx = InitDDAContext(org, dir, 128.0);
+                        ctx.mask.xyz = ctx_cache[depth].mask.xyz;
+
+                        tex_index[depth] = current_tex;
+                        current_tex = 1;//int_coords.x + int_coords.z * 8;
+
+                        ++depth;
+                        break;
+                    }
+                    else
+                        return HitNormalDDAContext(ctx);
+                }
+
+                StepDDAContext(ctx);
+            }
+
+            if (!found_chunk)
+            {
+                if (depth > 0)
+                {
+                    --depth;
+                    current_tex = tex_index[depth];
+                    ctx = RestoreDDAContext(ctx_cache[depth], dir, 128.0);
+                    org = org_cache[depth];
+                    StepDDAContext(ctx);
+                }
+                else
+                    break;
+            }
         }
-#endif
     }
 
-    return vec3(0.0);
+    return HitNormalDDAContext(ctx);
 }
 
 void main()
