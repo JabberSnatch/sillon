@@ -48,7 +48,7 @@ vec3 RegionTraversal(vec3 org, vec3 dir)
 
             while (ctx.mask.w == 1.0)
             {
-                data_stack[depth] = texture(masks[current_tex], ctx.voxel_coords).xy;
+                data_stack[depth] = texture(masks[nonuniformEXT(current_tex)], ctx.voxel_coords).xy;
 
                 if (data_stack[depth] != uvec2(0, 0))
                 {
