@@ -26,9 +26,9 @@ layout(std430, set = 0, binding = 0) buffer NodesBlock {
     NodePointer pointers[];
 };
 
-#define NODE_SIZE 2.0
+#define NODE_SIZE 128.0
 #define CHUNK_SIZE 4.0
-#define STACK_SIZE 1
+#define STACK_SIZE 3
 
 vec3 RegionTraversal0(vec3 org, vec3 dir)
 {
@@ -172,6 +172,7 @@ vec3 RegionTraversal3(vec3 org, vec3 dir)
                 else
                 {
                     output_value = ctx.voxel_coords;
+                    ++depth;
                 }
                 break;
             }
@@ -190,7 +191,7 @@ vec3 RegionTraversal3(vec3 org, vec3 dir)
             else
                 break;
         }
-        else if (depth == 1)
+        else if (depth > 1)
             break;
     }
 
@@ -202,63 +203,119 @@ vec3 RegionTraversal3(vec3 org, vec3 dir)
 
 vec3 RegionTraversal4(vec3 org, vec3 dir)
 {
-    uvec2 data = uvec2(0);
-    uint current_tex = 0;
-
-    int depth = 0;
     DDAContextSave ctx_cache[STACK_SIZE];
     vec3 org_cache[STACK_SIZE];
+    uint tex_index[STACK_SIZE];
+    uvec2 data[STACK_SIZE];
 
     bool hit = false;
     vec3 output_value = vec3(0.0);
 
+    int depth = 0;
     DDAContext ctx = InitDDAContext(org, dir, NODE_SIZE);
+    uint current_tex = 0;
+
     while (true)
     {
-        bool found_chunk = false;
+        hit = false;
 
-        while (ctx.mask.w == 1.0)
+        if ((depth & 1) == 0)
         {
-            data = texture(masks[nonuniformEXT(current_tex)], ctx.voxel_coords).xy;
-            if (data != uvec2(0, 0))
+            while (ctx.mask.w == 1.0)
             {
-                if (depth != STACK_SIZE)
+                data[depth] = texture(masks[nonuniformEXT(current_tex)], ctx.voxel_coords).xy;
+                if (data[depth] != uvec2(0, 0))
                 {
-                    ctx_cache[depth] = SaveDDAContext(ctx);
-                    org_cache[depth] = org;
-                    org = RecursionPointDDAContext(ctx, org, dir, NODE_SIZE);
-                    ctx = InitDDAContext(org, dir, NODE_SIZE);
-                    ctx.mask.xyz = ctx_cache[depth].mask.xyz;
-                    ++depth;
-                    break;
-                }
-                else
-                {
-                    int popcount = bitCount(data[0]) + bitCount(data[1]);
                     hit = true;
-                    found_chunk = true;
-                    output_value = vec3(float(popcount));
+                    if (depth < STACK_SIZE)
+                    {
+                        ctx_cache[depth] = SaveDDAContext(ctx);
+                        org_cache[depth] = org;
+                        tex_index[depth] = current_tex;
+
+                        //current_tex = current_tex;
+
+                        org = RecursionPointDDAContext(ctx, org, dir, NODE_SIZE);
+                        ctx = InitDDAContext(org, dir, CHUNK_SIZE);
+                        ctx.mask.xyz = ctx_cache[depth].mask.xyz;
+                        ++depth;
+                    }
+                    else
+                    {
+                        output_value = ctx.voxel_coords;
+                        ++depth;
+                    }
                     break;
                 }
-            }
-            StepDDAContext(ctx);
-        }
-
-        if (!found_chunk)
-        {
-            if (depth > 0)
-            {
-                --depth;
-                ctx = RestoreDDAContext(ctx_cache[depth], dir, NODE_SIZE);
-                org = org_cache[depth];
                 StepDDAContext(ctx);
             }
-            else
+
+            if (!hit)
+            {
+                if (depth > 0)
+                {
+                    --depth;
+                    ctx = RestoreDDAContext(ctx_cache[depth], dir, CHUNK_SIZE);
+                    org = org_cache[depth];
+                    current_tex = tex_index[depth];
+                    StepDDAContext(ctx);
+                }
+                else
+                    break;
+            }
+            else if (depth > STACK_SIZE)
                 break;
         }
+        else
+        {
+            while (ctx.mask.w == 1.0)
+            {
+                uvec3 int_coords = uvec3(floor(ctx.voxel_coords * CHUNK_SIZE));
+                uint side_index = int_coords.z / 2;
+                uint voxel_index = int_coords.x + int_coords.y * 4 + (int_coords.z%2)*16;
 
-        if (hit)
-            break;
+                if ((data[depth-1][side_index] & (1<<voxel_index)) != 0)
+                {
+                    hit = true;
+                    if (depth < STACK_SIZE)
+                    {
+                        ctx_cache[depth] = SaveDDAContext(ctx);
+                        org_cache[depth] = org;
+                        tex_index[depth] = current_tex;
+
+                        current_tex = 1;
+
+                        org = RecursionPointDDAContext(ctx, org, dir, CHUNK_SIZE);
+                        ctx = InitDDAContext(org, dir, NODE_SIZE);
+                        ctx.mask.xyz = ctx_cache[depth].mask.xyz;
+                        ++depth;
+                    }
+                    else
+                    {
+                        output_value = ctx.voxel_coords;
+                        ++depth;
+                    }
+                    break;
+                }
+                StepDDAContext(ctx);
+            }
+
+            if (!hit)
+            {
+                if (depth > 0)
+                {
+                    --depth;
+                    ctx = RestoreDDAContext(ctx_cache[depth], dir, NODE_SIZE);
+                    org = org_cache[depth];
+                    current_tex = tex_index[depth];
+                    StepDDAContext(ctx);
+                }
+                else
+                    break;
+            }
+            else if (depth > STACK_SIZE)
+                break;
+        }
     }
 
     if (hit)
@@ -276,8 +333,6 @@ vec3 RegionTraversal(vec3 org, vec3 dir)
     uint tex_index[STACK_SIZE];
     uvec2 data_stack[STACK_SIZE];
 
-vec3 output_value = vec3(0.0);
-        bool hit = false;
     DDAContext ctx = InitDDAContext(org, dir, NODE_SIZE);
     while (true) // entire stack
     {
@@ -348,30 +403,11 @@ vec3 output_value = vec3(0.0);
                         break;
                     }
                     else
-{
-
-                int popcount = 0;
-                if (side_index > 0)
-                    popcount = bitCount(data_stack[depth][0]);
-                popcount += bitCount(data_stack[depth][side_index] & ((1<<voxel_index)-1));
-
-                        //return vec3(float(popcount) / 64.0) * (dir * 0.5 + vec3(0.5));
-// * ctx.voxel_coords;
-                        //return vec3(float(popcount));// * (dir * 0.5 + vec3(0.5));
-                        //return vec3(float(popcount)) - vec3(float(popcount)) + vec3(1.0, 0.0, 1.0);
-                        //return ctx.voxel_coords;
-                        //return HitNormalDDAContext(ctx);
-hit = true;
-output_value = vec3(float(popcount)) * (dir * 0.5 + vec3(0.5));
-//return output_value;
-break;
-}
+                        return HitNormalDDAContext(ctx);
                 }
 
                 StepDDAContext(ctx);
             }
-
-if (hit) break;
 
             if (!found_chunk)
             {
@@ -390,9 +426,6 @@ if (hit) break;
         }
     }
 
-if (hit)
-return output_value;
-else
     return HitNormalDDAContext(ctx) * 0.1;
 }
 
@@ -422,7 +455,7 @@ void main()
 
     vec3 org = root_org;
 
-    vec3 trav = RegionTraversal3(org, dir);
+    vec3 trav = RegionTraversal4(org, dir);
     color.xyz = trav;// * 0.5 + vec3(0.5);
     color.w = 1.0;
 }

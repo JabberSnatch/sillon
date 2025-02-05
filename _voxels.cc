@@ -1668,7 +1668,7 @@ void LoadRegion(voxel_state_t* state, vktk::Context* vulkan)
 void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
 {
 #define AREA_SIZE 128
-#define NODE_SIZE 2
+#define NODE_SIZE 128
 #define SCALE_RATIO AREA_SIZE/NODE_SIZE
 
     state->sparse_texture = vulkan->CreateTexture(
