@@ -371,6 +371,8 @@ struct Region
                 current_node->child_mask.Set(local_point, true);
 #endif
             }
+            else
+                return;
         }
     }
 
