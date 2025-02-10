@@ -1679,9 +1679,12 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
     voxtk::Region<uint8_t>* src = &state->voxel_region;
     for (uint32_t lod_size = AREA_SIZE/NODE_SIZE, src_index = 0u;
          lod_size > 1;
-         (lod_size /= NODE_SIZE, src = &lods[src_index], ++src_index))
+         (lod_size /= NODE_SIZE, ++src_index))
     {
         lods.push_back(voxtk::Region<uint8_t>{ { lod_size * 4, lod_size * 4, lod_size * 4 }, (uint8_t)0 });
+
+        if (src_index)
+            src = &lods[src_index-1];
         voxtk::Region<uint8_t>& dst = lods.back();
 
         for (uint32_t dstz = 0; dstz < lod_size * 4; ++dstz)
