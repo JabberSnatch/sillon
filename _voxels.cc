@@ -1681,17 +1681,17 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
          lod_size > 1;
          (lod_size /= NODE_SIZE, ++src_index))
     {
-        lods.push_back(voxtk::Region<uint8_t>{ { lod_size * 4, lod_size * 4, lod_size * 4 }, (uint8_t)0 });
+        lods.push_back(voxtk::Region<uint8_t>{ { lod_size, lod_size, lod_size }, (uint8_t)0 });
 
         if (src_index)
             src = &lods[src_index-1];
         voxtk::Region<uint8_t>& dst = lods.back();
 
-        for (uint32_t dstz = 0; dstz < lod_size * 4; ++dstz)
+        for (uint32_t dstz = 0; dstz < dst.size.z; ++dstz)
         {
-            for (uint32_t dsty = 0; dsty < lod_size * 4; ++dsty)
+            for (uint32_t dsty = 0; dsty < dst.size.y; ++dsty)
             {
-                for (uint32_t dstx = 0; dstx < lod_size * 4; ++dstx)
+                for (uint32_t dstx = 0; dstx < dst.size.x; ++dstx)
                 {
                     numtk::vec3u dstbase{ dstx, dsty, dstz };
 
@@ -1703,7 +1703,8 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
                             {
                                 for (uint32_t srcx = 0; srcx < NODE_SIZE; ++srcx)
                                 {
-                                    numtk::vec3u srcbase = dstbase * NODE_SIZE + numtk::vec3u{ srcx, srcy, srcz };
+                                    numtk::vec3u srcbase = dstbase*NODE_SIZE*4
+                                        + numtk::vec3u{ srcx, srcy, srcz }*4;
                                     uint64_t srcbits = src.ExtractKernel(srcbase);
                                     if (srcbits != 0)
                                         return true;
@@ -1721,7 +1722,6 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
         int i = 0;
     }
 
-#if 0
     uint32_t level0_size = 512u / (NODE_SIZE * 4u);
     uint32_t level0_count = level0_size * level0_size * level0_size;
     for (uint32_t index = 0u; index < level0_count; ++index)
@@ -1761,17 +1761,51 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
         );
     }
 
-    uint32_t level1_size = NODE_SIZE / level0_size;
-    uint32_t level1_count = level1_size * level1_size * level1_size;
-    for (uint32_t index = 0u; index < level1_count; ++index)
+    for (uint32_t level_index = 0u; level_index < lods.size(); ++level_index)
     {
-        numtk::vec3u const base{
-            index % level1_size,
-            (index / level1_size) % level1_size,
-            index / (level1_size*level1_size)
-        };
+        voxtk::Region<uint8_t> const& lod = lods[level_index];
+        numtk::vec3u level_size = lod.size / (NODE_SIZE * 4);
+        uint32_t level_count = level_size.x*level_size.y*level_size.z;
+
+        for (uint32_t index = 0u; index < level_count; ++index)
+        {
+            numtk::vec3u const mask_base{
+                (index % level_size.x) * NODE_SIZE * 4,
+                ((index / level_size.x) % level_size.y) * NODE_SIZE * 4,
+                (index / (level_size.x*level_size.y)) * NODE_SIZE * 4
+            };
+
+            state->masks.push_back(
+                vulkan->CreateTexture(
+                    NODE_SIZE, NODE_SIZE, NODE_SIZE,
+                    VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
+                    VK_IMAGE_USAGE_SAMPLED_BIT,
+                    [&lod, &mask_base](void* mapped_data) {
+                        uint64_t* output = (uint64_t*)mapped_data;
+                        for (uint32_t zindex = 0; zindex < NODE_SIZE; ++zindex)
+                        {
+                            for (uint32_t yindex = 0; yindex < NODE_SIZE; ++yindex)
+                            {
+                                for (uint32_t xindex = 0; xindex < NODE_SIZE; ++xindex)
+                                {
+                                    numtk::vec3u base = numtk::vec3u{
+                                        xindex * 4,
+                                        yindex * 4,
+                                        zindex * 4
+                                    } + mask_base;
+
+                                    uint64_t bits = lod.ExtractKernel(base);
+                                    output[xindex + yindex*NODE_SIZE + zindex*NODE_SIZE*NODE_SIZE] = bits;
+                                }
+                            }
+                        }
+
+                        int i = 0;
+                    }
+                )
+            );
+        }
     }
-#endif
 #endif
 
     state->sparse_texture = vulkan->CreateTexture(
