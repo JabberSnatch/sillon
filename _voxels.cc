@@ -10,6 +10,7 @@
 #include "voxtk.hh"
 #include "dstk.hh"
 
+#include <bit>
 #include <memory>
 #include <unordered_map>
 
@@ -1669,8 +1670,8 @@ void LoadRegion(voxel_state_t* state, vktk::Context* vulkan)
 
 void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
 {
-#define AREA_SIZE 128
-#define NODE_SIZE 32
+#define AREA_SIZE 128u
+#define NODE_SIZE 8u
 #define SCALE_RATIO AREA_SIZE/NODE_SIZE
 
 #if 1
@@ -1764,8 +1765,11 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
     for (uint32_t level_index = 0u; level_index < lods.size(); ++level_index)
     {
         voxtk::Region<uint8_t> const& lod = lods[level_index];
-        numtk::vec3u level_size = lod.size / (NODE_SIZE * 4);
+        numtk::vec3u level_size = numtk::max(lod.size / (NODE_SIZE * 4),
+                                             numtk::vec3u::Constant(1));
         uint32_t level_count = level_size.x*level_size.y*level_size.z;
+
+        uint32_t current_offset = 0;
 
         for (uint32_t index = 0u; index < level_count; ++index)
         {
@@ -1780,13 +1784,13 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
                     NODE_SIZE, NODE_SIZE, NODE_SIZE,
                     VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
                     VK_IMAGE_USAGE_SAMPLED_BIT,
-                    [&lod, &mask_base](void* mapped_data) {
+                    [&lod, &mask_base, &current_offset](void* mapped_data) {
                         uint64_t* output = (uint64_t*)mapped_data;
-                        for (uint32_t zindex = 0; zindex < NODE_SIZE; ++zindex)
+                        for (uint32_t zindex = 0; zindex < std::min(NODE_SIZE, (lod.size.z%NODE_SIZE) / 4u); ++zindex)
                         {
-                            for (uint32_t yindex = 0; yindex < NODE_SIZE; ++yindex)
+                            for (uint32_t yindex = 0; yindex < std::min(NODE_SIZE, (lod.size.y%NODE_SIZE) / 4u); ++yindex)
                             {
-                                for (uint32_t xindex = 0; xindex < NODE_SIZE; ++xindex)
+                                for (uint32_t xindex = 0; xindex < std::min(NODE_SIZE, (lod.size.x%NODE_SIZE) / 4u); ++xindex)
                                 {
                                     numtk::vec3u base = numtk::vec3u{
                                         xindex * 4,
@@ -1796,6 +1800,7 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
 
                                     uint64_t bits = lod.ExtractKernel(base);
                                     output[xindex + yindex*NODE_SIZE + zindex*NODE_SIZE*NODE_SIZE] = bits;
+                                    current_offset += std::popcount(bits);
                                 }
                             }
                         }
