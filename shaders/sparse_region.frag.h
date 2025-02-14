@@ -26,7 +26,7 @@ layout(std430, set = 0, binding = 0) buffer NodesBlock {
     NodePointer pointers[];
 };
 
-#define NODE_SIZE 8.0
+#define NODE_SIZE 4.0
 #define CHUNK_SIZE 4.0
 #define STACK_SIZE 1
 

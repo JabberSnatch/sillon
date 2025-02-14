@@ -1671,7 +1671,7 @@ void LoadRegion(voxel_state_t* state, vktk::Context* vulkan)
 void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
 {
 #define AREA_SIZE 128u
-#define NODE_SIZE 8u
+#define NODE_SIZE 4u
 #define SCALE_RATIO AREA_SIZE/NODE_SIZE
 
 #if 1
@@ -1680,7 +1680,7 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
     voxtk::Region<uint8_t>* src = &state->voxel_region;
     for (uint32_t lod_size = AREA_SIZE/NODE_SIZE, src_index = 0u;
          lod_size > 1;
-         (lod_size /= NODE_SIZE, ++src_index))
+         (lod_size /= NODE_SIZE*4, ++src_index))
     {
         lods.push_back(voxtk::Region<uint8_t>{ { lod_size, lod_size, lod_size }, (uint8_t)0 });
 
@@ -1786,11 +1786,17 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
                     VK_IMAGE_USAGE_SAMPLED_BIT,
                     [&lod, &mask_base, &current_offset](void* mapped_data) {
                         uint64_t* output = (uint64_t*)mapped_data;
-                        for (uint32_t zindex = 0; zindex < std::min(NODE_SIZE, (lod.size.z%NODE_SIZE) / 4u); ++zindex)
+                        for (uint32_t zindex = 0;
+                             zindex < std::min(NODE_SIZE, std::max((lod.size.z-mask_base.z)/4u, 1u));
+                             ++zindex)
                         {
-                            for (uint32_t yindex = 0; yindex < std::min(NODE_SIZE, (lod.size.y%NODE_SIZE) / 4u); ++yindex)
+                            for (uint32_t yindex = 0;
+                                 yindex < std::min(NODE_SIZE, std::max((lod.size.y-mask_base.y)/4u, 1u));
+                                 ++yindex)
                             {
-                                for (uint32_t xindex = 0; xindex < std::min(NODE_SIZE, (lod.size.x%NODE_SIZE) / 4u); ++xindex)
+                                for (uint32_t xindex = 0;
+                                     xindex < std::min(NODE_SIZE, std::max((lod.size.x-mask_base.x)/4u, 1u));
+                                     ++xindex)
                                 {
                                     numtk::vec3u base = numtk::vec3u{
                                         xindex * 4,
