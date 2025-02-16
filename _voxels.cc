@@ -1723,22 +1723,118 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
         int i = 0;
     }
 
-    uint32_t level0_size = 512u / (NODE_SIZE * 4u);
-    uint32_t level0_count = level0_size * level0_size * level0_size;
-    for (uint32_t index = 0u; index < level0_count; ++index)
+    uint32_t current_offset = 1u;
+    for (uint32_t level_index = 0u; level_index < lods.size(); ++level_index)
     {
-        numtk::vec3u const mask_base{
-            (index % level0_size) * NODE_SIZE * 4u,
-            ((index / level0_size) % level0_size) * NODE_SIZE * 4u,
-            (index / (level0_size*level0_size)) * NODE_SIZE * 4u
+        voxtk::Region<uint8_t> const& lod = lods[lods.size()-1 - level_index];
+        numtk::vec3u nextlod_size = numtk::max(lod.size / (NODE_SIZE * 4),
+                                             numtk::vec3u::Constant(1));
+        uint32_t nextlod_count = nextlod_size.x*nextlod_size.y*nextlod_size.z;
+
+        for (uint32_t index = 0u; index < nextlod_count; ++index)
+        {
+            std::vector<uint32_t> level_offsets = { current_offset };
+
+            numtk::vec3u const nextlod_base {
+                (index % nextlod_size.x),
+                ((index / nextlod_size.x) % nextlod_size.y),
+                (index / (nextlod_size.x*nextlod_size.y))
+            };
+
+            if (level_index != 0u && !lods[lods.size() - level_index].Test(nextlod_base))
+                continue;
+
+            numtk::vec3u const lod_base = nextlod_base * NODE_SIZE*4;
+
+            numtk::vec3u const valid_range{
+                std::min(NODE_SIZE, std::max((lod.size.x-lod_base.x)/4u, 1u)),
+                std::min(NODE_SIZE, std::max((lod.size.y-lod_base.y)/4u, 1u)),
+                std::min(NODE_SIZE, std::max((lod.size.z-lod_base.z)/4u, 1u))
+            };
+
+            state->masks.push_back(
+                vulkan->CreateTexture(
+                    NODE_SIZE, NODE_SIZE, NODE_SIZE,
+                    VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
+                    VK_IMAGE_USAGE_SAMPLED_BIT,
+                    [&lod, &lod_base, &level_offsets, &valid_range](void* mapped_data) {
+                        uint64_t* output = (uint64_t*)mapped_data;
+                        for (uint32_t zindex = 0; zindex < valid_range.z; ++zindex)
+                        {
+                            for (uint32_t yindex = 0; yindex < valid_range.y; ++yindex)
+                            {
+                                for (uint32_t xindex = 0; xindex < valid_range.x; ++xindex)
+                                {
+                                    numtk::vec3u base = numtk::vec3u{
+                                        xindex * 4,
+                                        yindex * 4,
+                                        zindex * 4
+                                    } + lod_base;
+
+                                    uint64_t bits = lod.ExtractKernel(base);
+                                    output[xindex + yindex*NODE_SIZE + zindex*NODE_SIZE*NODE_SIZE] = bits;
+                                    level_offsets.push_back(level_offsets.back() + std::popcount(bits));
+                                }
+
+                                if (valid_range.x != NODE_SIZE)
+                                    level_offsets.resize(level_offsets.size()
+                                                         + (NODE_SIZE-valid_range.x),
+                                                         level_offsets.back());
+                            }
+
+                            if (valid_range.y != NODE_SIZE)
+                                level_offsets.resize(level_offsets.size()
+                                                     + (NODE_SIZE-valid_range.y)*NODE_SIZE,
+                                                     level_offsets.back());
+                        }
+
+                        if (valid_range.z != NODE_SIZE)
+                            level_offsets.resize(level_offsets.size()
+                                                 + (NODE_SIZE-valid_range.z)*NODE_SIZE*NODE_SIZE,
+                                                 level_offsets.back());
+
+                        int i = 0;
+                    }
+                )
+            );
+
+            state->offsets.push_back(
+                vulkan->CreateTexture(
+                    NODE_SIZE, NODE_SIZE, NODE_SIZE,
+                    VK_IMAGE_TYPE_3D, VK_FORMAT_R32_UINT,
+                    VK_IMAGE_USAGE_SAMPLED_BIT,
+                    [&level_offsets, &valid_range](void* mapped_data) {
+                        uint32_t* output = (uint32_t*)mapped_data;
+                        std::memcpy(output, level_offsets.data(), NODE_SIZE*NODE_SIZE*NODE_SIZE*sizeof(uint32_t));
+                    }
+                )
+            );
+
+            current_offset = level_offsets.back();
+        }
+    }
+
+    uint32_t level1_size = 512u / (NODE_SIZE * 4u);
+    uint32_t level1_count = level1_size * level1_size * level1_size;
+    for (uint32_t index = 0u; index < level1_count; ++index)
+    {
+        numtk::vec3u const lod1_base{
+            (index % level1_size),
+            ((index / level1_size) % level1_size),
+            (index / (level1_size*level1_size))
         };
+
+        if (!lods[0].Test(lod1_base))
+            continue;
+
+        numtk::vec3u const lod0_base = lod1_base * NODE_SIZE*4u;
 
         state->masks.push_back(
             vulkan->CreateTexture(
                 NODE_SIZE, NODE_SIZE, NODE_SIZE,
                 VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
                 VK_IMAGE_USAGE_SAMPLED_BIT,
-                [state, &mask_base](void* mapped_data) {
+                [state, &lod0_base](void* mapped_data) {
                     uint64_t* output = (uint64_t*)mapped_data;
                     for (uint32_t zindex = 0; zindex < NODE_SIZE; ++zindex)
                     {
@@ -1750,7 +1846,7 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
                                     xindex * 4,
                                     yindex * 4,
                                     zindex * 4
-                                } + mask_base;
+                                } + lod0_base;
 
                                 uint64_t bits = state->voxel_region.ExtractKernel(base);
                                 output[xindex + yindex*NODE_SIZE + zindex*NODE_SIZE*NODE_SIZE] = bits;
@@ -1762,61 +1858,6 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
         );
     }
 
-    for (uint32_t level_index = 0u; level_index < lods.size(); ++level_index)
-    {
-        voxtk::Region<uint8_t> const& lod = lods[level_index];
-        numtk::vec3u level_size = numtk::max(lod.size / (NODE_SIZE * 4),
-                                             numtk::vec3u::Constant(1));
-        uint32_t level_count = level_size.x*level_size.y*level_size.z;
-
-        uint32_t current_offset = 0;
-
-        for (uint32_t index = 0u; index < level_count; ++index)
-        {
-            numtk::vec3u const mask_base{
-                (index % level_size.x) * NODE_SIZE * 4,
-                ((index / level_size.x) % level_size.y) * NODE_SIZE * 4,
-                (index / (level_size.x*level_size.y)) * NODE_SIZE * 4
-            };
-
-            state->masks.push_back(
-                vulkan->CreateTexture(
-                    NODE_SIZE, NODE_SIZE, NODE_SIZE,
-                    VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
-                    VK_IMAGE_USAGE_SAMPLED_BIT,
-                    [&lod, &mask_base, &current_offset](void* mapped_data) {
-                        uint64_t* output = (uint64_t*)mapped_data;
-                        for (uint32_t zindex = 0;
-                             zindex < std::min(NODE_SIZE, std::max((lod.size.z-mask_base.z)/4u, 1u));
-                             ++zindex)
-                        {
-                            for (uint32_t yindex = 0;
-                                 yindex < std::min(NODE_SIZE, std::max((lod.size.y-mask_base.y)/4u, 1u));
-                                 ++yindex)
-                            {
-                                for (uint32_t xindex = 0;
-                                     xindex < std::min(NODE_SIZE, std::max((lod.size.x-mask_base.x)/4u, 1u));
-                                     ++xindex)
-                                {
-                                    numtk::vec3u base = numtk::vec3u{
-                                        xindex * 4,
-                                        yindex * 4,
-                                        zindex * 4
-                                    } + mask_base;
-
-                                    uint64_t bits = lod.ExtractKernel(base);
-                                    output[xindex + yindex*NODE_SIZE + zindex*NODE_SIZE*NODE_SIZE] = bits;
-                                    current_offset += std::popcount(bits);
-                                }
-                            }
-                        }
-
-                        int i = 0;
-                    }
-                )
-            );
-        }
-    }
 #endif
 
     state->sparse_texture = vulkan->CreateTexture(
