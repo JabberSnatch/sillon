@@ -16,6 +16,9 @@ layout(std140, set = 0, binding = 1) uniform MatrixBlock {
 
 layout(set = 1, binding = 0) uniform usampler3D masks[];
 
+layout(set = 2, binding = 0) uniform usampler3D offsets[];
+
+#if 0
 struct NodePointer
 {
     uint level;
@@ -25,10 +28,11 @@ struct NodePointer
 layout(std430, set = 0, binding = 0) buffer NodesBlock {
     NodePointer pointers[];
 };
+#endif
 
 #define NODE_SIZE 4.0
 #define CHUNK_SIZE 4.0
-#define STACK_SIZE 1
+#define STACK_SIZE 5
 
 vec3 RegionTraversal0(vec3 org, vec3 dir)
 {
@@ -283,7 +287,9 @@ vec3 RegionTraversal4(vec3 org, vec3 dir)
                         org_cache[depth] = org;
                         tex_index[depth] = current_tex;
 
-                        current_tex = 1;
+                        current_tex = texture(offsets[nonuniformEXT(current_tex)],
+                                              ctx_cache[depth-1].voxel_coords).x;
+                        //current_tex = 1;
 
                         org = RecursionPointDDAContext(ctx, org, dir, CHUNK_SIZE);
                         ctx = InitDDAContext(org, dir, NODE_SIZE);

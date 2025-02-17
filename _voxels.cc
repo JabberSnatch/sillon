@@ -765,9 +765,15 @@ struct DispatchRuntime
     }
 };
 
+struct PNextEntry {
+    uint32_t binding_group_index;
+    void* pnext;
+};
+using PNextMap = std::unordered_map<std::string, std::vector<PNextEntry>>;
+
 DispatchNodeStatic GenerateDispatchStaticRuntime(DispatchNodeInfo const& _node,
                                                  vktk::Context* _vulkan,
-                                                 std::unordered_map<std::string, void*> _pNext_map = {})
+                                                 PNextMap const& _pNext_map = {})
 {
     DispatchNodeStatic static_runtime = {};
 
@@ -777,12 +783,20 @@ DispatchNodeStatic GenerateDispatchStaticRuntime(DispatchNodeInfo const& _node,
         std::vector<VkDescriptorSetLayout> set_layouts = {};
         std::vector<VkPushConstantRange> push_constant_ranges = {};
 
+#if 0
         void* stage_pnext = nullptr;
         if (_pNext_map.count(stage.name))
             stage_pnext = _pNext_map[stage.name];
+#endif
+        std::vector<PNextEntry> stage_pnexts = {};
+        if (_pNext_map.count(stage.name))
+            stage_pnexts = _pNext_map.at(stage.name);
 
-        for (DispatchStageInfo::BindingGroupInfo const& binding_group : stage.binding_groups)
+        //for (DispatchStageInfo::BindingGroupInfo const& binding_group : stage.binding_groups)
+        for (uint32_t group_index = 0u; group_index < (uint32_t)stage.binding_groups.size(); ++group_index)
         {
+            DispatchStageInfo::BindingGroupInfo const& binding_group = stage.binding_groups[group_index];
+
             DispatchStageStatic::BindingGroup descriptor = {};
             std::vector<vktk::Context::DescriptorSetBindingPoint> bindings = {};
 
@@ -802,6 +816,7 @@ DispatchNodeStatic GenerateDispatchStaticRuntime(DispatchNodeInfo const& _node,
             void* pnext_begin = nullptr;
 
             VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc;
+#if 0
             if (std::find_if(binding_group.bindings.begin(),
                              binding_group.bindings.end(),
                              [](DispatchStageInfo::BindingInfo const& binding) {
@@ -817,6 +832,26 @@ DispatchNodeStatic GenerateDispatchStaticRuntime(DispatchNodeInfo const& _node,
                     : VkDescriptorSetVariableDescriptorCountAllocateInfo{};
                 desc_count_alloc.pNext = nullptr;
                 pnext_begin = desc_count_alloc_ptr ? &desc_count_alloc : nullptr;
+            }
+#endif
+
+            {
+                auto group_pnext_it = std::find_if(
+                    stage_pnexts.begin(), stage_pnexts.end(),
+                    [group_index](PNextEntry const& entry) {
+                        return entry.binding_group_index == group_index;
+                    });
+                if (group_pnext_it != stage_pnexts.end())
+                {
+                    void* desc_count_alloc_ptr = vktk::PNextLookup(
+                        (VkBaseOutStructure*)group_pnext_it->pnext,
+                        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO);
+                    desc_count_alloc = desc_count_alloc_ptr
+                        ? *(VkDescriptorSetVariableDescriptorCountAllocateInfo const*)desc_count_alloc_ptr
+                        : VkDescriptorSetVariableDescriptorCountAllocateInfo{};
+                    desc_count_alloc.pNext = nullptr;
+                    pnext_begin = desc_count_alloc_ptr ? &desc_count_alloc : nullptr;
+                }
             }
 
             VkDescriptorSetAllocateInfo descset_allocate{};
@@ -1012,6 +1047,15 @@ DispatchStageInfo SparseRegionDispatchStageInfo()
               VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT, 512*512 },
         }
     });
+
+#if 1
+    output.binding_groups.push_back(DispatchStageInfo::BindingGroupInfo{
+        {
+            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT, 512*512 },
+        }
+    });
+#endif
 
     output.push_constants = std::vector<DispatchStageInfo::PushConstantRange>{
     };
@@ -1965,20 +2009,34 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
     for (DispatchNodeInfo const& node : _state->sparse_graph.nodes)
     {
-        std::unordered_map<std::string, void*> pNext_map = {};
+        PNextMap pNext_map = {};
 
         if (node.name == "SparseRegionDispatch")
         {
-            static uint32_t desc_count = 0u;
-            static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc = {};
-            desc_count = 65;
-            desc_count_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
-            desc_count_alloc.pNext = nullptr;
-            desc_count_alloc.descriptorSetCount = 1;
-            desc_count_alloc.pDescriptorCounts = &desc_count;
-            void* pnext_begin = &desc_count_alloc;
+            static uint32_t desc_counts[2] = { 0u, 0u };
+            desc_counts[0] = (uint32_t)_state->masks.size();//65;
+            desc_counts[1] = (uint32_t)_state->offsets.size();//65;
 
-            pNext_map.emplace("sparse_region", pnext_begin);
+            static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_allocs[2];
+            desc_count_allocs[0] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
+            desc_count_allocs[1] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
+
+            desc_count_allocs[0].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+            desc_count_allocs[0].pNext = nullptr;
+            desc_count_allocs[0].descriptorSetCount = 1;
+            desc_count_allocs[0].pDescriptorCounts = &desc_counts[0];
+
+            desc_count_allocs[1].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+            desc_count_allocs[1].pNext = nullptr;
+            desc_count_allocs[1].descriptorSetCount = 1;
+            desc_count_allocs[1].pDescriptorCounts = &desc_counts[1];
+
+            //void* pnext_begin = &desc_count_alloc;
+
+            pNext_map.emplace("sparse_region", std::vector<PNextEntry>{
+                PNextEntry{ 1, (void*)&desc_count_allocs[0] },
+                PNextEntry{ 2, (void*)&desc_count_allocs[1] }
+            });
         }
 
         _state->sparse_runtime.nodes_static.push_back(
@@ -1988,7 +2046,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
     for (DispatchNodeInfo const& node : _state->forward_graph.nodes)
     {
-        std::unordered_map<std::string, void*> pNext_map = {};
+        PNextMap pNext_map = {};
 
         if (node.name == "MainWorldDispatch")
         {
@@ -2001,7 +2059,9 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
             desc_count_alloc.pDescriptorCounts = &desc_count;
             void* pnext_begin = &desc_count_alloc;
 
-            pNext_map.emplace("render_region", pnext_begin);
+            pNext_map.emplace("render_region", std::vector<PNextEntry>{
+                PNextEntry{ 0, (void*)&desc_count_alloc }
+            });
         }
 
         _state->forward_runtime.nodes_static.push_back(
@@ -2011,7 +2071,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
     for (DispatchNodeInfo const& node : _state->pixel_cycling_graph.nodes)
     {
-        std::unordered_map<std::string, void*> pNext_map = {};
+        PNextMap pNext_map = {};
 
         if (node.name == "MainWorldDispatch")
         {
@@ -2024,7 +2084,9 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
             desc_count_alloc.pDescriptorCounts = &desc_count;
             void* pnext_begin = &desc_count_alloc;
 
-            pNext_map.emplace("render_region", pnext_begin);
+            pNext_map.emplace("render_region", std::vector<PNextEntry>{
+                PNextEntry{ 0, (void*)&desc_count_alloc }
+            });
         }
 
         _state->pixel_cycling_runtime.nodes_static.push_back(
@@ -2240,6 +2302,57 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         std::vector<VkWriteDescriptorSet> bindings = {};
 
         std::vector<VkDescriptorImageInfo> nodes_info{};
+        for (vktk::Texture const& node : _state->masks)
+        {
+            VkDescriptorImageInfo region_image_info{};
+            region_image_info.sampler = _state->sampler;
+            region_image_info.imageView = node.view;
+            region_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            nodes_info.push_back(region_image_info);
+        }
+
+        bindings.push_back(
+            _state->sparse_runtime.BindShaderResource(
+                NodeBindingPoint{
+                    .node = &sparse_region_node,
+                    .stage_index = 0,
+                    .type = NodeBindingPoint::BindingType_Shader,
+                    .shader = ShaderBindingInfo{ 1, 0 }
+                },
+                0,
+                ShaderResourceBinding{
+                    .descriptor_count = (uint32_t)nodes_info.size(),
+                    .images = nodes_info.data()
+                })
+            );
+
+        std::vector<VkDescriptorImageInfo> offsets_info{};
+        for (vktk::Texture const& offsets : _state->offsets)
+        {
+            VkDescriptorImageInfo offsets_image_info{};
+            offsets_image_info.sampler = _state->sampler;
+            offsets_image_info.imageView = offsets.view;
+            offsets_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            offsets_info.push_back(offsets_image_info);
+        }
+
+        bindings.push_back(
+            _state->sparse_runtime.BindShaderResource(
+                NodeBindingPoint{
+                    .node = &sparse_region_node,
+                    .stage_index = 0,
+                    .type = NodeBindingPoint::BindingType_Shader,
+                    .shader = ShaderBindingInfo{ 2, 0 }
+                },
+                0,
+                ShaderResourceBinding{
+                    .descriptor_count = (uint32_t)offsets_info.size(),
+                    .images = offsets_info.data()
+                })
+            );
+
+#if 0
+        std::vector<VkDescriptorImageInfo> nodes_info{};
         {
             VkDescriptorImageInfo info = {};
             info.sampler = _state->sampler;
@@ -2271,6 +2384,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                     .images = nodes_info.data()
                 })
             );
+#endif
 
         VkDescriptorBufferInfo matrix_buffer_info = {};
         matrix_buffer_info.buffer = _state->matrix_buffer;
