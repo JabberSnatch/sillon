@@ -1715,7 +1715,7 @@ void LoadRegion(voxel_state_t* state, vktk::Context* vulkan)
 void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
 {
 #define AREA_SIZE 128u
-#define NODE_SIZE 4u
+#define NODE_SIZE 16u
 #define SCALE_RATIO AREA_SIZE/NODE_SIZE
 
 #if 1
@@ -1772,18 +1772,32 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
     {
         voxtk::Region<uint8_t> const& lod = lods[lods.size()-1 - level_index];
         numtk::vec3u nextlod_size = numtk::max(lod.size / (NODE_SIZE * 4),
-                                             numtk::vec3u::Constant(1));
+                                               numtk::vec3u::Constant(1));
+#if 0
+        numtk::vec3u nextlod_pixelsize = numtk::max(nextlod_size / 4,
+                                                    numtk::vec3u::Constant(1));
+#endif
         uint32_t nextlod_count = nextlod_size.x*nextlod_size.y*nextlod_size.z;
 
         for (uint32_t index = 0u; index < nextlod_count; ++index)
         {
             std::vector<uint32_t> level_offsets = { current_offset };
 
+#if 0
+            numtk::vec3u const nextlod_pixel_base {
+                (index % nextlod_pixelsize.x),
+                ((index / nextlod_pixelsize.x) % nextlod_pixelsize.y),
+                (index / nextlod_pixelsize.x*nextlod_pixelsize.y)
+            };
+#endif
+
+#if 1
             numtk::vec3u const nextlod_base {
                 (index % nextlod_size.x),
                 ((index / nextlod_size.x) % nextlod_size.y),
                 (index / (nextlod_size.x*nextlod_size.y))
             };
+#endif
 
             if (level_index != 0u && !lods[lods.size() - level_index].Test(nextlod_base))
                 continue;
@@ -1859,9 +1873,16 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
     }
 
     uint32_t level1_size = 512u / (NODE_SIZE * 4u);
+    uint32_t level1_pixelsize = level1_size / 4u;
     uint32_t level1_count = level1_size * level1_size * level1_size;
     for (uint32_t index = 0u; index < level1_count; ++index)
     {
+        numtk::vec3u const lod1_pixelbase {
+            (index % level1_pixelsize),
+            ((index / level1_pixelsize) % level1_pixelsize),
+            (index / level1_pixelsize*level1_pixelsize)
+        };
+
         numtk::vec3u const lod1_base{
             (index % level1_size),
             ((index / level1_size) % level1_size),
