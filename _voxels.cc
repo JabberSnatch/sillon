@@ -1715,7 +1715,7 @@ void LoadRegion(voxel_state_t* state, vktk::Context* vulkan)
 void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
 {
 #define AREA_SIZE 128u
-#define NODE_SIZE 16u
+#define NODE_SIZE 4u
 #define SCALE_RATIO AREA_SIZE/NODE_SIZE
 
 #if 1
@@ -1773,8 +1773,12 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
         voxtk::Region<uint8_t> const& lod = lods[lods.size()-1 - level_index];
         numtk::vec3u nextlod_size = numtk::max(lod.size / (NODE_SIZE * 4),
                                                numtk::vec3u::Constant(1));
-        numtk::vec3u nextlod_chunksize = numtk::max(nextlod_size / 4,
+        numtk::vec3u nextlod_chunkcount = numtk::max(nextlod_size / 4,
                                                     numtk::vec3u::Constant(1));
+        numtk::vec3u nextlod_chunksize = (level_index == 0)
+            ? numtk::vec3u{ 4, 4, 4 }
+            : numtk::min(lods[lods.size()-level_index].size,
+                         numtk::vec3u{ 4, 4, 4 });
 
         uint32_t nextlod_count = nextlod_size.x*nextlod_size.y*nextlod_size.z;
 
@@ -1784,25 +1788,18 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
 
             uint32_t const chunk_index = index / 64;
             numtk::vec3u const nextlod_chunkbase {
-                (chunk_index % nextlod_chunksize.x),
-                ((chunk_index / nextlod_chunksize.x) % nextlod_chunksize.y),
-                (chunk_index / (nextlod_chunksize.x*nextlod_chunksize.y))
+                (chunk_index % nextlod_chunkcount.x),
+                ((chunk_index / nextlod_chunkcount.x) % nextlod_chunkcount.y),
+                (chunk_index / (nextlod_chunkcount.x*nextlod_chunkcount.y))
             };
 
             uint32_t const voxel_index = index % 64;
             numtk::vec3u const nextlod_voxelbase {
-                (voxel_index % 4),
-                ((voxel_index / 4) % 4),
-                (voxel_index / 16)
+                (voxel_index % nextlod_chunksize.x),
+                ((voxel_index / nextlod_chunksize.x) % nextlod_chunksize.y),
+                (voxel_index / (nextlod_chunksize.x*nextlod_chunksize.y))
             };
 
-#if 0
-            numtk::vec3u const nextlod_base {
-                (index % nextlod_size.x),
-                ((index / nextlod_size.x) % nextlod_size.y),
-                (index / (nextlod_size.x*nextlod_size.y))
-            };
-#endif
             numtk::vec3u const nextlod_base = nextlod_chunkbase * 4 + nextlod_voxelbase;
 
             if (level_index != 0u && !lods[lods.size() - level_index].Test(nextlod_base))
@@ -1879,15 +1876,15 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
     }
 
     uint32_t level1_size = 512u / (NODE_SIZE * 4u);
-    uint32_t level1_chunksize = level1_size / 4u;
+    uint32_t level1_chunkcount = level1_size / 4u;
     uint32_t level1_count = level1_size * level1_size * level1_size;
     for (uint32_t index = 0u; index < level1_count; ++index)
     {
         uint32_t chunk_index = index / 64;
         numtk::vec3u const lod1_chunkbase {
-            (chunk_index % level1_chunksize),
-            ((chunk_index / level1_chunksize) % level1_chunksize),
-            (chunk_index / (level1_chunksize*level1_chunksize))
+            (chunk_index % level1_chunkcount),
+            ((chunk_index / level1_chunkcount) % level1_chunkcount),
+            (chunk_index / (level1_chunkcount*level1_chunkcount))
         };
 
         uint32_t voxel_index = index % 64;
