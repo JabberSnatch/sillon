@@ -1721,6 +1721,8 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
     static constexpr uint32_t kLogScale = (uint32_t)std::popcount((NODE_SIZE*4) - 1u);
     static constexpr uint32_t kNodeMortonMask = (NODE_SIZE - 1u);
     static constexpr uint32_t kNodeMortonShift = (uint32_t)std::popcount(kNodeMortonMask);
+    static constexpr uint32_t kChunkMortonMask = 0x3;
+    static constexpr uint32_t kChunkMortonShift = 2;
 
 #if 1
     std::vector<voxtk::Region<uint8_t>> lods = {};
@@ -1797,9 +1799,11 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
             std::vector<uint32_t> level_offsets = { current_offset };
 
             numtk::vec3u const test_index{
-                index & kNodeMortonMask,
-                (index >> kNodeMortonShift) & kNodeMortonMask,
-                (index >> (kNodeMortonShift*2)) & kNodeMortonMask
+                numtk::BitExtract(index, ((kNodeMortonMask << (3*kChunkMortonShift)) | kChunkMortonMask)),
+                numtk::BitExtract(index, ((kNodeMortonMask << (3*kChunkMortonShift+kNodeMortonShift))
+                                          | (kChunkMortonMask << kChunkMortonShift))),
+                numtk::BitExtract(index, ((kNodeMortonMask << (3*kChunkMortonShift+2*kNodeMortonShift))
+                                          | (kChunkMortonMask << (2*kChunkMortonShift))))
             };
 
             uint32_t const chunk_index = index / (4*4*4);
@@ -1905,10 +1909,20 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
     uint32_t level1_count = level1_size * level1_size * level1_size;
     for (uint32_t index = 0u; index < level1_count; ++index)
     {
+#if 0
         numtk::vec3u const test_index{
             index & morton_mask,
             (index >> kNodeMortonShift) & morton_mask,
             (index >> (kNodeMortonShift*2)) & morton_mask
+        };
+#endif
+
+        numtk::vec3u const test_index{
+            numtk::BitExtract(index, ((kNodeMortonMask << (3*kChunkMortonShift)) | kChunkMortonMask)),
+            numtk::BitExtract(index, ((kNodeMortonMask << (3*kChunkMortonShift+kNodeMortonShift))
+                                      | (kChunkMortonMask << kChunkMortonShift))),
+            numtk::BitExtract(index, ((kNodeMortonMask << (3*kChunkMortonShift+2*kNodeMortonShift))
+                                      | (kChunkMortonMask << (2*kChunkMortonShift))))
         };
 
         uint32_t chunk_index = index / (4*4*4);

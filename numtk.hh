@@ -12,6 +12,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <immintrin.h>
 
 namespace numtk {
 
@@ -417,6 +418,12 @@ BitReverse(uint64_t _v)
     _v = (((_v & 0xFF00FF00FF00FF00ull) >> 8) | ((_v & 0x00FF00FF00FF00FFull) << 8));
     _v = (((_v & 0xFFFF0000FFFF0000ull) >> 16) | ((_v & 0x0000FFFF0000FFFFull) << 16));
     return (_v >> 32) | (_v << 32);
+}
+
+inline uint32_t
+BitExtract(uint32_t _v, uint32_t _m)
+{
+    return (uint32_t)_pext_u32(_v, _m);
 }
 
 } // namespace numtk
