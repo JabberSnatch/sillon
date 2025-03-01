@@ -1715,7 +1715,7 @@ void LoadRegion(voxel_state_t* state, vktk::Context* vulkan)
 void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
 {
 #define AREA_SIZE 128u
-#define NODE_SIZE 4u
+#define NODE_SIZE 8u
 #define SCALE_RATIO AREA_SIZE/NODE_SIZE
 
     static constexpr uint32_t kLogScale = (uint32_t)std::popcount((NODE_SIZE*4) - 1u);
@@ -1779,14 +1779,16 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
 
     uint32_t morton_mask = kNodeMortonMask;
 
-    uint32_t node_mask = kNodeMortonMask << (3*kChunkMortonShift);
-    uint32_t chunk_mask = kChunkMortonMask;
+    uint32_t node_mask = 0;//kNodeMortonMask << (3*kChunkMortonShift);
+    uint32_t chunk_mask = 0;//kChunkMortonMask;
+    uint32_t shift_depth = 0;
 
     for (uint32_t level_index = 0u; level_index < lods.size();
          ++level_index
              , morton_mask = (morton_mask << kNodeMortonShift*3) | kNodeMortonMask
-             , node_mask = node_mask | (node_mask << kLevelMortonShift)
-             , chunk_mask = chunk_mask | (chunk_mask << kLevelMortonShift))
+             , node_mask = (kNodeMortonMask << (3*kChunkMortonShift)) | (node_mask << kLevelMortonShift)
+             , chunk_mask = kChunkMortonMask | (chunk_mask << kLevelMortonShift)
+             , shift_depth += kLevelMortonShift)
     {
         uint32_t lod_index = lods.size()-1 - level_index;
         voxtk::Region<uint8_t> const& lod = lods[lods.size()-1 - level_index];
@@ -1800,8 +1802,9 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
                          numtk::vec3u{ 4, 4, 4 });
 
         uint32_t nextlod_count = nextlod_size.x*nextlod_size.y*nextlod_size.z;
+        uint32_t test_count = 1u << shift_depth;
 
-        for (uint32_t index = 0u; index < nextlod_count; ++index)
+        for (uint32_t index = 0u; index < test_count/*nextlod_count*/; ++index)
         {
             std::vector<uint32_t> level_offsets = { current_offset };
 
@@ -1818,6 +1821,7 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
 #endif
             };
 
+#if 0
             uint32_t const chunk_index = index / (4*4*4);
             numtk::vec3u const nextlod_chunkbase {
                 (chunk_index % nextlod_chunkcount.x),
@@ -1831,8 +1835,10 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
                 ((voxel_index / nextlod_chunksize.x) % nextlod_chunksize.y),
                 (voxel_index / (nextlod_chunksize.x*nextlod_chunksize.y))
             };
+#endif
 
-            numtk::vec3u const nextlod_base = nextlod_chunkbase * 4 + nextlod_voxelbase;
+            //numtk::vec3u const nextlod_base = nextlod_chunkbase * 4 + nextlod_voxelbase;
+            numtk::vec3u const nextlod_base = test_index;
 
             if (level_index != 0u && !lods[lods.size() - level_index].Test(nextlod_base))
                 continue;
@@ -1919,7 +1925,8 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
     uint32_t level1_chunkcount = level1_size / 4u;
     //uint32_t level1_chunkcount = level1_size / (NODE_SIZE*4u);
     uint32_t level1_count = level1_size * level1_size * level1_size;
-    for (uint32_t index = 0u; index < level1_count; ++index)
+    uint32_t test_count = 1 << shift_depth;
+    for (uint32_t index = 0u; index < test_count/*level1_count*/; ++index)
     {
 #if 0
         numtk::vec3u const test_index{
@@ -1942,6 +1949,7 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
 #endif
         };
 
+#if 0
         uint32_t chunk_index = index / (4*4*4);
         //uint32_t chunk_index = index / (1u<<(kLogScale*3));
         numtk::vec3u const lod1_chunkbase {
@@ -1964,6 +1972,7 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
             ((voxel_index / (1u<<kLogScale)) % (1u<<kLogScale)),
             (voxel_index / (1u<<(kLogScale*2)))
         };
+#endif
 #endif
 
         //numtk::vec3u const lod1_base = lod1_chunkbase * 4 + lod1_voxelbase;
