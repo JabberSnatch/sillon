@@ -17,18 +17,6 @@ layout(std140, set = 0, binding = 1) uniform MatrixBlock {
 layout(set = 1, binding = 0) uniform usampler3D masks[];
 layout(set = 2, binding = 0) uniform usampler3D offsets[];
 
-#if 0
-struct NodePointer
-{
-    uint level;
-    uint offset;
-};
-
-layout(std430, set = 0, binding = 0) buffer NodesBlock {
-    NodePointer pointers[];
-};
-#endif
-
 #define NODE_SIZE 8.0
 #define CHUNK_SIZE 4.0
 #define STACK_SIZE 3
