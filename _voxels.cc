@@ -1827,7 +1827,7 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
                     NODE_SIZE, NODE_SIZE, NODE_SIZE,
                     VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
                     VK_IMAGE_USAGE_SAMPLED_BIT,
-                    [&lod, &lod_base, &level_offsets, &valid_range, lod_index](void* mapped_data) {
+                    [&lod, &lod_base, &level_offsets, &valid_range, &current_offset, lod_index](void* mapped_data) {
                         uint64_t* output = (uint64_t*)mapped_data;
                         for (uint32_t zindex = 0; zindex < valid_range.z; ++zindex)
                         {
@@ -1843,25 +1843,93 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
 
                                     uint64_t bits = lod.ExtractKernel(base);
                                     output[xindex + yindex*NODE_SIZE + zindex*NODE_SIZE*NODE_SIZE] = bits;
-                                    level_offsets.push_back(level_offsets.back() + std::popcount(bits));
+                                    //level_offsets.push_back(level_offsets.back() + std::popcount(bits));
+
+                                    current_offset += std::popcount(bits);
+                                    level_offsets.push_back(current_offset);
                                 }
 
                                 if (valid_range.x != NODE_SIZE)
+                                {
+#if 1
+                                    level_offsets.reserve(level_offsets.size()
+                                                          + (NODE_SIZE-valid_range.x));
+                                    uint32_t base_size = level_offsets.size();
+                                    for (uint32_t index = 0u; index < NODE_SIZE-valid_range.x; ++index)
+                                    {
+                                        level_offsets.push_back(
+                                            level_offsets[
+#if 0
+                                                index
+                                                + yindex*NODE_SIZE
+                                                + zindex*NODE_SIZE*NODE_SIZE]
+#endif
+                                            base_size - valid_range.x + index]
+                                            );
+#if 1
+                                        output[valid_range.x+index
+                                               + yindex*NODE_SIZE
+                                               + zindex*NODE_SIZE*NODE_SIZE] =
+                                            output[index
+                                                   + yindex*NODE_SIZE
+                                                   + zindex*NODE_SIZE*NODE_SIZE];
+#endif
+                                    }
+
+#else
+
                                     level_offsets.resize(level_offsets.size()
                                                          + (NODE_SIZE-valid_range.x),
                                                          level_offsets.back());
+#endif
+                                }
                             }
 
                             if (valid_range.y != NODE_SIZE)
+                            {
+#if 1
+                                level_offsets.reserve(level_offsets.size()
+                                                      + (NODE_SIZE-valid_range.y)*NODE_SIZE);
+                                uint32_t base_size = level_offsets.size();
+                                for (uint32_t index = 0u; index < (NODE_SIZE-valid_range.y)*NODE_SIZE; ++index)
+                                {
+                                    level_offsets.push_back(level_offsets[base_size - (valid_range.y*NODE_SIZE) + index]);
+
+                                    output[index
+                                           + valid_range.y*NODE_SIZE
+                                           + zindex*NODE_SIZE*NODE_SIZE] =
+                                        output[index
+                                               + zindex*NODE_SIZE*NODE_SIZE];
+                                }
+#else
                                 level_offsets.resize(level_offsets.size()
                                                      + (NODE_SIZE-valid_range.y)*NODE_SIZE,
                                                      level_offsets.back());
+#endif
+                            }
                         }
 
                         if (valid_range.z != NODE_SIZE)
+                        {
+#if 1
+                            level_offsets.reserve(level_offsets.size()
+                                                  + (NODE_SIZE-valid_range.z)*NODE_SIZE*NODE_SIZE);
+                            uint32_t base_size = level_offsets.size();
+                            for (uint32_t index = 0u; index < (NODE_SIZE-valid_range.z)*NODE_SIZE*NODE_SIZE; ++index)
+                            {
+                                level_offsets.push_back(level_offsets[base_size - (valid_range.z*NODE_SIZE*NODE_SIZE) + index]);
+
+                                output[index
+                                       + valid_range.z*NODE_SIZE*NODE_SIZE] =
+                                    output[index];
+
+                            }
+#else
                             level_offsets.resize(level_offsets.size()
                                                  + (NODE_SIZE-valid_range.z)*NODE_SIZE*NODE_SIZE,
                                                  level_offsets.back());
+#endif
+                        }
                     }
                 )
             );
@@ -1873,12 +1941,13 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
                     VK_IMAGE_USAGE_SAMPLED_BIT,
                     [&level_offsets, &valid_range](void* mapped_data) {
                         uint32_t* output = (uint32_t*)mapped_data;
+                        //std::memcpy(output, level_offsets.data()+1, NODE_SIZE*NODE_SIZE*NODE_SIZE*sizeof(uint32_t));
                         std::memcpy(output, level_offsets.data(), NODE_SIZE*NODE_SIZE*NODE_SIZE*sizeof(uint32_t));
                     }
                 )
             );
 
-            current_offset = level_offsets.back();
+            //current_offset = level_offsets.back();
         }
     }
 

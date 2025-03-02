@@ -233,7 +233,7 @@ vec3 RegionTraversal4(vec3 org, vec3 dir)
                     }
                     else
                     {
-                        output_value = ctx.voxel_coords;
+                        output_value = HitNormalDDAContext(ctx);// ctx.voxel_coords;
                         ++depth;
                     }
                     break;
@@ -289,7 +289,7 @@ vec3 RegionTraversal4(vec3 org, vec3 dir)
                     }
                     else
                     {
-                        output_value = ctx.voxel_coords;
+                        output_value = HitNormalDDAContext(ctx);//ctx.voxel_coords;
                         ++depth;
                     }
                     break;
@@ -316,7 +316,7 @@ vec3 RegionTraversal4(vec3 org, vec3 dir)
     }
 
     if (hit)
-        return output_value;
+        return output_value * vec3(0.5) + vec3(0.5);
     else
         return (HitNormalDDAContext(ctx) * 0.5 + vec3(0.5)) * 0.1;
 }
