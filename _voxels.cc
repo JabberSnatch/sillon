@@ -1715,7 +1715,7 @@ void LoadRegion(voxel_state_t* state, vktk::Context* vulkan)
 void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
 {
 #define AREA_SIZE 128u
-#define NODE_SIZE 8u
+#define NODE_SIZE 4u
 #define SCALE_RATIO AREA_SIZE/NODE_SIZE
 
     static constexpr uint32_t kLogScale = (uint32_t)std::popcount((NODE_SIZE*4) - 1u);
@@ -1803,7 +1803,7 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
 
         for (uint32_t index = 0u; index < nextlod_count; ++index)
         {
-            std::vector<uint32_t> level_offsets = { current_offset };
+            std::vector<uint32_t> level_offsets{};// = { current_offset };
 
             numtk::vec3u const nextlod_base{
                 numtk::BitExtract(index, node_mask | chunk_mask),
@@ -1842,11 +1842,20 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
                                     } + lod_base;
 
                                     uint64_t bits = lod.ExtractKernel(base);
+#if 0
+                                    if (lod.size.x < 4u)
+                                    {
+                                        bits |=
+                                            ((lod.size.x & 0x1) ? bits << 3u : bits << 2u)
+                                            | ((lod.size.x & 0x11 == 0x1) ? bits << 1u : 0ull);
+                                    }
+#endif
+
                                     output[xindex + yindex*NODE_SIZE + zindex*NODE_SIZE*NODE_SIZE] = bits;
                                     //level_offsets.push_back(level_offsets.back() + std::popcount(bits));
 
-                                    current_offset += std::popcount(bits);
                                     level_offsets.push_back(current_offset);
+                                    current_offset += std::popcount(bits);
                                 }
 
                                 if (valid_range.x != NODE_SIZE)
@@ -1857,15 +1866,8 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
                                     uint32_t base_size = level_offsets.size();
                                     for (uint32_t index = 0u; index < NODE_SIZE-valid_range.x; ++index)
                                     {
-                                        level_offsets.push_back(
-                                            level_offsets[
-#if 0
-                                                index
-                                                + yindex*NODE_SIZE
-                                                + zindex*NODE_SIZE*NODE_SIZE]
-#endif
-                                            base_size - valid_range.x + index]
-                                            );
+                                        level_offsets.push_back(level_offsets[base_size - valid_range.x + index]);
+
 #if 1
                                         output[valid_range.x+index
                                                + yindex*NODE_SIZE
@@ -1874,6 +1876,7 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
                                                    + yindex*NODE_SIZE
                                                    + zindex*NODE_SIZE*NODE_SIZE];
 #endif
+
                                     }
 
 #else
@@ -1887,7 +1890,7 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
 
                             if (valid_range.y != NODE_SIZE)
                             {
-#if 1
+#if 0
                                 level_offsets.reserve(level_offsets.size()
                                                       + (NODE_SIZE-valid_range.y)*NODE_SIZE);
                                 uint32_t base_size = level_offsets.size();
