@@ -7,8 +7,10 @@
 #include "systk.hh"
 #include "numtk.hh"
 #include "vktk.hh"
-#include "voxtk.hh"
 #include "dstk.hh"
+
+#define VOXTK_IMPLEMENTATION
+#include "voxtk.hh"
 
 #include <bit>
 #include <memory>

@@ -19,7 +19,7 @@ layout(set = 2, binding = 0) uniform usampler3D offsets[];
 
 #define NODE_SIZE 4.0
 #define CHUNK_SIZE 4.0
-#define STACK_SIZE 3
+#define STACK_SIZE 5
 
 vec3 RegionTraversal0(vec3 org, vec3 dir)
 {
