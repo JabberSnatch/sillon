@@ -7,8 +7,10 @@
 #include "systk.hh"
 #include "numtk.hh"
 #include "vktk.hh"
-#include "voxtk.hh"
 #include "dstk.hh"
+
+#define VOXTK_IMPLEMENTATION
+#include "voxtk.hh"
 
 #include <bit>
 #include <memory>
@@ -765,9 +767,15 @@ struct DispatchRuntime
     }
 };
 
+struct PNextEntry {
+    uint32_t binding_group_index;
+    void* pnext;
+};
+using PNextMap = std::unordered_map<std::string, std::vector<PNextEntry>>;
+
 DispatchNodeStatic GenerateDispatchStaticRuntime(DispatchNodeInfo const& _node,
                                                  vktk::Context* _vulkan,
-                                                 std::unordered_map<std::string, void*> _pNext_map = {})
+                                                 PNextMap const& _pNext_map = {})
 {
     DispatchNodeStatic static_runtime = {};
 
@@ -777,12 +785,20 @@ DispatchNodeStatic GenerateDispatchStaticRuntime(DispatchNodeInfo const& _node,
         std::vector<VkDescriptorSetLayout> set_layouts = {};
         std::vector<VkPushConstantRange> push_constant_ranges = {};
 
+#if 0
         void* stage_pnext = nullptr;
         if (_pNext_map.count(stage.name))
             stage_pnext = _pNext_map[stage.name];
+#endif
+        std::vector<PNextEntry> stage_pnexts = {};
+        if (_pNext_map.count(stage.name))
+            stage_pnexts = _pNext_map.at(stage.name);
 
-        for (DispatchStageInfo::BindingGroupInfo const& binding_group : stage.binding_groups)
+        //for (DispatchStageInfo::BindingGroupInfo const& binding_group : stage.binding_groups)
+        for (uint32_t group_index = 0u; group_index < (uint32_t)stage.binding_groups.size(); ++group_index)
         {
+            DispatchStageInfo::BindingGroupInfo const& binding_group = stage.binding_groups[group_index];
+
             DispatchStageStatic::BindingGroup descriptor = {};
             std::vector<vktk::Context::DescriptorSetBindingPoint> bindings = {};
 
@@ -802,6 +818,7 @@ DispatchNodeStatic GenerateDispatchStaticRuntime(DispatchNodeInfo const& _node,
             void* pnext_begin = nullptr;
 
             VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc;
+#if 0
             if (std::find_if(binding_group.bindings.begin(),
                              binding_group.bindings.end(),
                              [](DispatchStageInfo::BindingInfo const& binding) {
@@ -817,6 +834,26 @@ DispatchNodeStatic GenerateDispatchStaticRuntime(DispatchNodeInfo const& _node,
                     : VkDescriptorSetVariableDescriptorCountAllocateInfo{};
                 desc_count_alloc.pNext = nullptr;
                 pnext_begin = desc_count_alloc_ptr ? &desc_count_alloc : nullptr;
+            }
+#endif
+
+            {
+                auto group_pnext_it = std::find_if(
+                    stage_pnexts.begin(), stage_pnexts.end(),
+                    [group_index](PNextEntry const& entry) {
+                        return entry.binding_group_index == group_index;
+                    });
+                if (group_pnext_it != stage_pnexts.end())
+                {
+                    void* desc_count_alloc_ptr = vktk::PNextLookup(
+                        (VkBaseOutStructure*)group_pnext_it->pnext,
+                        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO);
+                    desc_count_alloc = desc_count_alloc_ptr
+                        ? *(VkDescriptorSetVariableDescriptorCountAllocateInfo const*)desc_count_alloc_ptr
+                        : VkDescriptorSetVariableDescriptorCountAllocateInfo{};
+                    desc_count_alloc.pNext = nullptr;
+                    pnext_begin = desc_count_alloc_ptr ? &desc_count_alloc : nullptr;
+                }
             }
 
             VkDescriptorSetAllocateInfo descset_allocate{};
@@ -1012,6 +1049,15 @@ DispatchStageInfo SparseRegionDispatchStageInfo()
               VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT, 512*512 },
         }
     });
+
+#if 1
+    output.binding_groups.push_back(DispatchStageInfo::BindingGroupInfo{
+        {
+            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT, 512*512 },
+        }
+    });
+#endif
 
     output.push_constants = std::vector<DispatchStageInfo::PushConstantRange>{
     };
@@ -1674,6 +1720,13 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
 #define NODE_SIZE 4u
 #define SCALE_RATIO AREA_SIZE/NODE_SIZE
 
+    static constexpr uint32_t kLogScale = (uint32_t)std::popcount((NODE_SIZE*4) - 1u);
+    static constexpr uint32_t kNodeMortonMask = (NODE_SIZE - 1u);
+    static constexpr uint32_t kNodeMortonShift = (uint32_t)std::popcount(kNodeMortonMask);
+    static constexpr uint32_t kChunkMortonMask = 0x3;
+    static constexpr uint32_t kChunkMortonShift = 2;
+    static constexpr uint32_t kLevelMortonShift = (kNodeMortonShift+kChunkMortonShift)*3;
+
 #if 1
     std::vector<voxtk::Region<uint8_t>> lods = {};
 
@@ -1719,26 +1772,45 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
                 }
             }
         }
-
-        int i = 0;
     }
 
     uint32_t current_offset = 1u;
-    for (uint32_t level_index = 0u; level_index < lods.size(); ++level_index)
+    uint32_t group_size = 1u;
+
+    uint32_t morton_mask = kNodeMortonMask;
+
+    uint32_t node_mask = 0;
+    uint32_t chunk_mask = 0;
+    uint32_t shift_depth = 0;
+
+    for (uint32_t level_index = 0u; level_index < lods.size();
+         ++level_index
+             , morton_mask = (morton_mask << kNodeMortonShift*3) | kNodeMortonMask
+             , node_mask = (kNodeMortonMask << (3*kChunkMortonShift)) | (node_mask << kLevelMortonShift)
+             , chunk_mask = kChunkMortonMask | (chunk_mask << kLevelMortonShift)
+             , shift_depth += kLevelMortonShift)
     {
+        uint32_t lod_index = lods.size()-1 - level_index;
         voxtk::Region<uint8_t> const& lod = lods[lods.size()-1 - level_index];
         numtk::vec3u nextlod_size = numtk::max(lod.size / (NODE_SIZE * 4),
-                                             numtk::vec3u::Constant(1));
-        uint32_t nextlod_count = nextlod_size.x*nextlod_size.y*nextlod_size.z;
+                                               numtk::vec3u::Constant(1));
+        numtk::vec3u nextlod_chunkcount = numtk::max(nextlod_size / 4,
+                                                    numtk::vec3u::Constant(1));
+        numtk::vec3u nextlod_chunksize = (level_index == 0)
+            ? numtk::vec3u{ 4, 4, 4 }
+            : numtk::min(lods[lods.size()-level_index].size,
+                         numtk::vec3u{ 4, 4, 4 });
+
+        uint32_t nextlod_count = 1u << shift_depth;
 
         for (uint32_t index = 0u; index < nextlod_count; ++index)
         {
-            std::vector<uint32_t> level_offsets = { current_offset };
+            std::vector<uint32_t> level_offsets{};// = { current_offset };
 
-            numtk::vec3u const nextlod_base {
-                (index % nextlod_size.x),
-                ((index / nextlod_size.x) % nextlod_size.y),
-                (index / (nextlod_size.x*nextlod_size.y))
+            numtk::vec3u const nextlod_base{
+                numtk::BitExtract(index, node_mask | chunk_mask),
+                numtk::BitExtract(index, (node_mask << kNodeMortonShift) | (chunk_mask << kChunkMortonShift)),
+                numtk::BitExtract(index, (node_mask << (2*kNodeMortonShift)) | (chunk_mask << (2*kChunkMortonShift)))
             };
 
             if (level_index != 0u && !lods[lods.size() - level_index].Test(nextlod_base))
@@ -1757,7 +1829,7 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
                     NODE_SIZE, NODE_SIZE, NODE_SIZE,
                     VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
                     VK_IMAGE_USAGE_SAMPLED_BIT,
-                    [&lod, &lod_base, &level_offsets, &valid_range](void* mapped_data) {
+                    [&lod, &lod_base, &level_offsets, &valid_range, &current_offset, lod_index](void* mapped_data) {
                         uint64_t* output = (uint64_t*)mapped_data;
                         for (uint32_t zindex = 0; zindex < valid_range.z; ++zindex)
                         {
@@ -1772,28 +1844,97 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
                                     } + lod_base;
 
                                     uint64_t bits = lod.ExtractKernel(base);
+#if 0
+                                    if (lod.size.x < 4u)
+                                    {
+                                        bits |=
+                                            ((lod.size.x & 0x1) ? bits << 3u : bits << 2u)
+                                            | ((lod.size.x & 0x11 == 0x1) ? bits << 1u : 0ull);
+                                    }
+#endif
+
                                     output[xindex + yindex*NODE_SIZE + zindex*NODE_SIZE*NODE_SIZE] = bits;
-                                    level_offsets.push_back(level_offsets.back() + std::popcount(bits));
+                                    //level_offsets.push_back(level_offsets.back() + std::popcount(bits));
+
+                                    level_offsets.push_back(current_offset);
+                                    current_offset += std::popcount(bits);
                                 }
 
                                 if (valid_range.x != NODE_SIZE)
+                                {
+#if 1
+                                    level_offsets.reserve(level_offsets.size()
+                                                          + (NODE_SIZE-valid_range.x));
+                                    uint32_t base_size = level_offsets.size();
+                                    for (uint32_t index = 0u; index < NODE_SIZE-valid_range.x; ++index)
+                                    {
+                                        level_offsets.push_back(level_offsets[base_size - valid_range.x + index]);
+
+#if 1
+                                        output[valid_range.x+index
+                                               + yindex*NODE_SIZE
+                                               + zindex*NODE_SIZE*NODE_SIZE] =
+                                            output[index
+                                                   + yindex*NODE_SIZE
+                                                   + zindex*NODE_SIZE*NODE_SIZE];
+#endif
+
+                                    }
+
+#else
+
                                     level_offsets.resize(level_offsets.size()
                                                          + (NODE_SIZE-valid_range.x),
                                                          level_offsets.back());
+#endif
+                                }
                             }
 
                             if (valid_range.y != NODE_SIZE)
+                            {
+#if 0
+                                level_offsets.reserve(level_offsets.size()
+                                                      + (NODE_SIZE-valid_range.y)*NODE_SIZE);
+                                uint32_t base_size = level_offsets.size();
+                                for (uint32_t index = 0u; index < (NODE_SIZE-valid_range.y)*NODE_SIZE; ++index)
+                                {
+                                    level_offsets.push_back(level_offsets[base_size - (valid_range.y*NODE_SIZE) + index]);
+
+                                    output[index
+                                           + valid_range.y*NODE_SIZE
+                                           + zindex*NODE_SIZE*NODE_SIZE] =
+                                        output[index
+                                               + zindex*NODE_SIZE*NODE_SIZE];
+                                }
+#else
                                 level_offsets.resize(level_offsets.size()
                                                      + (NODE_SIZE-valid_range.y)*NODE_SIZE,
                                                      level_offsets.back());
+#endif
+                            }
                         }
 
                         if (valid_range.z != NODE_SIZE)
+                        {
+#if 1
+                            level_offsets.reserve(level_offsets.size()
+                                                  + (NODE_SIZE-valid_range.z)*NODE_SIZE*NODE_SIZE);
+                            uint32_t base_size = level_offsets.size();
+                            for (uint32_t index = 0u; index < (NODE_SIZE-valid_range.z)*NODE_SIZE*NODE_SIZE; ++index)
+                            {
+                                level_offsets.push_back(level_offsets[base_size - (valid_range.z*NODE_SIZE*NODE_SIZE) + index]);
+
+                                output[index
+                                       + valid_range.z*NODE_SIZE*NODE_SIZE] =
+                                    output[index];
+
+                            }
+#else
                             level_offsets.resize(level_offsets.size()
                                                  + (NODE_SIZE-valid_range.z)*NODE_SIZE*NODE_SIZE,
                                                  level_offsets.back());
-
-                        int i = 0;
+#endif
+                        }
                     }
                 )
             );
@@ -1805,23 +1946,25 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
                     VK_IMAGE_USAGE_SAMPLED_BIT,
                     [&level_offsets, &valid_range](void* mapped_data) {
                         uint32_t* output = (uint32_t*)mapped_data;
+                        //std::memcpy(output, level_offsets.data()+1, NODE_SIZE*NODE_SIZE*NODE_SIZE*sizeof(uint32_t));
                         std::memcpy(output, level_offsets.data(), NODE_SIZE*NODE_SIZE*NODE_SIZE*sizeof(uint32_t));
                     }
                 )
             );
 
-            current_offset = level_offsets.back();
+            //current_offset = level_offsets.back();
         }
     }
 
-    uint32_t level1_size = 512u / (NODE_SIZE * 4u);
-    uint32_t level1_count = level1_size * level1_size * level1_size;
+    std::cout << "region load begin" << std::endl;
+
+    uint32_t level1_count = 1 << shift_depth;
     for (uint32_t index = 0u; index < level1_count; ++index)
     {
         numtk::vec3u const lod1_base{
-            (index % level1_size),
-            ((index / level1_size) % level1_size),
-            (index / (level1_size*level1_size))
+            numtk::BitExtract(index, node_mask | chunk_mask),
+            numtk::BitExtract(index, (node_mask << kNodeMortonShift) | (chunk_mask << kChunkMortonShift)),
+            numtk::BitExtract(index, (node_mask << (2*kNodeMortonShift)) | (chunk_mask << (2*kChunkMortonShift)))
         };
 
         if (!lods[0].Test(lod1_base))
@@ -1965,20 +2108,34 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
     for (DispatchNodeInfo const& node : _state->sparse_graph.nodes)
     {
-        std::unordered_map<std::string, void*> pNext_map = {};
+        PNextMap pNext_map = {};
 
         if (node.name == "SparseRegionDispatch")
         {
-            static uint32_t desc_count = 0u;
-            static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc = {};
-            desc_count = 65;
-            desc_count_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
-            desc_count_alloc.pNext = nullptr;
-            desc_count_alloc.descriptorSetCount = 1;
-            desc_count_alloc.pDescriptorCounts = &desc_count;
-            void* pnext_begin = &desc_count_alloc;
+            static uint32_t desc_counts[2] = { 0u, 0u };
+            desc_counts[0] = (uint32_t)_state->masks.size();//65;
+            desc_counts[1] = (uint32_t)_state->offsets.size();//65;
 
-            pNext_map.emplace("sparse_region", pnext_begin);
+            static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_allocs[2];
+            desc_count_allocs[0] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
+            desc_count_allocs[1] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
+
+            desc_count_allocs[0].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+            desc_count_allocs[0].pNext = nullptr;
+            desc_count_allocs[0].descriptorSetCount = 1;
+            desc_count_allocs[0].pDescriptorCounts = &desc_counts[0];
+
+            desc_count_allocs[1].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+            desc_count_allocs[1].pNext = nullptr;
+            desc_count_allocs[1].descriptorSetCount = 1;
+            desc_count_allocs[1].pDescriptorCounts = &desc_counts[1];
+
+            //void* pnext_begin = &desc_count_alloc;
+
+            pNext_map.emplace("sparse_region", std::vector<PNextEntry>{
+                PNextEntry{ 1, (void*)&desc_count_allocs[0] },
+                PNextEntry{ 2, (void*)&desc_count_allocs[1] }
+            });
         }
 
         _state->sparse_runtime.nodes_static.push_back(
@@ -1988,7 +2145,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
     for (DispatchNodeInfo const& node : _state->forward_graph.nodes)
     {
-        std::unordered_map<std::string, void*> pNext_map = {};
+        PNextMap pNext_map = {};
 
         if (node.name == "MainWorldDispatch")
         {
@@ -2001,7 +2158,9 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
             desc_count_alloc.pDescriptorCounts = &desc_count;
             void* pnext_begin = &desc_count_alloc;
 
-            pNext_map.emplace("render_region", pnext_begin);
+            pNext_map.emplace("render_region", std::vector<PNextEntry>{
+                PNextEntry{ 0, (void*)&desc_count_alloc }
+            });
         }
 
         _state->forward_runtime.nodes_static.push_back(
@@ -2011,7 +2170,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
     for (DispatchNodeInfo const& node : _state->pixel_cycling_graph.nodes)
     {
-        std::unordered_map<std::string, void*> pNext_map = {};
+        PNextMap pNext_map = {};
 
         if (node.name == "MainWorldDispatch")
         {
@@ -2024,7 +2183,9 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
             desc_count_alloc.pDescriptorCounts = &desc_count;
             void* pnext_begin = &desc_count_alloc;
 
-            pNext_map.emplace("render_region", pnext_begin);
+            pNext_map.emplace("render_region", std::vector<PNextEntry>{
+                PNextEntry{ 0, (void*)&desc_count_alloc }
+            });
         }
 
         _state->pixel_cycling_runtime.nodes_static.push_back(
@@ -2240,6 +2401,57 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         std::vector<VkWriteDescriptorSet> bindings = {};
 
         std::vector<VkDescriptorImageInfo> nodes_info{};
+        for (vktk::Texture const& node : _state->masks)
+        {
+            VkDescriptorImageInfo region_image_info{};
+            region_image_info.sampler = _state->sampler;
+            region_image_info.imageView = node.view;
+            region_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            nodes_info.push_back(region_image_info);
+        }
+
+        bindings.push_back(
+            _state->sparse_runtime.BindShaderResource(
+                NodeBindingPoint{
+                    .node = &sparse_region_node,
+                    .stage_index = 0,
+                    .type = NodeBindingPoint::BindingType_Shader,
+                    .shader = ShaderBindingInfo{ 1, 0 }
+                },
+                0,
+                ShaderResourceBinding{
+                    .descriptor_count = (uint32_t)nodes_info.size(),
+                    .images = nodes_info.data()
+                })
+            );
+
+        std::vector<VkDescriptorImageInfo> offsets_info{};
+        for (vktk::Texture const& offsets : _state->offsets)
+        {
+            VkDescriptorImageInfo offsets_image_info{};
+            offsets_image_info.sampler = _state->sampler;
+            offsets_image_info.imageView = offsets.view;
+            offsets_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            offsets_info.push_back(offsets_image_info);
+        }
+
+        bindings.push_back(
+            _state->sparse_runtime.BindShaderResource(
+                NodeBindingPoint{
+                    .node = &sparse_region_node,
+                    .stage_index = 0,
+                    .type = NodeBindingPoint::BindingType_Shader,
+                    .shader = ShaderBindingInfo{ 2, 0 }
+                },
+                0,
+                ShaderResourceBinding{
+                    .descriptor_count = (uint32_t)offsets_info.size(),
+                    .images = offsets_info.data()
+                })
+            );
+
+#if 0
+        std::vector<VkDescriptorImageInfo> nodes_info{};
         {
             VkDescriptorImageInfo info = {};
             info.sampler = _state->sampler;
@@ -2271,6 +2483,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                     .images = nodes_info.data()
                 })
             );
+#endif
 
         VkDescriptorBufferInfo matrix_buffer_info = {};
         matrix_buffer_info.buffer = _state->matrix_buffer;

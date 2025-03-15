@@ -15,20 +15,11 @@ layout(std140, set = 0, binding = 1) uniform MatrixBlock {
 };
 
 layout(set = 1, binding = 0) uniform usampler3D masks[];
-
-struct NodePointer
-{
-    uint level;
-    uint offset;
-};
-
-layout(std430, set = 0, binding = 0) buffer NodesBlock {
-    NodePointer pointers[];
-};
+layout(set = 2, binding = 0) uniform usampler3D offsets[];
 
 #define NODE_SIZE 4.0
 #define CHUNK_SIZE 4.0
-#define STACK_SIZE 1
+#define STACK_SIZE 5
 
 vec3 RegionTraversal0(vec3 org, vec3 dir)
 {
@@ -242,7 +233,7 @@ vec3 RegionTraversal4(vec3 org, vec3 dir)
                     }
                     else
                     {
-                        output_value = ctx.voxel_coords;
+                        output_value = HitNormalDDAContext(ctx);// ctx.voxel_coords;
                         ++depth;
                     }
                     break;
@@ -283,7 +274,13 @@ vec3 RegionTraversal4(vec3 org, vec3 dir)
                         org_cache[depth] = org;
                         tex_index[depth] = current_tex;
 
-                        current_tex = 1;
+                        uint offset = bitCount(data[depth-1][side_index] & ((1<<voxel_index)-1));
+                        if (side_index == 1)
+                            offset += bitCount(data[depth-1][0]);
+
+                        current_tex = offset +
+                            texture(offsets[nonuniformEXT(current_tex)],
+                                    ctx_cache[depth-1].voxel_coords).x;
 
                         org = RecursionPointDDAContext(ctx, org, dir, CHUNK_SIZE);
                         ctx = InitDDAContext(org, dir, NODE_SIZE);
@@ -292,7 +289,7 @@ vec3 RegionTraversal4(vec3 org, vec3 dir)
                     }
                     else
                     {
-                        output_value = ctx.voxel_coords;
+                        output_value = HitNormalDDAContext(ctx);//ctx.voxel_coords;
                         ++depth;
                     }
                     break;
@@ -319,7 +316,7 @@ vec3 RegionTraversal4(vec3 org, vec3 dir)
     }
 
     if (hit)
-        return output_value;
+        return output_value * vec3(0.5) + vec3(0.5);
     else
         return (HitNormalDDAContext(ctx) * 0.5 + vec3(0.5)) * 0.1;
 }

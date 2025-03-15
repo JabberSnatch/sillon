@@ -1552,8 +1552,10 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
     submit_info.pSignalSemaphores = nullptr;
     vkQueueSubmit(present_queue, 1, &submit_info, staging_fence);
 
+#if 0
     std::cout << "[CreateTexture] scheduled staging buffer destruction "
               << std::hex << staging.buffer << std::dec << std::endl;
+#endif
     ScheduleRoutine(staging_fence, [staging](Context& _context) {
         std::cout << "[ScheduledRoutine] staging buffer destroyed "
                   << std::hex << staging.buffer << std::dec << std::endl;
