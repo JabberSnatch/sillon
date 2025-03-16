@@ -426,6 +426,18 @@ BitExtract(uint32_t _v, uint32_t _m)
     return (uint32_t)_pext_u32(_v, _m);
 }
 
+inline uint64_t
+BitExtract(uint64_t _v, uint64_t _m)
+{
+    return (uint64_t)_pext_u64(_v, _m);
+}
+
+inline uint64_t
+BitDeposit(uint64_t _v, uint64_t _m)
+{
+    return (uint64_t)_pdep_u64(_v, _m);
+}
+
 } // namespace numtk
 
 template <typename scalar>

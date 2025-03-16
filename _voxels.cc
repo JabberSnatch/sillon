@@ -2086,6 +2086,18 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
 
 void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 {
+    voxtk::VoxelMask testmask0 = voxtk::VoxelMask::FillArea({ 0, 0, 0 }, { 4, 4, 4 });
+    testmask0.Shift({ 1, 0, 0 });
+
+    voxtk::VoxelMask testmask1 = voxtk::VoxelMask::FillArea({ 0, 0, 0 }, { 4, 4, 4 });
+    testmask1.Shift({ 2, 0, 0 });
+
+    voxtk::VoxelMask testmask2 = voxtk::VoxelMask::FillArea({ 0, 0, 0 }, { 4, 4, 4 });
+    testmask2.Shift({ 3, 0, 0 });
+
+    voxtk::VoxelMask testmask3 = voxtk::VoxelMask::FillArea({ 0, 0, 0 }, { 4, 4, 4 });
+    testmask3.Shift({ 4, 0, 0 });
+
     voxel_state_t* _state = (voxel_state_t*)_pstate;
 
     _state->forward_graph = FullFrameRenderGraph();

@@ -15,22 +15,24 @@ struct VoxelMask
 
     static uint64_t PackFillMask(numtk::vec3u const& begin);
 
-    void Clear();
-    void BitReverse();
+    static VoxelMask FillAbove(numtk::vec3u const& begin);
+    static VoxelMask FillBelow(numtk::vec3u const& end);
+    static VoxelMask FillArea(numtk::vec3u const& begin, numtk::vec3u const& end);
+
+    VoxelMask& Clear();
+    VoxelMask& BitReverse();
 
     VoxelMask BitwiseAnd(VoxelMask const& o) const;
     VoxelMask BitwiseOr(VoxelMask const& o) const;
     VoxelMask BitwiseNot() const;
 
-    void FillAbove(numtk::vec3u const& begin);
-    void FillBelow(numtk::vec3u const& end);
-    void FillArea(numtk::vec3u const& begin, numtk::vec3u const& end);
+    VoxelMask& Shift(numtk::vec3i const& shift);
 
     bool Test(numtk::vec3u const& point) const;
     uint64_t ExtractKernel(numtk::vec3u const& base) const;
 
-    void Set(numtk::vec3u const& point, bool v);
-    void Set(numtk::vec3u const& begin, numtk::vec3u const& end, bool v);
+    VoxelMask& Set(numtk::vec3u const& point, bool v);
+    VoxelMask& Set(numtk::vec3u const& begin, numtk::vec3u const& end, bool v);
 
     bool Full() const;
     bool Empty() const;
@@ -55,6 +57,7 @@ struct Region
     void Set(numtk::vec3u const& point, bool v);
     void Set(numtk::vec3u const& point, DataType const& value);
     void Set(numtk::vec3u const& begin, numtk::vec3u const& end, DataType const& value);
+    void Set(numtk::vec3u const& begin, voxtk::Region<DataType> const& region);
 
     void Clear(numtk::vec3u const& begin, numtk::vec3u const& end);
 
@@ -369,6 +372,23 @@ void Region<DataType>::Set(numtk::vec3u const& begin, numtk::vec3u const& end, D
 }
 
 template <typename DataType>
+void Region<DataType>::Set(numtk::vec3u const& begin, voxtk::Region<DataType> const& region)
+{
+    if (begin.x >= size.x
+        || begin.y >= size.y
+        || begin.z >= size.z)
+        return;
+
+    if (!root)
+    {
+        root = node_pool[node_pool.Reserve()];
+        root->parent = nullptr;
+        root->location = numtk::vec3u{ 0, 0, 0 };
+        root->depth = level_count - 1;
+    }
+}
+
+template <typename DataType>
 void Region<DataType>::Clear(numtk::vec3u const& begin, numtk::vec3u const& end)
 {
     if (begin.x >= size.x
@@ -540,7 +560,81 @@ uint64_t VoxelMask::PackFillMask(numtk::vec3u const& begin)
     return mask;
 }
 
-void VoxelMask::Clear()
+VoxelMask VoxelMask::FillAbove(numtk::vec3u const& begin)
+{
+    VoxelMask output = {};
+
+    if (begin.x > 7u || begin.y > 7u || begin.z > 7u)
+        return output;
+
+    numtk::vec3u const pack_begin = begin >> 2u;/// 4u;
+    numtk::vec3u const bits_begin = begin & 0x3u;//% 4u;
+
+    numtk::vec3u quadrant0 = pack_begin;
+    output.bits[quadrant0.x + quadrant0.y*2 + quadrant0.z*4] = PackFillMask(bits_begin);
+
+    if (quadrant0.x == 0)
+    {
+        numtk::vec3u const quadrant1{ 1u, quadrant0.y, quadrant0.z };
+        output.bits[quadrant1.x + quadrant1.y*2 + quadrant1.z*4] =
+            PackFillMask(numtk::vec3u{ 0, bits_begin.y, bits_begin.z });
+    }
+
+    if (quadrant0.y == 0)
+    {
+        numtk::vec3u const quadrant2{ quadrant0.x, 1u, quadrant0.z };
+        output.bits[quadrant2.x + quadrant2.y*2 + quadrant2.z*4] =
+            PackFillMask(numtk::vec3u{ bits_begin.x, 0, bits_begin.z });
+    }
+
+    if (quadrant0.z == 0)
+    {
+        numtk::vec3u const quadrant3{ quadrant0.x, quadrant0.y, 1u };
+        output.bits[quadrant3.x + quadrant3.y*2 + quadrant3.z*4] =
+            PackFillMask(numtk::vec3u{ bits_begin.x, bits_begin.y, 0 });
+    }
+
+    if (quadrant0.x == 0 && quadrant0.y == 0)
+    {
+        numtk::vec3u const quadrant4{ 1u, 1u, quadrant0.z };
+        output.bits[quadrant4.x + quadrant4.y*2 + quadrant4.z*4] =
+            PackFillMask(numtk::vec3u{ 0, 0, bits_begin.z });
+    }
+
+    if (quadrant0.y == 0 && quadrant0.z == 0)
+    {
+        numtk::vec3u const quadrant5{ quadrant0.x, 1u, 1u };
+        output.bits[quadrant5.x + quadrant5.y*2 + quadrant5.z*4] =
+            PackFillMask(numtk::vec3u{ bits_begin.x, 0, 0 });
+    }
+
+    if (quadrant0.x == 0 && quadrant0.z == 0)
+    {
+        numtk::vec3u const quadrant6{ 1u, quadrant0.y, 1u };
+        output.bits[quadrant6.x + quadrant6.y*2 + quadrant6.z*4] =
+            PackFillMask(numtk::vec3u{ 0, bits_begin.y, 0 });
+    }
+
+    if (quadrant0.x == 0 && quadrant0.y == 0 && quadrant0.z == 0)
+        output.bits[7] = ~0ull;
+
+    return output;
+}
+
+VoxelMask VoxelMask::FillBelow(numtk::vec3u const& end)
+{
+    if (end.x == 0 || end.y == 0 || end.z == 0)
+        return VoxelMask{};
+
+    return FillAbove(numtk::vec3u{ 8u, 8u, 8u, } - end).BitReverse();
+}
+
+VoxelMask VoxelMask::FillArea(numtk::vec3u const& begin, numtk::vec3u const& end)
+{
+    return FillBelow(end).BitwiseAnd(FillAbove(begin));
+}
+
+VoxelMask& VoxelMask::Clear()
 {
     bits[0] = 0ull;
     bits[1] = 0ull;
@@ -550,9 +644,11 @@ void VoxelMask::Clear()
     bits[5] = 0ull;
     bits[6] = 0ull;
     bits[7] = 0ull;
+
+    return *this;
 }
 
-void VoxelMask::BitReverse()
+VoxelMask& VoxelMask::BitReverse()
 {
     bits[0] = numtk::BitReverse(bits[0]);
     bits[1] = numtk::BitReverse(bits[1]);
@@ -566,6 +662,8 @@ void VoxelMask::BitReverse()
     std::swap(bits[1], bits[6]);
     std::swap(bits[2], bits[5]);
     std::swap(bits[3], bits[4]);
+
+    return *this;
 }
 
 VoxelMask VoxelMask::BitwiseAnd(VoxelMask const& o) const
@@ -610,78 +708,48 @@ VoxelMask VoxelMask::BitwiseNot() const
     return output;
 }
 
-void VoxelMask::FillAbove(numtk::vec3u const& begin)
+VoxelMask& VoxelMask::Shift(numtk::vec3i const& shift)
 {
-    if (begin.x > 7u || begin.y > 7u || begin.z > 7u)
-        return;
+    /*
+       0  1  2  3
+       4  5  6  7
+       8  9 10 11
+      12 13 14 15
 
-    numtk::vec3u const pack_begin = begin >> 2u;/// 4u;
-    numtk::vec3u const bits_begin = begin & 0x3u;//% 4u;
+      // X shift
+       x  0  1  2
+       x  4  5  6
+       x  8  9 10
+       x 12 13 14
 
-    numtk::vec3u quadrant0 = pack_begin;
-    bits[quadrant0.x + quadrant0.y*2 + quadrant0.z*4] = PackFillMask(bits_begin);
+      // Y shift
+       x  x  x  x
+       0  1  2  3
 
-    if (quadrant0.x == 0)
-    {
-        numtk::vec3u const quadrant1{ 1u, quadrant0.y, quadrant0.z };
-        bits[quadrant1.x + quadrant1.y*2 + quadrant1.z*4] =
-            PackFillMask(numtk::vec3u{ 0, bits_begin.y, bits_begin.z });
-    }
+      // Z shift
+       x  x  x  x
+       x  x  x  x
+       x  x  x  x
+       x  x  x  x
+     */
 
-    if (quadrant0.y == 0)
-    {
-        numtk::vec3u const quadrant2{ quadrant0.x, 1u, quadrant0.z };
-        bits[quadrant2.x + quadrant2.y*2 + quadrant2.z*4] =
-            PackFillMask(numtk::vec3u{ bits_begin.x, 0, bits_begin.z });
-    }
+#define XBROADCAST(mask) \
+    mask = mask | (mask << 4) | (mask << 8) | (mask << 12);\
+    mask = mask | (mask << 16) | (mask << 32) | (mask << 48);
 
-    if (quadrant0.z == 0)
-    {
-        numtk::vec3u const quadrant3{ quadrant0.x, quadrant0.y, 1u };
-        bits[quadrant3.x + quadrant3.y*2 + quadrant3.z*4] =
-            PackFillMask(numtk::vec3u{ bits_begin.x, bits_begin.y, 0 });
-    }
+    uint64_t xdstmask = (0xfull << shift.x) & 0xfull;
+    XBROADCAST(xdstmask);
 
-    if (quadrant0.x == 0 && quadrant0.y == 0)
-    {
-        numtk::vec3u const quadrant4{ 1u, 1u, quadrant0.z };
-        bits[quadrant4.x + quadrant4.y*2 + quadrant4.z*4] =
-            PackFillMask(numtk::vec3u{ 0, 0, bits_begin.z });
-    }
+    uint64_t xsrcmask = (0xfull >> shift.x);
+    XBROADCAST(xsrcmask);
 
-    if (quadrant0.y == 0 && quadrant0.z == 0)
-    {
-        numtk::vec3u const quadrant5{ quadrant0.x, 1u, 1u };
-        bits[quadrant5.x + quadrant5.y*2 + quadrant5.z*4] =
-            PackFillMask(numtk::vec3u{ bits_begin.x, 0, 0 });
-    }
+    bits[0] = numtk::BitDeposit(numtk::BitExtract(bits[0], xsrcmask), xdstmask);
 
-    if (quadrant0.x == 0 && quadrant0.z == 0)
-    {
-        numtk::vec3u const quadrant6{ 1u, quadrant0.y, 1u };
-        bits[quadrant6.x + quadrant6.y*2 + quadrant6.z*4] =
-            PackFillMask(numtk::vec3u{ 0, bits_begin.y, 0 });
-    }
+    //bits[0] << (shift.z * kSize*kSize);
 
-    if (quadrant0.x == 0 && quadrant0.y == 0 && quadrant0.z == 0)
-        bits[7] = ~0ull;
-}
+#undef XBROADCAST
 
-void VoxelMask::FillBelow(numtk::vec3u const& end)
-{
-    if (end.x == 0 || end.y == 0 || end.z == 0)
-        return;
-
-    FillAbove(numtk::vec3u{ 8u, 8u, 8u, } - end);
-    BitReverse();
-}
-
-void VoxelMask::FillArea(numtk::vec3u const& begin, numtk::vec3u const& end)
-{
-    VoxelMask above{};
-    above.FillAbove(begin);
-    FillBelow(end);
-    *this = BitwiseAnd(above);
+    return *this;
 }
 
 bool VoxelMask::Test(numtk::vec3u const& point) const
@@ -699,7 +767,7 @@ uint64_t VoxelMask::ExtractKernel(numtk::vec3u const& base) const
     return bits[pack_index];
 }
 
-void VoxelMask::Set(numtk::vec3u const& point, bool v)
+VoxelMask& VoxelMask::Set(numtk::vec3u const& point, bool v)
 {
     //numtk::vec3u const pack_point = point >> 2u;/// 4u;
     //numtk::vec3u const bit_point = point & 0x3u;//% 4u;
@@ -709,9 +777,11 @@ void VoxelMask::Set(numtk::vec3u const& point, bool v)
         bits[pack_index] |= (1ull << bit_index);
     else
         bits[pack_index] &= ~(1ull << bit_index);
+
+    return *this;
 }
 
-void VoxelMask::Set(numtk::vec3u const& begin, numtk::vec3u const& end, bool v)
+VoxelMask& VoxelMask::Set(numtk::vec3u const& begin, numtk::vec3u const& end, bool v)
 {
     VoxelMask mask{};
     mask.FillArea(begin, end);
@@ -722,6 +792,8 @@ void VoxelMask::Set(numtk::vec3u const& begin, numtk::vec3u const& end, bool v)
         mask = mask.BitwiseNot();
         *this = BitwiseAnd(mask);
     }
+
+    return *this;
 }
 
 bool VoxelMask::Full() const
