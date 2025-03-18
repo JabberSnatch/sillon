@@ -14,6 +14,7 @@ set_property(TARGET vktk PROPERTY CXX_STANDARD 20)
 
 add_library(sillon MODULE engine.cc _glyphs.cc _icosphere.cc _voxels.cc _editor.cc)
 target_link_libraries(sillon PRIVATE vktk loader_interface)
+target_include_directories(sillon PRIVATE toolkits)
 set_property(TARGET sillon PROPERTY CXX_STANDARD 20)
 
 hotreload_setup(sillon)
@@ -22,3 +23,24 @@ if (UNIX)
   target_compile_options(vktk PRIVATE "-fPIC")
   target_compile_options(sillon PRIVATE "-fvisibility=hidden")
 endif()
+
+
+# === VOXTK_IMPORTERS ===
+
+set(WITH_PYTHON OFF CACHE BOOL "")
+set(WITH_TESTS OFF CACHE BOOL "")
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "")
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS ON)
+
+add_subdirectory(voxtk-importers/laz-perf)
+include_directories(voxtk-importers/laz-perf/cpp)
+
+add_subdirectory(voxtk-importers/copc-lib)
+include_directories(voxtk-importers/copc-lib/cpp/include/copc-lib)
+
+target_link_libraries(sillon PRIVATE copc-lib-s)
+
+# ===

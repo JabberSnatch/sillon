@@ -10,3 +10,6 @@
 [submodule "toolkits"]
 	path = toolkits
 	url = git@github.com:JabberSnatch/toolkits.git
+[submodule "voxtk-importers"]
+	path = voxtk-importers
+	url = git@github.com:JabberSnatch/voxtk-importers.git

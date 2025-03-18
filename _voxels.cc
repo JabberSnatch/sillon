@@ -5,12 +5,14 @@
 #include "mctk/mctk.hh"
 
 #include "systk.hh"
-#include "toolkits/numtk.hh"
+#include <numtk.hh>
 #include "vktk.hh"
-#include "toolkits/dstk.hh"
+#include <dstk.hh>
 
 #define VOXTK_IMPLEMENTATION
-#include "toolkits/voxtk.hh"
+#include <voxtk.hh>
+#define VOXTK_IMPORT_IMPLEMENTATION
+#include "voxtk-importers/voxtk_import.hh"
 
 #include <bit>
 #include <memory>
@@ -1716,8 +1718,8 @@ void LoadRegion(voxel_state_t* state, vktk::Context* vulkan)
 
 void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
 {
-#define AREA_SIZE 128u
-#define NODE_SIZE 4u
+#define AREA_SIZE 512u
+#define NODE_SIZE 32u
 #define SCALE_RATIO AREA_SIZE/NODE_SIZE
 
     static constexpr uint32_t kLogScale = (uint32_t)std::popcount((NODE_SIZE*4) - 1u);
@@ -1862,7 +1864,7 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
 
                                 if (valid_range.x != NODE_SIZE)
                                 {
-#if 1
+#if 0
                                     level_offsets.reserve(level_offsets.size()
                                                           + (NODE_SIZE-valid_range.x));
                                     uint32_t base_size = level_offsets.size();
@@ -1916,7 +1918,7 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
 
                         if (valid_range.z != NODE_SIZE)
                         {
-#if 1
+#if 0
                             level_offsets.reserve(level_offsets.size()
                                                   + (NODE_SIZE-valid_range.z)*NODE_SIZE*NODE_SIZE);
                             uint32_t base_size = level_offsets.size();
@@ -2036,6 +2038,7 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
         state->tilemap_region.Set(numtk::vec3u{ 0 + (index % 512), 0, 0 + (index / 512) }, (uint8_t)1);
 #endif
 
+#if 0
     state->tilemap = vulkan->CreateTexture(
         NODE_SIZE, NODE_SIZE, NODE_SIZE,
         VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
@@ -2060,6 +2063,7 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
                 }
             }
         });
+#endif
 
     state->nodes_buffer = vulkan->CreateBuffer(
         sizeof(float),
@@ -2113,7 +2117,8 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->sparse_runtime.graph = &_state->sparse_graph;
 
     //_state->region = DeserialiseRegion("../r.-1.6.mca");
-    _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
+    //_state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
+    _state->voxel_region = voxtk::importer::ImportCOPC("../LHD_FXX_0437_6707_PTS_C_LAMB93_IGN69.copc.laz", 2048);
     LoadRegion(_state, _vulkan);
     LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
     LoadRegionSparse(_state, _vulkan);
