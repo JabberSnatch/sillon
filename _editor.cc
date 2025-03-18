@@ -3,8 +3,8 @@
 #include <iostream>
 
 #include "vktk.hh"
-#include "numtk.hh"
-#include "voxtk.hh"
+#include "toolkits/numtk.hh"
+#include "toolkits/voxtk.hh"
 
 namespace {
 

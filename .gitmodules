@@ -7,3 +7,6 @@
 [submodule "mctk"]
 	path = mctk
 	url = git@github.com:JabberSnatch/mctk.git
+[submodule "toolkits"]
+	path = toolkits
+	url = git@github.com:JabberSnatch/toolkits.git

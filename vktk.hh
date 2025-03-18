@@ -9,7 +9,7 @@
 
 #include <vulkan/vulkan.h>
 
-#include "numtk.hh"
+#include "toolkits/numtk.hh"
 
 #define CHECKCALL(func, ...)                                            \
     {                                                                   \

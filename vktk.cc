@@ -12,7 +12,7 @@
 #include <vulkan/vulkan.h>
 
 #include "vktk.hh"
-#include "numtk.hh"
+#include "toolkits/numtk.hh"
 
 #include <shaderc/shaderc.hpp>
 

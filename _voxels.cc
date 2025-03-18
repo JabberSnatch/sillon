@@ -5,12 +5,12 @@
 #include "mctk/mctk.hh"
 
 #include "systk.hh"
-#include "numtk.hh"
+#include "toolkits/numtk.hh"
 #include "vktk.hh"
-#include "dstk.hh"
+#include "toolkits/dstk.hh"
 
 #define VOXTK_IMPLEMENTATION
-#include "voxtk.hh"
+#include "toolkits/voxtk.hh"
 
 #include <bit>
 #include <memory>

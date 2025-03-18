@@ -1,7 +1,7 @@
 #include "_icosphere.hh"
 
 #include "loader/iotk.hpp"
-#include "numtk.hh"
+#include "toolkits/numtk.hh"
 #include "vktk.hh"
 
 #include <iostream>
