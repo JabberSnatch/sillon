@@ -1718,8 +1718,17 @@ void LoadRegion(voxel_state_t* state, vktk::Context* vulkan)
 
 void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
 {
-#define AREA_SIZE 512u
+
+#if 0
+
+#define AREA_SIZE 128u
+#define NODE_SIZE 16u
+#else
+
+#define AREA_SIZE 1024u
 #define NODE_SIZE 32u
+#endif
+
 #define SCALE_RATIO AREA_SIZE/NODE_SIZE
 
     static constexpr uint32_t kLogScale = (uint32_t)std::popcount((NODE_SIZE*4) - 1u);
@@ -2118,7 +2127,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
     //_state->region = DeserialiseRegion("../r.-1.6.mca");
     //_state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
-    _state->voxel_region = voxtk::importer::ImportCOPC("../LHD_FXX_0437_6707_PTS_C_LAMB93_IGN69.copc.laz", 2048);
+    _state->voxel_region = voxtk::importer::ImportCOPC("../LHD_FXX_0437_6707_PTS_C_LAMB93_IGN69.copc.laz", 4096);
     LoadRegion(_state, _vulkan);
     LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
     LoadRegionSparse(_state, _vulkan);

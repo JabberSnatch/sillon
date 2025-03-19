@@ -19,7 +19,7 @@ layout(set = 2, binding = 0) uniform usampler3D offsets[];
 
 #define NODE_SIZE 32.0
 #define CHUNK_SIZE 4.0
-#define STACK_SIZE 5
+#define STACK_SIZE 3
 
 vec3 RegionTraversal0(vec3 org, vec3 dir)
 {
@@ -192,7 +192,7 @@ vec3 RegionTraversal3(vec3 org, vec3 dir)
         return (HitNormalDDAContext(ctx) * 0.5 + vec3(0.5)) * 0.1;
 }
 
-vec3 RegionTraversal4(vec3 org, vec3 dir)
+vec4 RegionTraversal4(vec3 org, vec3 dir)
 {
     DDAContextSave ctx_cache[STACK_SIZE];
     vec3 org_cache[STACK_SIZE];
@@ -201,6 +201,7 @@ vec3 RegionTraversal4(vec3 org, vec3 dir)
 
     bool hit = false;
     vec3 output_value = vec3(0.0);
+    float t = 0.0;
 
     int depth = 0;
     DDAContext ctx = InitDDAContext(org, dir, NODE_SIZE);
@@ -255,7 +256,15 @@ vec3 RegionTraversal4(vec3 org, vec3 dir)
                     break;
             }
             else if (depth > STACK_SIZE)
+            {
+                float level_size = 1.0;
+                for (uint index = 0; index < STACK_SIZE; index++)
+                {
+                    t += DDAContextSaveT(ctx_cache[index]) * level_size;
+                    level_size /= ((index & 1) != 0 ? CHUNK_SIZE : NODE_SIZE);
+                }
                 break;
+            }
         }
         else
         {
@@ -289,7 +298,8 @@ vec3 RegionTraversal4(vec3 org, vec3 dir)
                     }
                     else
                     {
-                        output_value = HitNormalDDAContext(ctx);//ctx.voxel_coords;
+                        output_value = HitNormalDDAContext(ctx);
+                        //output_value = ctx.voxel_coords;
                         ++depth;
                     }
                     break;
@@ -311,14 +321,22 @@ vec3 RegionTraversal4(vec3 org, vec3 dir)
                     break;
             }
             else if (depth > STACK_SIZE)
+            {
+                float level_size = 1.0;
+                for (uint index = 0; index < STACK_SIZE; index++)
+                {
+                    t += DDAContextSaveT(ctx_cache[index]) * level_size;
+                    level_size /= ((index & 1) != 0 ? CHUNK_SIZE : NODE_SIZE);
+                }
                 break;
+            }
         }
     }
 
     if (hit)
-        return output_value * vec3(0.5) + vec3(0.5);
+        return vec4(output_value, t);
     else
-        return (HitNormalDDAContext(ctx) * 0.5 + vec3(0.5)) * 0.1;
+        return vec4((HitNormalDDAContext(ctx) * 0.5 + vec3(0.5)) * 0.1, -1.0);
 }
 
 vec3 RegionTraversal(vec3 org, vec3 dir)
@@ -452,8 +470,11 @@ void main()
 
     vec3 org = root_org;
 
-    vec3 trav = RegionTraversal4(org, dir);
-    color.xyz = trav;// * 0.5 + vec3(0.5);
+    vec4 trav = RegionTraversal4(org, dir);
+    if (trav.w > 0.0)
+        color.xyz = vec3((1.0-trav.w)*(1.0-trav.w)*(1.0-trav.w));
+    else
+        color.xyz = trav.xyz;
     color.w = 1.0;
 }
 

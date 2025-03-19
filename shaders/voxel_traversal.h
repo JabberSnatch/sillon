@@ -91,6 +91,11 @@ struct DDAContextSave
     vec3 max_t;
 };
 
+float DDAContextSaveT(in DDAContextSave ctx)
+{
+    return min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
+}
+
 DDAContextSave SaveDDAContext(inout DDAContext ctx)
 {
     DDAContextSave save;
