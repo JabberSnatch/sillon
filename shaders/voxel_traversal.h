@@ -91,9 +91,13 @@ struct DDAContextSave
     vec3 max_t;
 };
 
-float DDAContextSaveT(in DDAContextSave ctx)
+float DDAContextSaveT(in DDAContextSave ctx, vec3 dir, float voxel_count)
 {
-    return min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
+    vec3 delta_t = 1.0 / (abs(dir) * voxel_count);
+    vec3 max_t = ctx.max_t - delta_t * ctx.mask.xyz * ctx.mask.w;
+    return min(max_t.x, min(max_t.y, max_t.z));
+
+    //return min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
 }
 
 DDAContextSave SaveDDAContext(inout DDAContext ctx)
