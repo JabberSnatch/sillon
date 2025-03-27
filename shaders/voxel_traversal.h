@@ -28,7 +28,23 @@ DDAContext InitDDAContext(vec3 org, vec3 dir, float voxel_count)
     ctx.voxel_coords = (floor(voxel_space_org) + vec3(0.5)) / voxel_count;
     ctx.voxel_step = ctx.step_sign / voxel_count;
 
-    ctx.mask.xyz = vec3(0.0);
+    vec3 order = vec3(
+        // ctx.max_t.x < ctx.max_t.y
+        1.0 - step(ctx.max_t.y, ctx.max_t.x),
+        // ctx.max_t.x < ctx.max_t.z
+        1.0 - step(ctx.max_t.z, ctx.max_t.x),
+        // ctx.max_t.y < ctx.max_t.z
+        1.0 - step(ctx.max_t.z, ctx.max_t.y));
+
+    ctx.mask.xyz = vec3(
+        // X && Y
+        order.x * order.y,
+        // !X && Z
+        (1.0 - order.x) * order.z,
+        // (X && !Y) || (!X && Z)
+        order.x * (1.0 - order.y) + (1.0 - order.x) * (1.0 - order.z)
+        );
+
     // Equivalent to mask =
     // ((voxel_coords.x * step_sign.x < exit_value.x) &&
     // (voxel_coords.y * step_sign.y < exit_value.y) &&
@@ -95,9 +111,7 @@ float DDAContextSaveT(in DDAContextSave ctx, vec3 dir, float voxel_count)
 {
     vec3 delta_t = 1.0 / (abs(dir) * voxel_count);
     vec3 max_t = ctx.max_t - delta_t * ctx.mask.xyz * ctx.mask.w;
-    return min(max_t.x, min(max_t.y, max_t.z));
-
-    //return min(ctx.max_t.x, min(ctx.max_t.y, ctx.max_t.z));
+    return max(0.0, min(max_t.x, min(max_t.y, max_t.z)));
 }
 
 DDAContextSave SaveDDAContext(inout DDAContext ctx)

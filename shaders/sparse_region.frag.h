@@ -197,7 +197,7 @@ vec4 RegionTraversal4(vec3 org, vec3 dir)
     DDAContextSave ctx_cache[STACK_SIZE];
     vec3 org_cache[STACK_SIZE];
     uint tex_index[STACK_SIZE];
-    uvec2 data[STACK_SIZE];
+    uvec2 data[STACK_SIZE+1];
 
     bool hit = false;
     vec3 output_value = vec3(0.0);
@@ -234,7 +234,7 @@ vec4 RegionTraversal4(vec3 org, vec3 dir)
                     }
                     else
                     {
-                        output_value = HitNormalDDAContext(ctx);// ctx.voxel_coords;
+                        output_value = HitNormalDDAContext(ctx);
                         ++depth;
                     }
                     break;
@@ -260,10 +260,11 @@ vec4 RegionTraversal4(vec3 org, vec3 dir)
                 float level_size = 1.0;
                 for (uint index = 0; index < STACK_SIZE; index++)
                 {
-                    float voxel_count = ((index & 1) != 0 ? NODE_SIZE : CHUNK_SIZE);
+                    float voxel_count = ((index & 1) != 0 ? CHUNK_SIZE : NODE_SIZE);
                     t += DDAContextSaveT(ctx_cache[index], dir, voxel_count) * level_size;
                     level_size /= voxel_count;
                 }
+                t += ctx.t * level_size;
                 break;
             }
         }
@@ -300,7 +301,6 @@ vec4 RegionTraversal4(vec3 org, vec3 dir)
                     else
                     {
                         output_value = HitNormalDDAContext(ctx);
-                        //output_value = ctx.voxel_coords;
                         ++depth;
                     }
                     break;
@@ -328,9 +328,9 @@ vec4 RegionTraversal4(vec3 org, vec3 dir)
                 {
                     float voxel_count = ((index & 1) != 0 ? CHUNK_SIZE : NODE_SIZE);
                     t += DDAContextSaveT(ctx_cache[index], dir, voxel_count) * level_size;
-                    //t += DDAContextSaveT(ctx_cache[index]) * level_size;
                     level_size /= voxel_count;
                 }
+                t += ctx.t * level_size;
                 break;
             }
         }
@@ -370,7 +370,7 @@ void main()
 
     vec4 trav = RegionTraversal4(org, dir);
     if (trav.w >= 0.0)
-        color.xyz = vec3(exp(-(trav.w*100.0)));
+        color.xyz = vec3(exp(-((trav.w+depth)*10.0)));
     else
         color.xyz = trav.xyz;
     color.w = 1.0;
