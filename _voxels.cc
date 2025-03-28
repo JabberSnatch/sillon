@@ -1062,6 +1062,7 @@ DispatchStageInfo SparseRegionDispatchStageInfo()
 #endif
 
     output.push_constants = std::vector<DispatchStageInfo::PushConstantRange>{
+        { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(numtk::vec3f) }
     };
 
     output.graphics.state_overrides = std::vector<vktk::Context::StateOverride>{};
@@ -2127,7 +2128,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
     //_state->region = DeserialiseRegion("../r.-1.6.mca");
     //_state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
-    _state->voxel_region = voxtk::importer::ImportCOPC("../LHD_FXX_0697_6520_PTS_C_LAMB93_IGN69.copc.laz", 4096);
+    _state->voxel_region = voxtk::importer::ImportCOPC("../LHD_FXX_0704_6519_PTS_C_LAMB93_IGN69.copc.laz", 4096);
     LoadRegion(_state, _vulkan);
     LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
     LoadRegionSparse(_state, _vulkan);
@@ -2979,6 +2980,17 @@ void Draw(void* _pstate,
 
         _state->sparse_runtime.BindGraphicsCommand(
             &sparse_region_node, 0, 0, command);
+
+        numtk::vec3f* push_constants =
+            (numtk::vec3f*)_state->sparse_runtime.BindPushConstants(
+                NodeBindingPoint{
+                    .node = &sparse_region_node,
+                    .stage_index = 0,
+                    .type = NodeBindingPoint::BindingType_PushConstantRange,
+                    .push_constants = PushConstantsBindingInfo{ 0 }
+                },
+                0);
+        *push_constants = sun_dir;
 
         _state->sparse_runtime.BindFramebufferArea(
             &sparse_region_node,

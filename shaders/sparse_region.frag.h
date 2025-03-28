@@ -14,6 +14,10 @@ layout(std140, set = 0, binding = 1) uniform MatrixBlock {
     ivec2 screen_size;
 };
 
+layout(push_constant, std430) uniform PushConstants {
+    vec3 light_dir;
+};
+
 layout(set = 1, binding = 0) uniform usampler3D masks[];
 layout(set = 2, binding = 0) uniform usampler3D offsets[];
 
@@ -357,20 +361,30 @@ void main()
     vec3 step_sign = sign(-dir);
     vec3 max_t = abs(((step_sign * 0.5 + vec3(0.5)) - (step_sign * iFS_volume_coords)) / dir);
 
-    float depth = distance(iFS_camera_position * 0.5 + vec3(0.5), iFS_volume_coords);
+    float entry_depth = distance(iFS_camera_position * 0.5 + vec3(0.5), iFS_volume_coords);
     float region_begin = min(max_t.x, min(max_t.y, max_t.z));
 
     vec3 root_org = iFS_volume_coords
         - dir * 0.00001
-        - (dir * min(depth, region_begin));
+        - (dir * min(entry_depth, region_begin));
 
-    depth = max(depth - region_begin, 0.0);
+    entry_depth = max(entry_depth - region_begin, 0.0);
 
     vec3 org = root_org;
 
     vec4 trav = RegionTraversal4(org, dir);
     if (trav.w >= 0.0)
-        color.xyz = vec3(exp(-((trav.w+depth)*10.0)));
+    {
+        float frag_depth = trav.w + entry_depth;
+        float fog = exp(-frag_depth * 10.0);
+
+        vec3 hitp = org + dir*trav.w;
+        float shadow = RegionTraversal4(hitp + light_dir*0.000001, light_dir).w > 0.0 ? 0.0 : 1.0;
+
+        float diffuse = max(0.0, dot(light_dir, trav.xyz));
+
+        color.xyz = vec3(mix(shadow.xxx * diffuse, vec3(0.3, 0.5, 0.5), (1.0 - fog).xxx));
+    }
     else
         color.xyz = trav.xyz;
     color.w = 1.0;
