@@ -24,6 +24,7 @@ layout(set = 2, binding = 0) uniform usampler3D offsets[];
 #define NODE_SIZE 32.0
 #define CHUNK_SIZE 4.0
 #define STACK_SIZE 3
+#define MAX_DEPTH STACK_SIZE
 
 vec3 RegionTraversal0(vec3 org, vec3 dir)
 {
@@ -223,7 +224,7 @@ vec4 RegionTraversal4(vec3 org, vec3 dir)
                 if (data[depth] != uvec2(0, 0))
                 {
                     hit = true;
-                    if (depth < STACK_SIZE)
+                    if (depth < MAX_DEPTH)
                     {
                         ctx_cache[depth] = SaveDDAContext(ctx);
                         org_cache[depth] = org;
@@ -259,16 +260,16 @@ vec4 RegionTraversal4(vec3 org, vec3 dir)
                 else
                     break;
             }
-            else if (depth > STACK_SIZE)
+            else if (depth > MAX_DEPTH)
             {
                 float level_size = 1.0;
-                for (uint index = 0; index < STACK_SIZE; index++)
+                for (uint index = 0; index < MAX_DEPTH; index++)
                 {
                     float voxel_count = ((index & 1) != 0 ? CHUNK_SIZE : NODE_SIZE);
                     t += DDAContextSaveT(ctx_cache[index], dir, voxel_count) * level_size;
                     level_size /= voxel_count;
                 }
-                t += ctx.t * level_size;
+                t += HitTDDAContext(ctx) * level_size;
                 break;
             }
         }
@@ -283,7 +284,7 @@ vec4 RegionTraversal4(vec3 org, vec3 dir)
                 if ((data[depth-1][side_index] & (1<<voxel_index)) != 0)
                 {
                     hit = true;
-                    if (depth < STACK_SIZE)
+                    if (depth < MAX_DEPTH)
                     {
                         ctx_cache[depth] = SaveDDAContext(ctx);
                         org_cache[depth] = org;
@@ -325,16 +326,16 @@ vec4 RegionTraversal4(vec3 org, vec3 dir)
                 else
                     break;
             }
-            else if (depth > STACK_SIZE)
+            else if (depth > MAX_DEPTH)
             {
                 float level_size = 1.0;
-                for (uint index = 0; index < STACK_SIZE; index++)
+                for (uint index = 0; index < MAX_DEPTH; index++)
                 {
                     float voxel_count = ((index & 1) != 0 ? CHUNK_SIZE : NODE_SIZE);
                     t += DDAContextSaveT(ctx_cache[index], dir, voxel_count) * level_size;
                     level_size /= voxel_count;
                 }
-                t += ctx.t * level_size;
+                t += HitTDDAContext(ctx) * level_size;
                 break;
             }
         }
@@ -379,7 +380,7 @@ void main()
         float fog = exp(-frag_depth * 10.0);
 
         vec3 hitp = org + dir*trav.w;
-        float shadow = RegionTraversal4(hitp + light_dir*0.000001, light_dir).w > 0.0 ? 0.0 : 1.0;
+        float shadow = RegionTraversal4(hitp + light_dir*0.0001, light_dir).w >= 0.0 ? 0.0 : 1.0;
 
         float diffuse = max(0.0, dot(light_dir, trav.xyz));
 

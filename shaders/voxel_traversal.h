@@ -100,6 +100,12 @@ vec3 HitNormalDDAContext(DDAContext ctx)
     return ctx.mask.xyz * -ctx.step_sign;
 }
 
+float HitTDDAContext(DDAContext ctx)
+{
+    vec3 max_t = ctx.max_t - ctx.delta_t * ctx.mask.xyz;// * ctx.mask.w;
+    return max(0.0, min(max_t.x, min(max_t.y, max_t.z)));
+}
+
 struct DDAContextSave
 {
     vec4 mask;
