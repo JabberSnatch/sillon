@@ -365,4 +365,123 @@ struct Context
     std::unordered_set<VkFence> pending_fences = {};
 };
 
+namespace RenderGraph
+{
+
+struct ShaderStageDesc
+{
+    VkShaderStageFlagBits stage;
+    std::vector<std::string> source;
+};
+
+struct StageBindingDesc
+{
+    VkShaderStageFlags stages;
+    VkDescriptorType type;
+    VkDescriptorBindingFlags flags;
+    uint32_t count;
+};
+
+struct StageBindingGroupDesc
+{
+    std::vector<StageBindingDesc> bindings;
+};
+
+struct PushConstantRangeDesc
+{
+    VkShaderStageFlags stages;
+    uint32_t offset;
+    uint32_t size;
+};
+
+struct GraphicsStageDesc
+{
+    std::vector<vktk::Context::StateOverride> state_overrides;
+
+    // geometry attachments
+    VkPrimitiveTopology topology;
+    std::vector<vktk::Context::VertexInput> input_layout;
+};
+
+struct DispatchStageDesc
+{
+    std::string name;
+    std::vector<ShaderStageDesc> shaders;
+    uint32_t group_instance_count;
+    std::vector<StageBindingGroupDesc> binding_groups;
+    std::vector<PushConstantRangeDesc> push_constants;
+    GraphicsStageDesc graphics;
+};
+
+
+enum NodeDispatchMode
+{
+    NodeDispatchMode_Graphics,
+    NodeDispatchMode_Compute,
+};
+
+union ClearValue
+{
+    numtk::vec4f color;
+    struct {
+        float depth;
+        uint32_t stencil;
+    } depth_stencil;
+};
+
+struct RenderAttachment {
+    VkImageType type;
+    VkFormat format;
+    ClearValue clear_value;
+};
+
+struct GraphicsNodeDesc
+{
+    std::vector<RenderAttachment> attachments;
+};
+
+struct DispatchNodeDesc
+{
+    std::string name;
+    NodeDispatchMode mode;
+    std::vector<DispatchStageDesc> sequence;
+    GraphicsNodeDesc graphics;
+};
+
+
+namespace Runtime
+{
+
+struct StageBindingGroupStatic
+{
+    vktk::DescriptorPool pool;
+    std::vector<VkDescriptorSet> sets;
+};
+
+struct DispatchStageStatic
+{
+    VkPipelineLayout pipeline_layout;
+    std::vector<StageBindingGroupStatic> binding_groups;
+};
+
+struct DispatchNodeStatic
+{
+    std::vector<DispatchStageStatic> stages;
+};
+
+struct GraphicsNodeFramebuffer
+{
+    VkRenderPass render_pass;
+};
+
+struct DispatchNodeFramebuffer
+{
+    std::vector<VkPipeline> stages;
+    GraphicsNodeFramebuffer graphics;
+};
+
+} // namespace Runtime
+
+} // namespace RenderGraph
+
 } // namespace vktk
