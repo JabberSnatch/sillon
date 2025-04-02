@@ -369,34 +369,32 @@ struct Context
 namespace RenderGraph
 {
 
-struct ShaderStageDesc
+namespace Layout
 {
+
+struct ShaderStage {
     VkShaderStageFlagBits stage;
     std::vector<std::string> source;
 };
 
-struct StageBindingDesc
-{
+struct StageBinding {
     VkShaderStageFlags stages;
     VkDescriptorType type;
     VkDescriptorBindingFlags flags;
     uint32_t count;
 };
 
-struct StageBindingGroupDesc
-{
-    std::vector<StageBindingDesc> bindings;
+struct StageBindingGroup {
+    std::vector<StageBinding> bindings;
 };
 
-struct PushConstantRangeDesc
-{
+struct PushConstantRange {
     VkShaderStageFlags stages;
     uint32_t offset;
     uint32_t size;
 };
 
-struct GraphicsStageDesc
-{
+struct GraphicsStage {
     std::vector<vktk::Context::StateOverride> state_overrides;
 
     // geometry attachments
@@ -404,25 +402,21 @@ struct GraphicsStageDesc
     std::vector<vktk::Context::VertexInput> input_layout;
 };
 
-struct DispatchStageDesc
-{
+struct DispatchStage {
     std::string name;
-    std::vector<ShaderStageDesc> shaders;
+    std::vector<ShaderStage> shaders;
     uint32_t group_instance_count;
-    std::vector<StageBindingGroupDesc> binding_groups;
-    std::vector<PushConstantRangeDesc> push_constants;
-    GraphicsStageDesc graphics;
+    std::vector<StageBindingGroup> binding_groups;
+    std::vector<PushConstantRange> push_constants;
+    GraphicsStage graphics;
 };
 
-
-enum NodeDispatchMode
-{
+enum NodeDispatchMode {
     NodeDispatchMode_Graphics,
     NodeDispatchMode_Compute,
 };
 
-union ClearValue
-{
+union ClearValue {
     numtk::vec4f color;
     struct {
         float depth;
@@ -436,40 +430,31 @@ struct RenderAttachment {
     ClearValue clear_value;
 };
 
-struct GraphicsNodeDesc
-{
+struct GraphicsNode {
     std::vector<RenderAttachment> attachments;
 };
 
-struct DispatchNodeDesc
-{
+struct DispatchNode {
     std::string name;
     NodeDispatchMode mode;
-    std::vector<DispatchStageDesc> sequence;
-    GraphicsNodeDesc graphics;
+    std::vector<DispatchStage> sequence;
+    GraphicsNode graphics;
 };
 
-namespace Layout
-{
-
-struct ShaderLocationDesc
-{
+struct ShaderLocation {
     uint32_t group_index;
     uint32_t binding_index;
 };
 
-struct FramebufferLocationDesc
-{
+struct FramebufferLocation {
     uint32_t attachment_index;
 };
 
-struct PushConstantsLocationDesc
-{
+struct PushConstantsLocation {
     uint32_t range_index;
 };
 
-enum BindingType
-{
+enum BindingType {
     BindingType_Shader,
     BindingType_Framebuffer,
     BindingType_PushConstantRange,
@@ -477,15 +462,14 @@ enum BindingType
     BindingType_Present,
 };
 
-struct NodeBindingPoint
-{
-    DispatchNodeDesc const* node;
+struct NodeBindingPoint {
+    DispatchNode const* node;
     uint32_t stage_index;
     BindingType type;
     union {
-        ShaderLocationDesc shader;
-        FramebufferLocationDesc framebuffer;
-        PushConstantsLocationDesc push_constants;
+        ShaderLocation shader;
+        FramebufferLocation framebuffer;
+        PushConstantsLocation push_constants;
     };
 };
 
@@ -494,29 +478,39 @@ enum EdgeType {
     EdgeType_Buffer,
 };
 
-struct GraphEdge
-{
+struct GraphEdge {
     EdgeType type;
     NodeBindingPoint source;
     NodeBindingPoint target;
 };
 
-struct BindingPointSync
-{
+struct BindingPointSync {
     VkPipelineStageFlags stage;
     VkAccessFlags access;
     VkImageLayout layout;
 };
 
-BindingPointSync BindingPointSyncRequirements(EdgeType type, NodeBindingPoint const& binding_point);
+struct DispatchGraph {
+    std::vector<DispatchNode> nodes;
+    std::vector<GraphEdge> edges;
+
+    std::unordered_map<DispatchNode const*, std::vector<uint32_t>> edges_in;
+    std::unordered_map<DispatchNode const*, std::vector<uint32_t>> edges_out;
+
+    void InsertEdge(GraphEdge const& edge);
+    std::vector<vktk::Context::RenderPassAttachment> RenderPassDescription(
+        uint32_t _node_index,
+        VkFormat const* _swapchain_format = nullptr) const;
+
+    static BindingPointSync BindingPointSyncRequirements(EdgeType type, NodeBindingPoint const& binding_point);
+};
 
 } // namespace Layout
 
-namespace Bindings
+namespace Binding
 {
 
-struct ShaderResource
-{
+struct ShaderResource {
     uint32_t descriptor_count;
     union {
         VkDescriptorImageInfo const* images;
@@ -524,39 +518,33 @@ struct ShaderResource
     };
 };
 
-enum DispatchCommand
-{
+enum DispatchCommand {
     DispatchCommand_Draw,
     DispatchCommand_DrawIndexed,
 };
 
-struct GraphicsCommand
-{
+struct GraphicsCommand {
     DispatchCommand command;
     uint32_t vertex_count;
     uint32_t instance_count;
 };
 
-struct FramebufferArea
-{
+struct FramebufferArea {
     uint32_t framebuffer_index;
     numtk::bounds2u scissor;
     numtk::bounds2f viewport;
 };
 
-struct DispatchInstance
-{
+struct DispatchInstance {
     GraphicsCommand graphics;
     std::vector<std::unique_ptr<uint8_t[]>> push_constants;
 };
 
-struct DispatchStage
-{
+struct DispatchStage {
     std::vector<DispatchInstance> instances;
 };
 
-struct DispatchNode
-{
+struct DispatchNode {
     FramebufferArea area_binding;
     std::vector<VkFramebuffer> framebuffers;
     std::vector<DispatchStage> stages;
@@ -569,91 +557,68 @@ struct PNextEntry {
 
 using PNextMap = std::unordered_map<std::string, std::vector<PNextEntry>>;
 
-} // namespace Bindings
-
+} // namespace Binding
 
 namespace Runtime
 {
 
-struct StageBindingGroupStatic
-{
+struct StageBindingGroupStatic {
     vktk::DescriptorPool pool;
     std::vector<VkDescriptorSet> sets;
 };
 
-struct DispatchStageStatic
-{
+struct DispatchStageStatic {
     VkPipelineLayout pipeline_layout;
     std::vector<StageBindingGroupStatic> binding_groups;
 };
 
-struct DispatchNodeStatic
-{
+struct DispatchNodeStatic {
     std::vector<DispatchStageStatic> stages;
 };
 
-struct GraphicsNodeFramebuffer
-{
+struct GraphicsNodeFramebuffer {
     VkRenderPass render_pass;
 };
 
-struct DispatchNodeFramebuffer
-{
+struct DispatchNodeFramebuffer {
     std::vector<VkPipeline> stages;
     GraphicsNodeFramebuffer graphics;
 };
 
-} // namespace Runtime
-
-
-struct DispatchGraph
-{
-    std::vector<DispatchNodeDesc> nodes;
-    std::vector<Layout::GraphEdge> edges;
-
-    std::unordered_map<DispatchNodeDesc const*, std::vector<uint32_t>> edges_in;
-    std::unordered_map<DispatchNodeDesc const*, std::vector<uint32_t>> edges_out;
-
-    void InsertEdge(Layout::GraphEdge const& edge);
-    std::vector<vktk::Context::RenderPassAttachment> RenderPassDescription(
-        uint32_t _node_index,
-        VkFormat const* _swapchain_format = nullptr) const;
-};
-
-struct DispatchRuntime
-{
+struct DispatchRuntime {
     vktk::Context* vulkan;
-    DispatchGraph const* graph;
-    std::vector<Runtime::DispatchNodeStatic> nodes_static;
-    std::vector<Runtime::DispatchNodeFramebuffer> nodes_framebuffer;
-    std::vector<Bindings::DispatchNode> nodes_bindings;
+    Layout::DispatchGraph const* graph;
+    std::vector<DispatchNodeStatic> nodes_static;
+    std::vector<DispatchNodeFramebuffer> nodes_framebuffer;
+    std::vector<Binding::DispatchNode> nodes_bindings;
 
     void ClearStaticRuntime();
     void ClearFramebufferRuntime();
 
-    void GenerateStaticRuntime(Bindings::PNextMap const& _pNext_map = {});
+    void GenerateStaticRuntime(Binding::PNextMap const& _pNext_map = {});
     void GenerateFramebufferRuntime(VkFormat const* _swapchain_format = nullptr);
-    void Dispatch(vktk::CommandBuffer& _command_buffer);
+    void Dispatch(vktk::CommandBuffer& _command_buffer) const;
 
-    void BindSwapchain(DispatchNodeDesc const* _node,
+    void BindSwapchain(Layout::DispatchNode const* _node,
                        vktk::Swapchain const& _swapchain);
-    void BindAttachments(DispatchNodeDesc const* _node,
+    void BindAttachments(Layout::DispatchNode const* _node,
                          numtk::vec2u const& _size,
                          std::vector<VkImageView> const& _attachments);
-    void BindFramebufferArea(DispatchNodeDesc const* _node,
-                             Bindings::FramebufferArea const& _area);
-    void BindGraphicsCommand(DispatchNodeDesc const* _node,
+    void BindFramebufferArea(Layout::DispatchNode const* _node,
+                             Binding::FramebufferArea const& _area);
+    void BindGraphicsCommand(Layout::DispatchNode const* _node,
                              uint32_t _stage_index,
                              uint32_t _instance_index,
-                             Bindings::GraphicsCommand const& _command);
+                             Binding::GraphicsCommand const& _command);
 
     void* BindPushConstants(Layout::NodeBindingPoint const& _location,
                             uint32_t _instance_index);
     VkWriteDescriptorSet BindShaderResource(Layout::NodeBindingPoint const& _location,
                                             uint32_t _instance_index,
-                                            Bindings::ShaderResource const& _resources);
+                                            Binding::ShaderResource const& _resources);
 };
 
+} // namespace Runtime
 
 } // namespace RenderGraph
 
