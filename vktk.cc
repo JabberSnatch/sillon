@@ -1960,10 +1960,12 @@ void* PNextLookup(VkBaseOutStructure* _out_struct, VkStructureType _type)
     return nullptr;
 }
 
-namespace RenderGraph
+} // namespace vktk
+
+namespace vkrg
 {
 
-namespace Layout
+namespace layout
 {
 
 void
@@ -1987,7 +1989,7 @@ DispatchGraph::RenderPassDescription(uint32_t _node_index,
     DispatchNode const& node = nodes[_node_index];
     for (uint32_t index = 0u; index < (uint32_t)node.graphics.attachments.size(); ++index)
     {
-        NodeBindingPoint binding_point = {};
+        BindingPoint binding_point = {};
         binding_point.node = &node;
         binding_point.stage_index = -1;
         binding_point.type = BindingType_Framebuffer;
@@ -2031,7 +2033,7 @@ DispatchGraph::RenderPassDescription(uint32_t _node_index,
 }
 
 BindingPointSync
-DispatchGraph::BindingPointSyncRequirements(EdgeType type, NodeBindingPoint const& binding_point)
+DispatchGraph::BindingPointSyncRequirements(EdgeType type, BindingPoint const& binding_point)
 {
     BindingPointSync output = {};
     output.access = VK_ACCESS_NONE;
@@ -2108,13 +2110,13 @@ DispatchGraph::BindingPointSyncRequirements(EdgeType type, NodeBindingPoint cons
     return output;
 }
 
-} // namespace Layout
+} // namespace layout
 
-namespace Runtime
+namespace runtime
 {
 
 void
-DispatchRuntime::ClearStaticRuntime()
+DispatchContext::ClearStaticRuntime()
 {
     for (DispatchNodeStatic& node_runtime : nodes_static)
     {
@@ -2140,9 +2142,9 @@ DispatchRuntime::ClearStaticRuntime()
 }
 
 void
-DispatchRuntime::ClearFramebufferRuntime()
+DispatchContext::ClearFramebufferRuntime()
 {
-    for (Binding::DispatchNode& bindings : nodes_bindings)
+    for (bind::DispatchNode& bindings : nodes_bindings)
     {
         for (VkFramebuffer framebuffer : bindings.framebuffers)
             vkDestroyFramebuffer(vulkan->device, framebuffer, nullptr);
@@ -2162,13 +2164,13 @@ DispatchRuntime::ClearFramebufferRuntime()
 }
 
 void
-DispatchRuntime::GenerateStaticRuntime(Binding::PNextMap const& _pNext_map)
+DispatchContext::GenerateStaticRuntime(bind::PNextMap const& _pNext_map)
 {
-    for (Layout::DispatchNode const& node : graph->nodes)
+    for (layout::DispatchNode const& node : graph->nodes)
     {
         DispatchNodeStatic static_runtime = {};
 
-        for (Layout::DispatchStage const& stage : node.sequence)
+        for (layout::DispatchStage const& stage : node.sequence)
         {
             DispatchStageStatic stage_static = {};
             std::vector<VkDescriptorSetLayout> set_layouts = {};
@@ -2179,19 +2181,19 @@ DispatchRuntime::GenerateStaticRuntime(Binding::PNextMap const& _pNext_map)
             if (_pNext_map.count(stage.name))
                 stage_pnext = _pNext_map[stage.name];
 #endif
-            std::vector<Binding::PNextEntry> stage_pnexts = {};
+            std::vector<bind::PNextEntry> stage_pnexts = {};
             if (_pNext_map.count(stage.name))
                 stage_pnexts = _pNext_map.at(stage.name);
 
             //for (DispatchStageInfo::BindingGroupInfo const& binding_group : stage.binding_groups)
             for (uint32_t group_index = 0u; group_index < (uint32_t)stage.binding_groups.size(); ++group_index)
             {
-                Layout::StageBindingGroup const& binding_group = stage.binding_groups[group_index];
+                layout::StageBindingGroup const& binding_group = stage.binding_groups[group_index];
 
                 StageBindingGroupStatic descriptor = {};
                 std::vector<vktk::Context::DescriptorSetBindingPoint> bindings = {};
 
-                for (Layout::StageBinding const& binding : binding_group.bindings)
+                for (layout::StageBinding const& binding : binding_group.bindings)
                 {
                     bindings.push_back(vktk::Context::DescriptorSetBindingPoint{
                         binding.type,
@@ -2229,7 +2231,7 @@ DispatchRuntime::GenerateStaticRuntime(Binding::PNextMap const& _pNext_map)
                 {
                     auto group_pnext_it = std::find_if(
                         stage_pnexts.begin(), stage_pnexts.end(),
-                        [group_index](Binding::PNextEntry const& entry) {
+                        [group_index](bind::PNextEntry const& entry) {
                             return entry.binding_group_index == group_index;
                         });
                     if (group_pnext_it != stage_pnexts.end())
@@ -2260,7 +2262,7 @@ DispatchRuntime::GenerateStaticRuntime(Binding::PNextMap const& _pNext_map)
                 set_layouts.push_back(descriptor.pool.layout);
             }
 
-            for (Layout::PushConstantRange const& push_constant : stage.push_constants)
+            for (layout::PushConstantRange const& push_constant : stage.push_constants)
             {
                 push_constant_ranges.push_back(VkPushConstantRange{
                     push_constant.stages,
@@ -2288,26 +2290,26 @@ DispatchRuntime::GenerateStaticRuntime(Binding::PNextMap const& _pNext_map)
 }
 
 void
-DispatchRuntime::GenerateFramebufferRuntime(VkFormat const* _swapchain_format)
+DispatchContext::GenerateFramebufferRuntime(VkFormat const* _swapchain_format)
 {
     for (uint32_t node_index = 0; node_index < (uint32_t)graph->nodes.size(); ++node_index)
     {
-        Layout::DispatchNode const& node = graph->nodes[node_index];
+        layout::DispatchNode const& node = graph->nodes[node_index];
         DispatchNodeStatic const& node_static = nodes_static[node_index];
         DispatchNodeFramebuffer framebuffer_runtime = {};
 
-        if (node.mode == Layout::NodeDispatchMode_Graphics)
+        if (node.mode == layout::DispatchMode_Graphics)
             framebuffer_runtime.graphics.render_pass =
                 vulkan->CreateRenderPass(
                     graph->RenderPassDescription(node_index, _swapchain_format));
 
         for (uint32_t stage_index = 0; stage_index < (uint32_t)node.sequence.size(); ++stage_index)
         {
-            Layout::DispatchStage const& stage = node.sequence[stage_index];
+            layout::DispatchStage const& stage = node.sequence[stage_index];
             DispatchStageStatic const& runtime = node_static.stages[stage_index];
 
             std::vector<vktk::Context::PipelineStage> pipeline_stages = {};
-            for (Layout::ShaderStage const& shader : stage.shaders)
+            for (layout::ShaderStage const& shader : stage.shaders)
             {
                 std::string shader_name = stage.name;
                 switch (shader.stage)
@@ -2323,7 +2325,7 @@ DispatchRuntime::GenerateFramebufferRuntime(VkFormat const* _swapchain_format)
                 pipeline_stages.push_back(vktk::Context::PipelineStage{ shader_module, shader.stage });
             }
 
-            if (node.mode == Layout::NodeDispatchMode_Graphics)
+            if (node.mode == layout::DispatchMode_Graphics)
             {
                 VkPipeline pipeline = vulkan->CreatePipeline(
                     runtime.pipeline_layout,
@@ -2346,21 +2348,21 @@ DispatchRuntime::GenerateFramebufferRuntime(VkFormat const* _swapchain_format)
 }
 
 void
-DispatchRuntime::Dispatch(vktk::CommandBuffer& _command_buffer) const
+DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
 {
     for (uint32_t node_index = 0u;
          node_index < (uint32_t)graph->nodes.size();
          ++node_index)
     {
-        Layout::DispatchNode const& node_info = graph->nodes[node_index];
-        Binding::DispatchNode const& bindings = nodes_bindings[node_index];
+        layout::DispatchNode const& node_info = graph->nodes[node_index];
+        bind::DispatchNode const& bindings = nodes_bindings[node_index];
         DispatchNodeFramebuffer const& framebuffer = nodes_framebuffer[node_index];
         DispatchNodeStatic const& runtime = nodes_static[node_index];
 
-        Layout::GraphicsNode const& graphics_info = node_info.graphics;
+        layout::GraphicsNode const& graphics_info = node_info.graphics;
 
         std::vector<VkClearValue> clear_values = {};
-        for(Layout::RenderAttachment const& attachment : graphics_info.attachments)
+        for(layout::RenderAttachment const& attachment : graphics_info.attachments)
         {
             VkClearValue clear_value = {};
             std::memcpy(&clear_value, &attachment.clear_value, sizeof(VkClearValue));
@@ -2430,7 +2432,7 @@ DispatchRuntime::Dispatch(vktk::CommandBuffer& _command_buffer) const
                      range_index < (uint32_t)node_info.sequence[stage_index].push_constants.size();
                      ++range_index)
                 {
-                    Layout::PushConstantRange const& range =
+                    layout::PushConstantRange const& range =
                         node_info.sequence[stage_index].push_constants[range_index];
                     void* memory = bindings
                         .stages[stage_index]
@@ -2444,12 +2446,12 @@ DispatchRuntime::Dispatch(vktk::CommandBuffer& _command_buffer) const
                                        memory);
                 }
 
-                Binding::GraphicsCommand const& graphics_command =
+                bind::GraphicsCommand const& graphics_command =
                     bindings.stages[stage_index].instances[dispatch_index].graphics;
 
                 switch(graphics_command.command)
                 {
-                case Binding::DispatchCommand_Draw:
+                case bind::DispatchCommand_Draw:
                 {
                     vkCmdDraw(_command_buffer,
                               graphics_command.vertex_count,
@@ -2466,14 +2468,14 @@ DispatchRuntime::Dispatch(vktk::CommandBuffer& _command_buffer) const
 }
 
 void
-DispatchRuntime::BindSwapchain(Layout::DispatchNode const* _node,
+DispatchContext::BindSwapchain(layout::DispatchNode const* _node,
                                vktk::Swapchain const& _swapchain)
 {
     uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
     if (nodes_bindings.size() < node_index+1)
         nodes_bindings.resize(node_index+1);
 
-    Binding::DispatchNode& node_bindings = nodes_bindings[node_index];
+    bind::DispatchNode& node_bindings = nodes_bindings[node_index];
     DispatchNodeFramebuffer const& framebuffer = nodes_framebuffer[node_index];
 
     for (uint32_t index = 0u; index < (uint32_t)_swapchain.framebuffers.size(); ++index)
@@ -2487,7 +2489,7 @@ DispatchRuntime::BindSwapchain(Layout::DispatchNode const* _node,
 }
 
 void
-DispatchRuntime::BindAttachments(Layout::DispatchNode const* _node,
+DispatchContext::BindAttachments(layout::DispatchNode const* _node,
                                  numtk::vec2u const& _size,
                                  std::vector<VkImageView> const& _attachments)
 {
@@ -2495,7 +2497,7 @@ DispatchRuntime::BindAttachments(Layout::DispatchNode const* _node,
     if (nodes_bindings.size() < node_index+1)
         nodes_bindings.resize(node_index+1);
 
-    Binding::DispatchNode& node_bindings = nodes_bindings[node_index];
+    bind::DispatchNode& node_bindings = nodes_bindings[node_index];
     DispatchNodeFramebuffer const& framebuffer = nodes_framebuffer[node_index];
     node_bindings.framebuffers.push_back(
         vulkan->CreateFramebuffer(framebuffer.graphics.render_pass,
@@ -2504,56 +2506,56 @@ DispatchRuntime::BindAttachments(Layout::DispatchNode const* _node,
 }
 
 void
-DispatchRuntime::BindFramebufferArea(Layout::DispatchNode const* _node,
-                                     Binding::FramebufferArea const& _area)
+DispatchContext::BindFramebufferArea(layout::DispatchNode const* _node,
+                                     bind::FramebufferArea const& _area)
 {
     uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
     if (nodes_bindings.size() < node_index+1)
         nodes_bindings.resize(node_index+1);
 
-    Binding::DispatchNode& node_bindings = nodes_bindings[node_index];
+    bind::DispatchNode& node_bindings = nodes_bindings[node_index];
     node_bindings.area_binding = _area;
 }
 
 void
-DispatchRuntime::BindGraphicsCommand(Layout::DispatchNode const* _node,
+DispatchContext::BindGraphicsCommand(layout::DispatchNode const* _node,
                                      uint32_t _stage_index,
                                      uint32_t _instance_index,
-                                     Binding::GraphicsCommand const& _command)
+                                     bind::GraphicsCommand const& _command)
 {
     uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
     if (nodes_bindings.size() < node_index+1)
         nodes_bindings.resize(node_index+1);
 
-    Binding::DispatchNode& node_bindings = nodes_bindings[node_index];
+    bind::DispatchNode& node_bindings = nodes_bindings[node_index];
     if (node_bindings.stages.size() < _stage_index+1)
         node_bindings.stages.resize(_stage_index+1);
     if (node_bindings.stages[_stage_index].instances.size() < _instance_index+1)
         node_bindings.stages[_stage_index].instances.resize(_instance_index+1);
 
-    Binding::GraphicsCommand& graphics = node_bindings.stages[_stage_index].instances[_instance_index].graphics;
+    bind::GraphicsCommand& graphics = node_bindings.stages[_stage_index].instances[_instance_index].graphics;
     graphics = _command;
 }
 
 void*
-DispatchRuntime::BindPushConstants(Layout::NodeBindingPoint const& _location,
+DispatchContext::BindPushConstants(layout::BindingPoint const& _location,
                                    uint32_t _instance_index)
 {
-    Layout::DispatchStage const& stage = _location.node->sequence[_location.stage_index];
-    Layout::PushConstantRange const& range = stage.push_constants[_location.push_constants.range_index];
+    layout::DispatchStage const& stage = _location.node->sequence[_location.stage_index];
+    layout::PushConstantRange const& range = stage.push_constants[_location.push_constants.range_index];
 
     uint32_t node_index = (uint32_t)(_location.node - graph->nodes.data());
     if (nodes_bindings.size() < node_index+1)
         nodes_bindings.resize(node_index+1);
 
-    Binding::DispatchNode& node_bindings = nodes_bindings[node_index];
+    bind::DispatchNode& node_bindings = nodes_bindings[node_index];
     if (node_bindings.stages.size() < _location.stage_index+1)
         node_bindings.stages.resize(_location.stage_index+1);
     if (node_bindings.stages[_location.stage_index].instances.size() < _instance_index+1)
         node_bindings.stages[_location.stage_index].instances.resize(_instance_index+1);
 
-    Binding::DispatchStage& stage_bindings = node_bindings.stages[_location.stage_index];
-    Binding::DispatchInstance& instance = stage_bindings.instances[_instance_index];
+    bind::DispatchStage& stage_bindings = node_bindings.stages[_location.stage_index];
+    bind::DispatchInstance& instance = stage_bindings.instances[_instance_index];
 
     if (instance.push_constants.size() < _location.push_constants.range_index+1)
         instance.push_constants.resize(_location.push_constants.range_index+1);
@@ -2563,18 +2565,18 @@ DispatchRuntime::BindPushConstants(Layout::NodeBindingPoint const& _location,
 }
 
 VkWriteDescriptorSet
-DispatchRuntime::BindShaderResource(Layout::NodeBindingPoint const& _location,
+DispatchContext::BindShaderResource(layout::BindingPoint const& _location,
                                     uint32_t _instance_index,
-                                    Binding::ShaderResource const& _resources)
+                                    bind::ShaderResource const& _resources)
 {
     uint32_t node_index = (uint32_t)(_location.node - graph->nodes.data());
     DispatchNodeStatic const& static_runtime = nodes_static[node_index];
     DispatchStageStatic const& stage_static = static_runtime.stages[_location.stage_index];
-    Runtime::StageBindingGroupStatic const& group_runtime = stage_static.binding_groups[_location.shader.group_index];
+    StageBindingGroupStatic const& group_runtime = stage_static.binding_groups[_location.shader.group_index];
 
-    Layout::DispatchStage const& stage = _location.node->sequence[_location.stage_index];
-    Layout::StageBindingGroup const& binding_group = stage.binding_groups[_location.shader.group_index];
-    Layout::StageBinding const& binding = binding_group.bindings[_location.shader.binding_index];
+    layout::DispatchStage const& stage = _location.node->sequence[_location.stage_index];
+    layout::StageBindingGroup const& binding_group = stage.binding_groups[_location.shader.group_index];
+    layout::StageBinding const& binding = binding_group.bindings[_location.shader.binding_index];
 
     VkWriteDescriptorSet desc_write = {};
     desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -2591,8 +2593,6 @@ DispatchRuntime::BindShaderResource(Layout::NodeBindingPoint const& _location,
     return desc_write;
 }
 
-} // namespace Runtime
+} // namespace runtime
 
-} // namespace RenderGraph
-
-} // namespace vktk
+} // namespace vkrg
