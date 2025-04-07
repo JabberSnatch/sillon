@@ -6,7 +6,7 @@ layout(location = 0) in vec3 iFS_volume_coords;
 layout(location = 1) in vec3 iFS_camera_position;
 layout(location = 0) out vec4 color;
 
-layout(std140, set = 0, binding = 1) uniform MatrixBlock {
+layout(std140, set = 0, binding = 0) uniform MatrixBlock {
     mat4 projection;
     mat4 view_model;
     mat4 view;

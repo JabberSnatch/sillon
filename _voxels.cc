@@ -108,12 +108,8 @@ struct voxel_state_t
     std::vector<vktk::Texture> section_textures{};
 
     voxtk::Region<uint8_t> voxel_region{ { 512u, 512u, 512u }, (uint8_t)0 };
-    voxtk::Region<uint8_t> tilemap_region{ { 512u, 512u, 512u, }, (uint8_t)0 };
-    vktk::Texture tilemap;
-    vktk::Texture sparse_texture;
     std::vector<vktk::Texture> masks{};
     std::vector<vktk::Texture> offsets{};
-    vktk::Buffer nodes_buffer;
 };
 
 struct MatrixBlock
@@ -160,9 +156,9 @@ vkrg::layout::DispatchStage RegionPassDispatchStageInfo()
     output.group_instance_count = 64;
     output.binding_groups.push_back(vkrg::layout::StageBindingGroup{
         {
-            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              0, 1 },
             { VK_SHADER_STAGE_ALL, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+              0, 1 },
+            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
               0, 1 },
             { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
               VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT, 32*32*32 },
@@ -207,8 +203,6 @@ vkrg::layout::DispatchStage SparseRegionDispatchStageInfo()
 
     output.binding_groups.push_back(vkrg::layout::StageBindingGroup{
         {
-            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-              0, 1 },
             { VK_SHADER_STAGE_ALL, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
               0, 1 },
         }
@@ -221,14 +215,12 @@ vkrg::layout::DispatchStage SparseRegionDispatchStageInfo()
         }
     });
 
-#if 1
     output.binding_groups.push_back(vkrg::layout::StageBindingGroup{
         {
             { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
               VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT, 512*512 },
         }
     });
-#endif
 
     output.push_constants = std::vector<vkrg::layout::PushConstantRange>{
         { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(numtk::vec3f) }
@@ -895,7 +887,8 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
 #define NODE_SIZE 8u
 #else
 
-#define AREA_SIZE 1024u
+    #define AREA_SIZE 1024u
+    //#define AREA_SIZE 128u
 #define NODE_SIZE 32u
 #endif
 
@@ -908,7 +901,6 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
     static constexpr uint32_t kChunkMortonShift = 2;
     static constexpr uint32_t kLevelMortonShift = (kNodeMortonShift+kChunkMortonShift)*3;
 
-#if 1
     std::vector<voxtk::Region<uint8_t>> lods = {};
 
     voxtk::Region<uint8_t>* src = &state->voxel_region;
@@ -986,7 +978,7 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
 
         for (uint32_t index = 0u; index < nextlod_count; ++index)
         {
-            std::vector<uint32_t> level_offsets{};// = { current_offset };
+            std::vector<uint32_t> level_offsets{};
 
             numtk::vec3u const nextlod_base{
                 numtk::BitExtract(index, node_mask | chunk_mask),
@@ -1025,15 +1017,6 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
                                     } + lod_base;
 
                                     uint64_t bits = lod.ExtractKernel(base);
-#if 0
-                                    if (lod.size.x < 4u)
-                                    {
-                                        bits |=
-                                            ((lod.size.x & 0x1) ? bits << 3u : bits << 2u)
-                                            | ((lod.size.x & 0x11 == 0x1) ? bits << 1u : 0ull);
-                                    }
-#endif
-
                                     output[xindex + yindex*NODE_SIZE + zindex*NODE_SIZE*NODE_SIZE] = bits;
 
                                     level_offsets.push_back(current_offset);
@@ -1041,80 +1024,21 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
                                 }
 
                                 if (valid_range.x != NODE_SIZE)
-                                {
-#if 0
-                                    level_offsets.reserve(level_offsets.size()
-                                                          + (NODE_SIZE-valid_range.x));
-                                    uint32_t base_size = level_offsets.size();
-                                    for (uint32_t index = 0u; index < NODE_SIZE-valid_range.x; ++index)
-                                    {
-                                        level_offsets.push_back(level_offsets[base_size - valid_range.x + index]);
-
-#if 1
-                                        output[valid_range.x+index
-                                               + yindex*NODE_SIZE
-                                               + zindex*NODE_SIZE*NODE_SIZE] =
-                                            output[index
-                                                   + yindex*NODE_SIZE
-                                                   + zindex*NODE_SIZE*NODE_SIZE];
-#endif
-
-                                    }
-
-#else
-
                                     level_offsets.resize(level_offsets.size()
                                                          + (NODE_SIZE-valid_range.x),
                                                          level_offsets.back());
-#endif
-                                }
                             }
 
                             if (valid_range.y != NODE_SIZE)
-                            {
-#if 0
-                                level_offsets.reserve(level_offsets.size()
-                                                      + (NODE_SIZE-valid_range.y)*NODE_SIZE);
-                                uint32_t base_size = level_offsets.size();
-                                for (uint32_t index = 0u; index < (NODE_SIZE-valid_range.y)*NODE_SIZE; ++index)
-                                {
-                                    level_offsets.push_back(level_offsets[base_size - (valid_range.y*NODE_SIZE) + index]);
-
-                                    output[index
-                                           + valid_range.y*NODE_SIZE
-                                           + zindex*NODE_SIZE*NODE_SIZE] =
-                                        output[index
-                                               + zindex*NODE_SIZE*NODE_SIZE];
-                                }
-#else
                                 level_offsets.resize(level_offsets.size()
                                                      + (NODE_SIZE-valid_range.y)*NODE_SIZE,
                                                      level_offsets.back());
-#endif
-                            }
                         }
 
                         if (valid_range.z != NODE_SIZE)
-                        {
-#if 0
-                            level_offsets.reserve(level_offsets.size()
-                                                  + (NODE_SIZE-valid_range.z)*NODE_SIZE*NODE_SIZE);
-                            uint32_t base_size = level_offsets.size();
-                            for (uint32_t index = 0u; index < (NODE_SIZE-valid_range.z)*NODE_SIZE*NODE_SIZE; ++index)
-                            {
-                                level_offsets.push_back(level_offsets[base_size - (valid_range.z*NODE_SIZE*NODE_SIZE) + index]);
-
-                                output[index
-                                       + valid_range.z*NODE_SIZE*NODE_SIZE] =
-                                    output[index];
-
-                            }
-#else
                             level_offsets.resize(level_offsets.size()
                                                  + (NODE_SIZE-valid_range.z)*NODE_SIZE*NODE_SIZE,
                                                  level_offsets.back());
-#endif
-                        }
                     }
                 )
             );
@@ -1126,13 +1050,10 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
                     VK_IMAGE_USAGE_SAMPLED_BIT,
                     [&level_offsets, &valid_range](void* mapped_data) {
                         uint32_t* output = (uint32_t*)mapped_data;
-                        //std::memcpy(output, level_offsets.data()+1, NODE_SIZE*NODE_SIZE*NODE_SIZE*sizeof(uint32_t));
                         std::memcpy(output, level_offsets.data(), NODE_SIZE*NODE_SIZE*NODE_SIZE*sizeof(uint32_t));
                     }
                 )
             );
-
-            //current_offset = level_offsets.back();
         }
     }
 
@@ -1180,90 +1101,6 @@ void LoadRegionSparse(voxel_state_t* state, vktk::Context* vulkan)
             )
         );
     }
-
-#endif
-
-    state->sparse_texture = vulkan->CreateTexture(
-        NODE_SIZE, NODE_SIZE, NODE_SIZE,
-        VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
-        VK_IMAGE_USAGE_SAMPLED_BIT,
-        [state](void* mapped_data) {
-            uint64_t* output = (uint64_t*)mapped_data;
-            for (uint32_t zindex = 0; zindex < NODE_SIZE; ++zindex)
-            {
-                for (uint32_t yindex = 0; yindex < NODE_SIZE; ++yindex)
-                {
-                    for (uint32_t xindex = 0; xindex < NODE_SIZE; ++xindex)
-                    {
-                        numtk::vec3u base{
-                            xindex * 4 * SCALE_RATIO,
-                            yindex * 4 * SCALE_RATIO,
-                            zindex * 4 * SCALE_RATIO
-                        };
-
-                        uint64_t bits = state->voxel_region.ExtractKernel(base);
-                        output[xindex + yindex*NODE_SIZE + zindex*NODE_SIZE*NODE_SIZE] = bits;
-                    }
-                }
-            }
-        });
-
-#if 0
-    for (uint32_t index = 0; index < 64; ++index)
-        state->tilemap_region.Set(numtk::vec3u{ 252 + (index % 8), 256, 252 + (index / 8) }, (uint8_t)1);
-#else
-    for (uint32_t index = 0; index < 512*512; ++index)
-        state->tilemap_region.Set(numtk::vec3u{ 0 + (index % 512), 0, 0 + (index / 512) }, (uint8_t)1);
-#endif
-
-#if 0
-    state->tilemap = vulkan->CreateTexture(
-        NODE_SIZE, NODE_SIZE, NODE_SIZE,
-        VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
-        VK_IMAGE_USAGE_SAMPLED_BIT,
-        [state](void* mapped_data) {
-            uint64_t* output = (uint64_t*)mapped_data;
-            for (uint32_t zindex = 0; zindex < NODE_SIZE; ++zindex)
-            {
-                for (uint32_t yindex = 0; yindex < NODE_SIZE; ++yindex)
-                {
-                    for (uint32_t xindex = 0; xindex < NODE_SIZE; ++xindex)
-                    {
-                        numtk::vec3u base{
-                            xindex * 4 * SCALE_RATIO,
-                            yindex * 4 * SCALE_RATIO,
-                            zindex * 4 * SCALE_RATIO
-                        };
-
-                        uint64_t bits = state->tilemap_region.ExtractKernel(base);
-                        output[xindex + yindex*NODE_SIZE + zindex*NODE_SIZE*NODE_SIZE] = bits;
-                    }
-                }
-            }
-        });
-#endif
-
-    state->nodes_buffer = vulkan->CreateBuffer(
-        sizeof(float),
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-
-#if 0
-    vktk::CommandBuffer update_commands = vulkan->CreateCommandBuffer(vulkan->present_queue);
-    update_commands.Begin();
-    update_commands.ImageTransitions(
-        VK_PIPELINE_STAGE_TRANSFER_BIT,
-        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        {
-            {
-                state->sparse_texture.image,
-                VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                VK_IMAGE_ASPECT_COLOR_BIT
-            }
-        });
-    update_commands.End();
-    update_commands.Submit();
-#endif
 }
 
 void ConstantResources(void* _pstate, vktk::Context* _vulkan)
@@ -1295,11 +1132,33 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->sparse_runtime.graph = &_state->sparse_graph;
 
     //_state->region = DeserialiseRegion("../r.-1.6.mca");
-    //_state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
-    _state->voxel_region = voxtk::importer::ImportCOPC("../LHD_FXX_0697_6520_PTS_C_LAMB93_IGN69.copc.laz", 4096);
+
+#ifdef TRAVERSAL_V1
+    _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
+#else
+
+#if 0
+    _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
+
+#else
+    {
+        systk::Timer scope_time{ "COPC import",
+            [](std::string const& tag, float time) {
+                std::cout << "[" << tag << "] " << time << " s" << std::endl;
+            }
+        };
+
+        _state->voxel_region = voxtk::importer::ImportCOPC("../LHD_FXX_0697_6520_PTS_C_LAMB93_IGN69.copc.laz", 4096);
+        //_state->voxel_region = voxtk::importer::ImportCOPC("../LHD_FXX_0704_6519_PTS_C_LAMB93_IGN69.copc.laz", 4096);
+        //_state->voxel_region = voxtk::importer::ImportCOPC("../LHD_FXX_0697_6520_PTS_C_LAMB93_IGN69.copc.laz", 512);
+    }
+#endif
+
+    LoadRegionSparse(_state, _vulkan);
+#endif
+
     LoadRegion(_state, _vulkan);
     LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
-    LoadRegionSparse(_state, _vulkan);
 
     for (vkrg::layout::DispatchNode const& node : _state->sparse_graph.nodes)
     {
@@ -1334,11 +1193,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         }
 
         _state->sparse_runtime.GenerateStaticRuntime(pNext_map);
-#if 0
-        _state->sparse_runtime.nodes_static.push_back(
-            GenerateDispatchStaticRuntime(node, _vulkan, pNext_map)
-            );
-#endif
     }
 
     for (vkrg::layout::DispatchNode const& node : _state->forward_graph.nodes)
@@ -1362,11 +1216,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         }
 
         _state->forward_runtime.GenerateStaticRuntime(pNext_map);
-#if 0
-        _state->forward_runtime.nodes_static.push_back(
-            GenerateDispatchStaticRuntime(node, _vulkan, pNext_map)
-            );
-#endif
     }
 
     for (vkrg::layout::DispatchNode const& node : _state->pixel_cycling_graph.nodes)
@@ -1390,11 +1239,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         }
 
         _state->pixel_cycling_runtime.GenerateStaticRuntime(pNext_map);
-#if 0
-        _state->pixel_cycling_runtime.nodes_static.push_back(
-            GenerateDispatchStaticRuntime(node, _vulkan, pNext_map)
-            );
-#endif
     }
 
     _state->staging_buffer = _vulkan->CreateBuffer(
@@ -1460,7 +1304,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                         .node = &main_world_node,
                         .stage_index = 0,
                         .type = vkrg::layout::BindingType_Shader,
-                        .shader = { 0, 0 }
+                        .shader = { 0, 1 }
                     },
                     index,
                     vkrg::bind::ShaderResource{
@@ -1478,7 +1322,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                         .node = &main_world_node,
                         .stage_index = 0,
                         .type = vkrg::layout::BindingType_Shader,
-                        .shader = { 0, 1 }
+                        .shader = { 0, 0 }
                     },
                     index,
                     vkrg::bind::ShaderResource{
@@ -1536,7 +1380,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                         .node = &main_world_node,
                         .stage_index = 0,
                         .type = vkrg::layout::BindingType_Shader,
-                        .shader = { 0, 0 }
+                        .shader = { 0, 1 }
                     },
                     index,
                     vkrg::bind::ShaderResource{
@@ -1554,7 +1398,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                         .node = &main_world_node,
                         .stage_index = 0,
                         .type = vkrg::layout::BindingType_Shader,
-                        .shader = { 0, 1 }
+                        .shader = { 0, 0 }
                     },
                     index,
                     vkrg::bind::ShaderResource{
@@ -1654,64 +1498,10 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                 })
             );
 
-#if 0
-        std::vector<VkDescriptorImageInfo> nodes_info{};
-        {
-            VkDescriptorImageInfo info = {};
-            info.sampler = _state->sampler;
-            info.imageView = _state->tilemap.view;
-            info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            nodes_info.push_back(info);
-        }
-
-        for (uint32_t index = 0u; index < 64; ++index)
-        {
-            VkDescriptorImageInfo region_image_info{};
-            region_image_info.sampler = _state->sampler;
-            region_image_info.imageView = _state->sparse_texture.view;
-            region_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            nodes_info.push_back(region_image_info);
-        }
-
-        bindings.push_back(
-            _state->sparse_runtime.BindShaderResource(
-                vkrg::layout::BindingPoint{
-                    .node = &sparse_region_node,
-                    .stage_index = 0,
-                    .type = vkrg::layout::BindingType_Shader,
-                    .shader = { 1, 0 }
-                },
-                0,
-                vkrg::bind::ShaderResource{
-                    .descriptor_count = (uint32_t)nodes_info.size(),
-                    .images = nodes_info.data()
-                })
-            );
-#endif
-
         VkDescriptorBufferInfo matrix_buffer_info = {};
         matrix_buffer_info.buffer = _state->matrix_buffer;
         matrix_buffer_info.offset = 0;
         matrix_buffer_info.range = sizeof(MatrixBlock);
-        bindings.push_back(
-            _state->sparse_runtime.BindShaderResource(
-                vkrg::layout::BindingPoint{
-                    .node = &sparse_region_node,
-                    .stage_index = 0,
-                    .type = vkrg::layout::BindingType_Shader,
-                    .shader = { 0, 1 }
-                },
-                0,
-                vkrg::bind::ShaderResource{
-                    .descriptor_count = 1,
-                    .buffers = &matrix_buffer_info
-                })
-            );
-
-        VkDescriptorBufferInfo nodes_buffer_info = {};
-        nodes_buffer_info.buffer = _state->nodes_buffer;
-        nodes_buffer_info.offset = 0;
-        nodes_buffer_info.range = sizeof(float);
         bindings.push_back(
             _state->sparse_runtime.BindShaderResource(
                 vkrg::layout::BindingPoint{
@@ -1723,7 +1513,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                 0,
                 vkrg::bind::ShaderResource{
                     .descriptor_count = 1,
-                    .buffers = &nodes_buffer_info
+                    .buffers = &matrix_buffer_info
                 })
             );
 
