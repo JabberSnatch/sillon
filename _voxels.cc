@@ -108,6 +108,10 @@ struct voxel_state_t
     std::vector<vktk::Texture> section_textures{};
 
     voxtk::Region<uint8_t> voxel_region{ { 512u, 512u, 512u }, (uint8_t)0 };
+    uint32_t area_size;
+    uint32_t node_size;
+    int32_t stack_depth;
+    int32_t display_depth;
     std::vector<vktk::Texture> masks{};
     std::vector<vktk::Texture> offsets{};
 };
@@ -120,6 +124,14 @@ struct MatrixBlock
     numtk::vec2f screen_offset;
     numtk::vec2i screen_size;
     float padding[12];
+};
+
+struct SparseRegionPushConstants
+{
+    numtk::vec3f light_dir;
+    float area_size;
+    float node_size;
+    int32_t stack_depth;
 };
 
 struct SkyboxPushConstants
@@ -205,8 +217,6 @@ vkrg::layout::DispatchStage SparseRegionDispatchStageInfo()
         {
             { VK_SHADER_STAGE_ALL, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
               0, 1 },
-            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-              0, 1 },
         }
     });
 
@@ -225,7 +235,7 @@ vkrg::layout::DispatchStage SparseRegionDispatchStageInfo()
     });
 
     output.push_constants = std::vector<vkrg::layout::PushConstantRange>{
-        { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(numtk::vec3f) }
+        { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SparseRegionPushConstants) }
     };
 
     output.graphics.state_overrides = std::vector<vktk::Context::StateOverride>{};
@@ -1139,14 +1149,19 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     //_state->region = DeserialiseRegion("../r.-1.6.mca");
 
 #ifdef TRAVERSAL_V1
+
     _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
 #else
 
 #if 0
     _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
-    UploadVoxelRegion(_state, _vulkan, 128, 8);
+    _state->area_size = 128u;
+    _state->node_size = 8u;
 
 #else
+    _state->area_size = 1024u;
+    _state->node_size = 32u;
+
     {
         systk::Timer scope_time{ "COPC import",
             [](std::string const& tag, float time) {
@@ -1154,12 +1169,20 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
             }
         };
 
-        _state->voxel_region = voxtk::importer::ImportCOPC("../LHD_FXX_0697_6520_PTS_C_LAMB93_IGN69.copc.laz", 4096);
+        _state->voxel_region = voxtk::importer::ImportCOPC("../LHD_FXX_0697_6520_PTS_C_LAMB93_IGN69.copc.laz", _state->area_size * 4);
         //_state->voxel_region = voxtk::importer::ImportCOPC("../LHD_FXX_0704_6519_PTS_C_LAMB93_IGN69.copc.laz", 4096);
         //_state->voxel_region = voxtk::importer::ImportCOPC("../LHD_FXX_0697_6520_PTS_C_LAMB93_IGN69.copc.laz", 512);
     }
-    UploadVoxelRegion(_state, _vulkan, 1024, 32);
 #endif
+
+    _state->stack_depth = 0;
+    for (uint32_t region_size = _state->area_size*4;
+         region_size > 1;
+         region_size /= _state->node_size*4)
+        _state->stack_depth += 2;
+    _state->display_depth = _state->stack_depth;
+
+    UploadVoxelRegion(_state, _vulkan, _state->area_size, _state->node_size);
 
 #endif
 
@@ -1717,6 +1740,11 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
     if (!_input->key_down['c'] && _past_input->key_down['c'])
         _state->pixel_cycling_enabled = !_state->pixel_cycling_enabled;
 
+    if (_input->key_down['p'] && !_past_input->key_down['p'])
+        _state->display_depth = std::min(_state->display_depth+1, _state->stack_depth);
+    if (_input->key_down['o'] && !_past_input->key_down['o'])
+        _state->display_depth = std::max(_state->display_depth-1, 0);
+
     _state->camera.Update(_input, _past_input);
 
     return true;
@@ -1954,8 +1982,8 @@ void Draw(void* _pstate,
         _state->sparse_runtime.BindGraphicsCommand(
             &sparse_region_node, 0, 0, command);
 
-        numtk::vec3f* push_constants =
-            (numtk::vec3f*)_state->sparse_runtime.BindPushConstants(
+        SparseRegionPushConstants* push_constants =
+            (SparseRegionPushConstants*)_state->sparse_runtime.BindPushConstants(
                 vkrg::layout::BindingPoint{
                     .node = &sparse_region_node,
                     .stage_index = 0,
@@ -1963,7 +1991,10 @@ void Draw(void* _pstate,
                     .push_constants = { 0 }
                 },
                 0);
-        *push_constants = sun_dir;
+        push_constants->light_dir = sun_dir;
+        push_constants->area_size = (float)_state->area_size;
+        push_constants->node_size = (float)_state->node_size;
+        push_constants->stack_depth = std::max(_state->display_depth-1, 0);
 
         _state->sparse_runtime.BindFramebufferArea(
             &sparse_region_node,

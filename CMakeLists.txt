@@ -27,6 +27,12 @@ endif()
 
 # === VOXTK_IMPORTERS ===
 
+if (MSVC)
+  add_compile_options(/wd4267 /wd4244 /wd5051 /wd4805)
+else()
+  add_compile_options(-w)
+endif()
+
 set(WITH_PYTHON OFF CACHE BOOL "")
 set(WITH_TESTS OFF CACHE BOOL "")
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "")
