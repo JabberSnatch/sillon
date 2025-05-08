@@ -17,6 +17,7 @@
 
 #include <shaderc/shaderc.hpp>
 
+#include <cstring>
 #include <iostream>
 #include <numeric>
 #include <vector>

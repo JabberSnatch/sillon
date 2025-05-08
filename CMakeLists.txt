@@ -21,7 +21,7 @@ hotreload_setup(sillon)
 
 if (UNIX)
   target_compile_options(vktk PRIVATE "-fPIC")
-  target_compile_options(sillon PRIVATE "-fvisibility=hidden")
+  target_compile_options(sillon PRIVATE "-fvisibility=hidden" "-mbmi2")
 endif()
 
 
@@ -30,7 +30,7 @@ endif()
 if (MSVC)
   add_compile_options(/wd4267 /wd4244 /wd5051 /wd4805)
 else()
-  add_compile_options(-w)
+  add_compile_options(-w -fPIC)
 endif()
 
 set(WITH_PYTHON OFF CACHE BOOL "")
