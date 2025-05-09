@@ -21,7 +21,7 @@ hotreload_setup(sillon)
 
 if (UNIX)
   target_compile_options(vktk PRIVATE "-fPIC")
-  target_compile_options(sillon PRIVATE "-fvisibility=hidden" "-mbmi2")
+  target_compile_options(sillon PRIVATE "-fvisibility=hidden" "-mbmi2" "-mbmi")
 endif()
 
 
