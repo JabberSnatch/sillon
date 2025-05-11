@@ -892,22 +892,6 @@ void LoadRegion(voxel_state_t* state, vktk::Context* vulkan)
 
 void UploadVoxelRegion(voxel_state_t* state, vktk::Context* vulkan, uint32_t _area_size, uint32_t _node_size)
 {
-
-#if 0
-#if 0
-
-#define AREA_SIZE 128u
-#define NODE_SIZE 8u
-
-#else
-
-#define AREA_SIZE 1024u
-//#define AREA_SIZE 128u
-#define NODE_SIZE 32u
-
-#endif
-#endif
-
     uint32_t kScaleRatio = _area_size / _node_size;
     uint32_t kLogScale = (uint32_t)std::popcount((_node_size*4) - 1u);
     uint32_t kNodeMortonMask = (_node_size - 1u);
@@ -1120,17 +1104,50 @@ void UploadVoxelRegion(voxel_state_t* state, vktk::Context* vulkan, uint32_t _ar
 
 void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 {
-    voxtk::VoxelMask testmask0 = voxtk::VoxelMask::FillArea({ 0, 0, 0 }, { 4, 4, 4 });
-    testmask0.Shift({ 1, 0, 0 });
+    {
+        numtk::vec3i offset_axis{ 1, 0, 1 };
 
-    voxtk::VoxelMask testmask1 = voxtk::VoxelMask::FillArea({ 0, 0, 0 }, { 4, 4, 4 });
-    testmask1.Shift({ 2, 0, 0 });
+        voxtk::VoxelMask testmask0 = voxtk::VoxelMask::FillArea({ 0, 0, 0 }, { 4, 4, 4 });
+        testmask0 = testmask0.Shift(offset_axis * 1);
 
-    voxtk::VoxelMask testmask2 = voxtk::VoxelMask::FillArea({ 0, 0, 0 }, { 4, 4, 4 });
-    testmask2.Shift({ 3, 0, 0 });
+        voxtk::VoxelMask testmask1 = voxtk::VoxelMask::FillArea({ 0, 0, 0 }, { 4, 4, 4 });
+        testmask1 = testmask1.Shift(offset_axis * 2);
 
-    voxtk::VoxelMask testmask3 = voxtk::VoxelMask::FillArea({ 0, 0, 0 }, { 4, 4, 4 });
-    testmask3.Shift({ 4, 0, 0 });
+        voxtk::VoxelMask testmask2 = voxtk::VoxelMask::FillArea({ 0, 0, 0 }, { 4, 4, 4 });
+        testmask2 = testmask2.Shift(offset_axis * 3);
+
+        voxtk::VoxelMask testmask3 = voxtk::VoxelMask::FillArea({ 0, 0, 0 }, { 4, 4, 4 });
+        testmask3 = testmask3.Shift(offset_axis * 4);
+
+        voxtk::VoxelMask testmask4 = voxtk::VoxelMask::FillArea({ 0, 0, 0 }, { 4, 4, 4 });
+        testmask4 = testmask4.Shift(offset_axis * 5);
+
+        voxtk::VoxelMask testmask5 = voxtk::VoxelMask::FillArea({ 0, 0, 0 }, { 4, 4, 4 });
+        testmask5 = testmask5.Shift(offset_axis * 6);
+
+        voxtk::VoxelMask testmask6 = voxtk::VoxelMask::FillArea({ 0, 0, 0 }, { 4, 4, 4 });
+        testmask6 = testmask6.Shift(offset_axis * 7);
+
+        voxtk::VoxelMask testmask7 = voxtk::VoxelMask::FillArea({ 0, 0, 0 }, { 4, 4, 4 });
+        testmask7 = testmask7.Shift(offset_axis * 8);
+
+        int i = 0;
+    }
+
+    {
+        voxtk::Region<uint8_t> src{ numtk::vec3u{ 16, 16, 16 }, uint8_t(0) };
+        for (uint32_t z = 0; z < 16; ++z)
+            for (uint32_t y = 0; y < 16; ++y)
+                for (uint32_t x = 0; x < 16; ++x)
+                    src.Set({ x, y, z }, !!(((x&1) + (y&1) + (z&1)) & 1));
+
+        voxtk::Region<uint8_t> mask{ numtk::vec3u{ 2, 2, 2 }, uint8_t(0) };
+        mask.Set({ 0, 0, 0 }, { 2, 2, 2 }, uint8_t(0));
+
+        src = src.BitwiseAnd(mask, numtk::vec3u{ 0, 0, 0 });
+
+        int i = 0;
+    }
 
     voxel_state_t* _state = (voxel_state_t*)_pstate;
 
