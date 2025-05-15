@@ -1104,6 +1104,8 @@ void UploadVoxelRegion(voxel_state_t* state, vktk::Context* vulkan, uint32_t _ar
 
 void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 {
+    voxel_state_t* _state = (voxel_state_t*)_pstate;
+
     {
         numtk::vec3i offset_axis{ 1, 0, 1 };
 
@@ -1144,12 +1146,13 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         voxtk::Region<uint8_t> mask{ numtk::vec3u{ 2, 2, 2 }, uint8_t(0) };
         mask.Set({ 0, 0, 0 }, { 2, 2, 2 }, uint8_t(0));
 
-        src = src.BitwiseAnd(mask, numtk::vec3u{ 0, 0, 0 });
+        _state->voxel_region = src.BitwiseAnd(mask, numtk::vec3u{ 9, 4, 9 });
 
+        //_state->voxel_region = src;
+        _state->area_size = 4u;
+        _state->node_size = 4u;
         int i = 0;
     }
-
-    voxel_state_t* _state = (voxel_state_t*)_pstate;
 
     _state->forward_graph = FullFrameRenderGraph();
     _state->forward_runtime.vulkan = _vulkan;
@@ -1171,6 +1174,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 #else
 
 #if 0
+#if 1
     _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
     _state->area_size = 128u;
     _state->node_size = 8u;
@@ -1190,6 +1194,8 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         //_state->voxel_region = voxtk::importer::ImportCOPC("../LHD_FXX_0704_6519_PTS_C_LAMB93_IGN69.copc.laz", 4096);
         //_state->voxel_region = voxtk::importer::ImportCOPC("../LHD_FXX_0697_6520_PTS_C_LAMB93_IGN69.copc.laz", 512);
     }
+#endif
+
 #endif
 
     _state->stack_depth = 0;
