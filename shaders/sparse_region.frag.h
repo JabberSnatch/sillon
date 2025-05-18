@@ -386,6 +386,13 @@ void main()
     if (trav.w >= 0.0)
     {
         float frag_depth = trav.w + entry_depth;
+
+#if 1
+        color.xyz = frag_depth.xxx;
+        color.w = 1.0;
+        return;
+
+#else
         float fog = exp(-frag_depth * 10.0);
 
         vec3 hitp = org + dir*trav.w;
@@ -394,6 +401,7 @@ void main()
         float diffuse = max(0.0, dot(light_dir, trav.xyz));
 
         color.xyz = vec3(mix(shadow.xxx * diffuse, vec3(0.3, 0.5, 0.5), (1.0 - fog).xxx));
+#endif
     }
     else
         color.xyz = trav.xyz;

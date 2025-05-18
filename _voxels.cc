@@ -948,6 +948,9 @@ void UploadVoxelRegion(voxel_state_t* state, vktk::Context* vulkan, uint32_t _ar
         }
     }
 
+    lods.push_back(voxtk::Region<uint8_t>{ { 1, 1, 1 }, (uint8_t)0 });
+    lods.back().Set( { 0, 0, 0 }, true);
+
     uint32_t current_offset = 1u;
     uint32_t group_size = 1u;
 
@@ -957,22 +960,23 @@ void UploadVoxelRegion(voxel_state_t* state, vktk::Context* vulkan, uint32_t _ar
     uint32_t chunk_mask = 0;
     uint32_t shift_depth = 0;
 
-    for (uint32_t level_index = 0u; level_index < lods.size();
+    uint32_t lod_count = lods.size()-1;
+    for (uint32_t level_index = 0u; level_index < lod_count;
          ++level_index
              , morton_mask = (morton_mask << kNodeMortonShift*3) | kNodeMortonMask
              , node_mask = (kNodeMortonMask << (3*kChunkMortonShift)) | (node_mask << kLevelMortonShift)
              , chunk_mask = kChunkMortonMask | (chunk_mask << kLevelMortonShift)
              , shift_depth += kLevelMortonShift)
     {
-        uint32_t lod_index = lods.size()-1 - level_index;
-        voxtk::Region<uint8_t> const& lod = lods[lods.size()-1 - level_index];
+        uint32_t lod_index = lod_count-1 - level_index;
+        voxtk::Region<uint8_t> const& lod = lods[lod_count-1 - level_index];
         numtk::vec3u nextlod_size = numtk::max(lod.size / (_node_size * 4),
                                                numtk::vec3u::Constant(1));
         numtk::vec3u nextlod_chunkcount = numtk::max(nextlod_size / 4,
                                                     numtk::vec3u::Constant(1));
         numtk::vec3u nextlod_chunksize = (level_index == 0)
             ? numtk::vec3u{ 4, 4, 4 }
-            : numtk::min(lods[lods.size()-level_index].size,
+            : numtk::min(lods[lod_count-level_index].size,
                          numtk::vec3u{ 4, 4, 4 });
 
         uint32_t nextlod_count = 1u << shift_depth;
@@ -987,7 +991,7 @@ void UploadVoxelRegion(voxel_state_t* state, vktk::Context* vulkan, uint32_t _ar
                 numtk::BitExtract(index, (node_mask << (2*kNodeMortonShift)) | (chunk_mask << (2*kChunkMortonShift)))
             };
 
-            if (level_index != 0u && !lods[lods.size() - level_index].Test(nextlod_base))
+            if (level_index != 0u && !lods[lod_count - level_index].Test(nextlod_base))
                 continue;
 
             numtk::vec3u const lod_base = nextlod_base * _node_size*4;
@@ -1148,7 +1152,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
         _state->voxel_region = src.BitwiseAnd(mask, numtk::vec3u{ 9, 4, 9 });
 
-        //_state->voxel_region = src;
         _state->area_size = 4u;
         _state->node_size = 4u;
         int i = 0;
