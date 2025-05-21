@@ -122,6 +122,7 @@ struct voxel_state_t
     uint32_t section_index = 0;
     std::vector<vktk::Texture> section_textures{};
 
+    numtk::vec3u stencil_location{ 0, 0, 0 };
     voxtk::Region<uint8_t> voxel_region{ { 512u, 512u, 512u }, (uint8_t)0 };
     VoxelRegionPackage region_package;
 };
@@ -1791,6 +1792,43 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         _state->region_package.display_depth = std::min(_state->region_package.display_depth+1, _state->region_package.stack_depth);
     if (_input->key_down['o'] && !_past_input->key_down['o'])
         _state->region_package.display_depth = std::max(_state->region_package.display_depth-1, 0);
+
+    numtk::vec3i stencil_delta{ 0, 0, 0 };
+    if (_input->key_down['u'] && !_past_input->key_down['u'])
+        stencil_delta += numtk::vec3i{ 0, 1, 0 };
+    if (_input->key_down['j'] && !_past_input->key_down['j'])
+        stencil_delta += numtk::vec3i{ 0, -1, 0 };
+    if (_input->key_down['h'] && !_past_input->key_down['h'])
+        stencil_delta += numtk::vec3i{ -1, 0, 0 };
+    if (_input->key_down['k'] && !_past_input->key_down['k'])
+        stencil_delta += numtk::vec3i{ 1, 0, 0 };
+    if (_input->key_down['y'] && !_past_input->key_down['y'])
+        stencil_delta += numtk::vec3i{ 0, 0, -1 };
+    if (_input->key_down['i'] && !_past_input->key_down['i'])
+        stencil_delta += numtk::vec3i{ 0, 0, 1 };
+
+    if (stencil_delta != numtk::vec3i::Constant(0))
+    {
+        _state->stencil_location += stencil_delta.cast<uint32_t>();
+        _state->stencil_location = numtk::min(_state->stencil_location, numtk::vec3u::Constant(16));
+
+        {
+            voxtk::Region<uint8_t> src{ numtk::vec3u{ 16, 16, 16 }, uint8_t(0) };
+            for (uint32_t z = 0; z < 16; ++z)
+                for (uint32_t y = 0; y < 16; ++y)
+                    for (uint32_t x = 0; x < 16; ++x)
+                        src.Set({ x, y, z }, !!(((x&1) + (y&1) + (z&1)) & 1));
+
+            voxtk::Region<uint8_t> mask{ numtk::vec3u{ 2, 2, 2 }, uint8_t(0) };
+            mask.Set({ 0, 0, 0 }, { 2, 2, 2 }, uint8_t(0));
+
+            _state->voxel_region = src.BitwiseAnd(mask, _state->stencil_location);
+
+            uint32_t area_size = 4u;
+            uint32_t node_size = 4u;
+            _state->region_package = UploadVoxelRegion(_vulkan, _state->voxel_region, area_size, node_size);
+        }
+    }
 
     _state->camera.Update(_input, _past_input);
 
