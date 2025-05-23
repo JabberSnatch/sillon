@@ -2177,11 +2177,6 @@ DispatchContext::GenerateStaticRuntime(bind::PNextMap const& _pNext_map)
             std::vector<VkDescriptorSetLayout> set_layouts = {};
             std::vector<VkPushConstantRange> push_constant_ranges = {};
 
-#if 0
-            void* stage_pnext = nullptr;
-            if (_pNext_map.count(stage.name))
-                stage_pnext = _pNext_map[stage.name];
-#endif
             std::vector<bind::PNextEntry> stage_pnexts = {};
             if (_pNext_map.count(stage.name))
                 stage_pnexts = _pNext_map.at(stage.name);
@@ -2210,31 +2205,13 @@ DispatchContext::GenerateStaticRuntime(bind::PNextMap const& _pNext_map)
                 void* pnext_begin = nullptr;
 
                 VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc;
-#if 0
-                if (std::find_if(binding_group.bindings.begin(),
-                                 binding_group.bindings.end(),
-                                 [](DispatchStageInfo::BindingInfo const& binding) {
-                                     return binding.flags & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
-                                 })
-                    != binding_group.bindings.end())
-                {
-                    void* desc_count_alloc_ptr = vktk::PNextLookup(
-                        (VkBaseOutStructure*)stage_pnext,
-                        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO);
-                    desc_count_alloc = desc_count_alloc_ptr
-                        ? *(VkDescriptorSetVariableDescriptorCountAllocateInfo const*)desc_count_alloc_ptr
-                        : VkDescriptorSetVariableDescriptorCountAllocateInfo{};
-                    desc_count_alloc.pNext = nullptr;
-                    pnext_begin = desc_count_alloc_ptr ? &desc_count_alloc : nullptr;
-                }
-#endif
-
                 {
                     auto group_pnext_it = std::find_if(
                         stage_pnexts.begin(), stage_pnexts.end(),
                         [group_index](bind::PNextEntry const& entry) {
                             return entry.binding_group_index == group_index;
                         });
+
                     if (group_pnext_it != stage_pnexts.end())
                     {
                         void* desc_count_alloc_ptr = vktk::PNextLookup(

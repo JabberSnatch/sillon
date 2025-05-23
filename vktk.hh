@@ -587,6 +587,18 @@ struct DispatchNodeFramebuffer {
     GraphicsNodeFramebuffer graphics;
 };
 
+struct StageBindingGroupDynamic {
+    std::vector<VkDescriptorSet> sets;
+};
+
+struct DispatchStageDynamic {
+    std::vector<StageBindingGroupStatic> binding_groups;
+};
+
+struct DispatchNodeDynamic {
+    std::vector<DispatchStageInstance> stages;
+};
+
 struct DispatchContext {
     vktk::Context* vulkan;
     layout::DispatchGraph const* graph;
