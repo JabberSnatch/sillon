@@ -1237,85 +1237,94 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     LoadRegion(_state, _vulkan);
     LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
 
-    for (vkrg::layout::DispatchNode const& node : _state->sparse_graph.nodes)
     {
         vkrg::bind::PNextMap pNext_map = {};
 
-        if (node.name == "SparseRegionDispatch")
+        for (vkrg::layout::DispatchNode const& node : _state->sparse_graph.nodes)
         {
-            static uint32_t desc_counts[2] = { 0u, 0u };
-            desc_counts[0] = (uint32_t)_state->region_package.masks.size();
-            desc_counts[1] = (uint32_t)_state->region_package.offsets.size();
+            if (node.name == "SparseRegionDispatch")
+            {
+                static uint32_t desc_counts[2] = { 0u, 0u };
+                desc_counts[0] = (uint32_t)_state->region_package.masks.size();
+                desc_counts[1] = (uint32_t)_state->region_package.offsets.size();
 
-            static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_allocs[2];
-            desc_count_allocs[0] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
-            desc_count_allocs[1] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
+                static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_allocs[2];
+                desc_count_allocs[0] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
+                desc_count_allocs[1] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
 
-            desc_count_allocs[0].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
-            desc_count_allocs[0].pNext = nullptr;
-            desc_count_allocs[0].descriptorSetCount = 1;
-            desc_count_allocs[0].pDescriptorCounts = &desc_counts[0];
+                desc_count_allocs[0].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+                desc_count_allocs[0].pNext = nullptr;
+                desc_count_allocs[0].descriptorSetCount = 1;
+                desc_count_allocs[0].pDescriptorCounts = &desc_counts[0];
 
-            desc_count_allocs[1].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
-            desc_count_allocs[1].pNext = nullptr;
-            desc_count_allocs[1].descriptorSetCount = 1;
-            desc_count_allocs[1].pDescriptorCounts = &desc_counts[1];
+                desc_count_allocs[1].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+                desc_count_allocs[1].pNext = nullptr;
+                desc_count_allocs[1].descriptorSetCount = 1;
+                desc_count_allocs[1].pDescriptorCounts = &desc_counts[1];
 
-            //void* pnext_begin = &desc_count_alloc;
+                //void* pnext_begin = &desc_count_alloc;
 
-            pNext_map.emplace("sparse_region", std::vector<vkrg::bind::PNextEntry>{
-                { 1, (void*)&desc_count_allocs[0] },
-                { 2, (void*)&desc_count_allocs[1] }
-            });
+                pNext_map.emplace("sparse_region", std::vector<vkrg::bind::PNextEntry>{
+                    { 1, (void*)&desc_count_allocs[0] },
+                    { 2, (void*)&desc_count_allocs[1] }
+                });
+            }
         }
 
-        _state->sparse_runtime.GenerateStaticRuntime(pNext_map);
+        _state->sparse_runtime.GenerateStaticRuntime();
+        _state->sparse_runtime.UpdateDynamicRuntime(pNext_map);
     }
 
-    for (vkrg::layout::DispatchNode const& node : _state->forward_graph.nodes)
     {
         vkrg::bind::PNextMap pNext_map = {};
 
-        if (node.name == "MainWorldDispatch")
+        for (vkrg::layout::DispatchNode const& node : _state->forward_graph.nodes)
         {
-            static uint32_t desc_count = 0u;
-            static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc = {};
-            desc_count = (uint32_t)_state->section_textures.size();
-            desc_count_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
-            desc_count_alloc.pNext = nullptr;
-            desc_count_alloc.descriptorSetCount = 1;
-            desc_count_alloc.pDescriptorCounts = &desc_count;
-            void* pnext_begin = &desc_count_alloc;
+            if (node.name == "MainWorldDispatch")
+            {
+                static uint32_t desc_count = 0u;
+                static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc = {};
+                desc_count = (uint32_t)_state->section_textures.size();
+                desc_count_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+                desc_count_alloc.pNext = nullptr;
+                desc_count_alloc.descriptorSetCount = 1;
+                desc_count_alloc.pDescriptorCounts = &desc_count;
+                void* pnext_begin = &desc_count_alloc;
 
-            pNext_map.emplace("render_region", std::vector<vkrg::bind::PNextEntry>{
-                vkrg::bind::PNextEntry{ 0, (void*)&desc_count_alloc }
-            });
+                pNext_map.emplace("render_region", std::vector<vkrg::bind::PNextEntry>{
+                    vkrg::bind::PNextEntry{ 0, (void*)&desc_count_alloc }
+                });
+            }
         }
 
-        _state->forward_runtime.GenerateStaticRuntime(pNext_map);
+        _state->forward_runtime.GenerateStaticRuntime();
+        _state->forward_runtime.UpdateDynamicRuntime(pNext_map);
     }
 
-    for (vkrg::layout::DispatchNode const& node : _state->pixel_cycling_graph.nodes)
     {
         vkrg::bind::PNextMap pNext_map = {};
 
-        if (node.name == "MainWorldDispatch")
+        for (vkrg::layout::DispatchNode const& node : _state->pixel_cycling_graph.nodes)
         {
-            static uint32_t desc_count = 0u;
-            static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc = {};
-            desc_count = (uint32_t)_state->section_textures.size();
-            desc_count_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
-            desc_count_alloc.pNext = nullptr;
-            desc_count_alloc.descriptorSetCount = 1;
-            desc_count_alloc.pDescriptorCounts = &desc_count;
-            void* pnext_begin = &desc_count_alloc;
+            if (node.name == "MainWorldDispatch")
+            {
+                static uint32_t desc_count = 0u;
+                static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc = {};
+                desc_count = (uint32_t)_state->section_textures.size();
+                desc_count_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+                desc_count_alloc.pNext = nullptr;
+                desc_count_alloc.descriptorSetCount = 1;
+                desc_count_alloc.pDescriptorCounts = &desc_count;
+                void* pnext_begin = &desc_count_alloc;
 
-            pNext_map.emplace("render_region", std::vector<vkrg::bind::PNextEntry>{
-                vkrg::bind::PNextEntry{ 0, (void*)&desc_count_alloc }
-            });
+                pNext_map.emplace("render_region", std::vector<vkrg::bind::PNextEntry>{
+                    vkrg::bind::PNextEntry{ 0, (void*)&desc_count_alloc }
+                });
+            }
         }
 
-        _state->pixel_cycling_runtime.GenerateStaticRuntime(pNext_map);
+        _state->pixel_cycling_runtime.GenerateStaticRuntime();
+        _state->pixel_cycling_runtime.UpdateDynamicRuntime(pNext_map);
     }
 
     _state->staging_buffer = _vulkan->CreateBuffer(

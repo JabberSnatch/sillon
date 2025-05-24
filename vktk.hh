@@ -566,7 +566,6 @@ namespace runtime
 
 struct StageBindingGroupStatic {
     vktk::DescriptorPool pool;
-    std::vector<VkDescriptorSet> sets;
 };
 
 struct DispatchStageStatic {
@@ -592,11 +591,11 @@ struct StageBindingGroupDynamic {
 };
 
 struct DispatchStageDynamic {
-    std::vector<StageBindingGroupStatic> binding_groups;
+    std::vector<StageBindingGroupDynamic> binding_groups;
 };
 
 struct DispatchNodeDynamic {
-    std::vector<DispatchStageInstance> stages;
+    std::vector<DispatchStageDynamic> stages;
 };
 
 struct DispatchContext {
@@ -604,13 +603,16 @@ struct DispatchContext {
     layout::DispatchGraph const* graph;
     std::vector<DispatchNodeStatic> nodes_static;
     std::vector<DispatchNodeFramebuffer> nodes_framebuffer;
+    std::vector<DispatchNodeDynamic> nodes_dynamic;
     std::vector<bind::DispatchNode> nodes_bindings;
 
     void ClearStaticRuntime();
     void ClearFramebufferRuntime();
+    void ClearDynamicRuntime();
 
-    void GenerateStaticRuntime(bind::PNextMap const& _pNext_map = {});
+    void GenerateStaticRuntime();
     void GenerateFramebufferRuntime(VkFormat const* _swapchain_format = nullptr);
+    void UpdateDynamicRuntime(bind::PNextMap const& _pNext_map = {});
     void Dispatch(vktk::CommandBuffer& _command_buffer) const;
 
     void BindSwapchain(layout::DispatchNode const* _node,

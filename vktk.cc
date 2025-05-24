@@ -2119,6 +2119,8 @@ namespace runtime
 void
 DispatchContext::ClearStaticRuntime()
 {
+    ClearDynamicRuntime();
+
     for (DispatchNodeStatic& node_runtime : nodes_static)
     {
         for (DispatchStageStatic& stage_runtime : node_runtime.stages)
@@ -2128,12 +2130,6 @@ DispatchContext::ClearStaticRuntime()
 
             for (StageBindingGroupStatic& group : stage_runtime.binding_groups)
             {
-                vkFreeDescriptorSets(vulkan->device,
-                                     group.pool.pool,
-                                     group.sets.size(),
-                                     group.sets.data());
-                group.sets.clear();
-
                 vulkan->DestroyDescriptorPool(group.pool);
                 group.pool.pool = VK_NULL_HANDLE;
                 group.pool.layout = VK_NULL_HANDLE;
@@ -2165,7 +2161,35 @@ DispatchContext::ClearFramebufferRuntime()
 }
 
 void
-DispatchContext::GenerateStaticRuntime(bind::PNextMap const& _pNext_map)
+DispatchContext::ClearDynamicRuntime()
+{
+    for (size_t node_index = 0; node_index < nodes_dynamic.size(); ++node_index)
+    {
+        DispatchNodeDynamic& node = nodes_dynamic[node_index];
+        DispatchNodeStatic const& node_static = nodes_static[node_index];
+
+        for (size_t stage_index = 0; stage_index < node.stages.size(); ++stage_index)
+        {
+            DispatchStageDynamic& stage = node.stages[stage_index];
+            DispatchStageStatic const& stage_static = node_static.stages[stage_index];
+
+            for (size_t group_index = 0; group_index < stage.binding_groups.size(); ++group_index)
+            {
+                StageBindingGroupDynamic& group = stage.binding_groups[group_index];
+                StageBindingGroupStatic const& group_static = stage_static.binding_groups[group_index];
+
+                vkFreeDescriptorSets(vulkan->device,
+                                     group_static.pool.pool,
+                                     group.sets.size(),
+                                     group.sets.data());
+                group.sets.clear();
+            }
+        }
+    }
+}
+
+void
+DispatchContext::GenerateStaticRuntime()
 {
     for (layout::DispatchNode const& node : graph->nodes)
     {
@@ -2177,11 +2201,6 @@ DispatchContext::GenerateStaticRuntime(bind::PNextMap const& _pNext_map)
             std::vector<VkDescriptorSetLayout> set_layouts = {};
             std::vector<VkPushConstantRange> push_constant_ranges = {};
 
-            std::vector<bind::PNextEntry> stage_pnexts = {};
-            if (_pNext_map.count(stage.name))
-                stage_pnexts = _pNext_map.at(stage.name);
-
-            //for (DispatchStageInfo::BindingGroupInfo const& binding_group : stage.binding_groups)
             for (uint32_t group_index = 0u; group_index < (uint32_t)stage.binding_groups.size(); ++group_index)
             {
                 layout::StageBindingGroup const& binding_group = stage.binding_groups[group_index];
@@ -2200,40 +2219,6 @@ DispatchContext::GenerateStaticRuntime(bind::PNextMap const& _pNext_map)
                 }
 
                 descriptor.pool = vulkan->CreateDescriptorPool(stage.group_instance_count, bindings);
-                descriptor.sets.resize(stage.group_instance_count);
-
-                void* pnext_begin = nullptr;
-
-                VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc;
-                {
-                    auto group_pnext_it = std::find_if(
-                        stage_pnexts.begin(), stage_pnexts.end(),
-                        [group_index](bind::PNextEntry const& entry) {
-                            return entry.binding_group_index == group_index;
-                        });
-
-                    if (group_pnext_it != stage_pnexts.end())
-                    {
-                        void* desc_count_alloc_ptr = vktk::PNextLookup(
-                            (VkBaseOutStructure*)group_pnext_it->pnext,
-                            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO);
-                        desc_count_alloc = desc_count_alloc_ptr
-                            ? *(VkDescriptorSetVariableDescriptorCountAllocateInfo const*)desc_count_alloc_ptr
-                            : VkDescriptorSetVariableDescriptorCountAllocateInfo{};
-                        desc_count_alloc.pNext = nullptr;
-                        pnext_begin = desc_count_alloc_ptr ? &desc_count_alloc : nullptr;
-                    }
-                }
-
-                VkDescriptorSetAllocateInfo descset_allocate{};
-                descset_allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-                descset_allocate.pNext = pnext_begin;
-                descset_allocate.descriptorPool = descriptor.pool.pool;
-                descset_allocate.descriptorSetCount = 1u;
-                descset_allocate.pSetLayouts = &descriptor.pool.layout;
-                for (uint32_t index = 0; index < stage.group_instance_count; ++index)
-                    CHECKCALL(vkAllocateDescriptorSets, vulkan->device,
-                              &descset_allocate, &descriptor.sets[index]);
 
                 stage_static.binding_groups.push_back(descriptor);
 
@@ -2326,6 +2311,79 @@ DispatchContext::GenerateFramebufferRuntime(VkFormat const* _swapchain_format)
 }
 
 void
+DispatchContext::UpdateDynamicRuntime(bind::PNextMap const& _pNext_map)
+{
+    ClearDynamicRuntime();
+
+    for (size_t node_index = 0; node_index < graph->nodes.size(); ++node_index)
+    {
+        layout::DispatchNode const& node = graph->nodes[node_index];
+        DispatchNodeStatic const& node_static = nodes_static[node_index];
+
+        DispatchNodeDynamic dynamic_runtime = {};
+
+        for (size_t stage_index = 0; stage_index < node.sequence.size(); ++stage_index)
+        {
+            layout::DispatchStage const& stage = node.sequence[stage_index];
+            DispatchStageStatic const& stage_static = node_static.stages[stage_index];
+
+            DispatchStageDynamic stage_dynamic = {};
+
+            std::vector<bind::PNextEntry> stage_pnexts = {};
+            if (_pNext_map.count(stage.name))
+                stage_pnexts = _pNext_map.at(stage.name);
+
+            for (uint32_t group_index = 0u; group_index < (uint32_t)stage.binding_groups.size(); ++group_index)
+            {
+                StageBindingGroupStatic const& binding_group_static = stage_static.binding_groups[group_index];
+
+                StageBindingGroupDynamic binding_group_dynamic = {};
+                binding_group_dynamic.sets.resize(stage.group_instance_count);
+
+                void* pnext_begin = nullptr;
+
+                VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc;
+                {
+                    auto group_pnext_it = std::find_if(
+                        stage_pnexts.begin(), stage_pnexts.end(),
+                        [group_index](bind::PNextEntry const& entry) {
+                            return entry.binding_group_index == group_index;
+                        });
+
+                    if (group_pnext_it != stage_pnexts.end())
+                    {
+                        void* desc_count_alloc_ptr = vktk::PNextLookup(
+                            (VkBaseOutStructure*)group_pnext_it->pnext,
+                            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO);
+                        desc_count_alloc = desc_count_alloc_ptr
+                            ? *(VkDescriptorSetVariableDescriptorCountAllocateInfo const*)desc_count_alloc_ptr
+                            : VkDescriptorSetVariableDescriptorCountAllocateInfo{};
+                        desc_count_alloc.pNext = nullptr;
+                        pnext_begin = desc_count_alloc_ptr ? &desc_count_alloc : nullptr;
+                    }
+                }
+
+                VkDescriptorSetAllocateInfo descset_allocate{};
+                descset_allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+                descset_allocate.pNext = pnext_begin;
+                descset_allocate.descriptorPool = binding_group_static.pool.pool;
+                descset_allocate.descriptorSetCount = 1u;
+                descset_allocate.pSetLayouts = &binding_group_static.pool.layout;
+                for (uint32_t index = 0; index < stage.group_instance_count; ++index)
+                    CHECKCALL(vkAllocateDescriptorSets, vulkan->device,
+                              &descset_allocate, &binding_group_dynamic.sets[index]);
+
+                stage_dynamic.binding_groups.push_back(binding_group_dynamic);
+            }
+
+            dynamic_runtime.stages.push_back(stage_dynamic);
+        }
+
+        nodes_dynamic.push_back(dynamic_runtime);
+    }
+}
+
+void
 DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
 {
     for (uint32_t node_index = 0u;
@@ -2336,6 +2394,7 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
         bind::DispatchNode const& bindings = nodes_bindings[node_index];
         DispatchNodeFramebuffer const& framebuffer = nodes_framebuffer[node_index];
         DispatchNodeStatic const& runtime = nodes_static[node_index];
+        DispatchNodeDynamic const& dynamic = nodes_dynamic[node_index];
 
         layout::GraphicsNode const& graphics_info = node_info.graphics;
 
@@ -2397,7 +2456,7 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                      ++group_index)
                 {
                     VkDescriptorSet descset =
-                        runtime.stages[stage_index].binding_groups[group_index].sets[dispatch_index];
+                        dynamic.stages[stage_index].binding_groups[group_index].sets[dispatch_index];
                     vkCmdBindDescriptorSets(_command_buffer,
                                             VK_PIPELINE_BIND_POINT_GRAPHICS,
                                             runtime.stages[stage_index].pipeline_layout,
@@ -2548,9 +2607,9 @@ DispatchContext::BindShaderResource(layout::BindingPoint const& _location,
                                     bind::ShaderResource const& _resources)
 {
     uint32_t node_index = (uint32_t)(_location.node - graph->nodes.data());
-    DispatchNodeStatic const& static_runtime = nodes_static[node_index];
-    DispatchStageStatic const& stage_static = static_runtime.stages[_location.stage_index];
-    StageBindingGroupStatic const& group_runtime = stage_static.binding_groups[_location.shader.group_index];
+    DispatchNodeDynamic const& dynamic_runtime = nodes_dynamic[node_index];
+    DispatchStageDynamic const& stage_dynamic = dynamic_runtime.stages[_location.stage_index];
+    StageBindingGroupDynamic const& group_runtime = stage_dynamic.binding_groups[_location.shader.group_index];
 
     layout::DispatchStage const& stage = _location.node->sequence[_location.stage_index];
     layout::StageBindingGroup const& binding_group = stage.binding_groups[_location.shader.group_index];
