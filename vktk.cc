@@ -1969,6 +1969,18 @@ namespace vkrg
 namespace layout
 {
 
+DispatchNode const*
+DispatchGraph::operator[](char const* node_id) const
+{
+    auto node_it = std::find_if(nodes.begin(), nodes.end(),
+                                [node_id](DispatchNode const& node) {
+                                    return node.name == node_id;
+                                });
+    if (node_it != nodes.end())
+        return &*node_it;
+    return nullptr;
+}
+
 void
 DispatchGraph::InsertEdge(GraphEdge const& edge)
 {
@@ -2184,8 +2196,14 @@ DispatchContext::ClearDynamicRuntime()
                                      group.sets.data());
                 group.sets.clear();
             }
+
+            stage.binding_groups.clear();
         }
+
+        node.stages.clear();
     }
+
+    nodes_dynamic.clear();
 }
 
 void

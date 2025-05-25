@@ -435,6 +435,111 @@ vkrg::layout::DispatchGraph SparseRegionRenderGraph()
     return output;
 }
 
+void SparseRegionUpdateBindings(voxel_state_t* _state, vktk::Context* _vulkan)
+{
+    {
+        vkrg::bind::PNextMap pNext_map = {};
+
+        static uint32_t desc_counts[2] = { 0u, 0u };
+        desc_counts[0] = (uint32_t)_state->region_package.masks.size();
+        desc_counts[1] = (uint32_t)_state->region_package.offsets.size();
+
+        static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_allocs[2];
+        desc_count_allocs[0] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
+        desc_count_allocs[1] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
+
+        desc_count_allocs[0].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+        desc_count_allocs[0].pNext = nullptr;
+        desc_count_allocs[0].descriptorSetCount = 1;
+        desc_count_allocs[0].pDescriptorCounts = &desc_counts[0];
+
+        desc_count_allocs[1].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+        desc_count_allocs[1].pNext = nullptr;
+        desc_count_allocs[1].descriptorSetCount = 1;
+        desc_count_allocs[1].pDescriptorCounts = &desc_counts[1];
+
+        pNext_map.emplace("sparse_region", std::vector<vkrg::bind::PNextEntry>{
+            { 1, (void*)&desc_count_allocs[0] },
+            { 2, (void*)&desc_count_allocs[1] }
+        });
+
+        _state->sparse_runtime.UpdateDynamicRuntime(pNext_map);
+    }
+
+    vkrg::layout::DispatchNode const* sparse_region_node = _state->sparse_graph["SparseRegionDispatch"];
+    std::vector<VkWriteDescriptorSet> bindings = {};
+    std::vector<VkDescriptorImageInfo> nodes_info{};
+    for (vktk::Texture const& node : _state->region_package.masks)
+    {
+        VkDescriptorImageInfo region_image_info{};
+        region_image_info.sampler = _state->sampler;
+        region_image_info.imageView = node.view;
+        region_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        nodes_info.push_back(region_image_info);
+    }
+
+    bindings.push_back(
+        _state->sparse_runtime.BindShaderResource(
+            vkrg::layout::BindingPoint{
+                .node = sparse_region_node,
+                .stage_index = 0,
+                .type = vkrg::layout::BindingType_Shader,
+                .shader = { 1, 0 }
+            },
+            0,
+            vkrg::bind::ShaderResource{
+                .descriptor_count = (uint32_t)nodes_info.size(),
+                .images = nodes_info.data()
+            })
+        );
+
+    std::vector<VkDescriptorImageInfo> offsets_info{};
+    for (vktk::Texture const& offsets : _state->region_package.offsets)
+    {
+        VkDescriptorImageInfo offsets_image_info{};
+        offsets_image_info.sampler = _state->sampler;
+        offsets_image_info.imageView = offsets.view;
+        offsets_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        offsets_info.push_back(offsets_image_info);
+    }
+
+    bindings.push_back(
+        _state->sparse_runtime.BindShaderResource(
+            vkrg::layout::BindingPoint{
+                .node = sparse_region_node,
+                .stage_index = 0,
+                .type = vkrg::layout::BindingType_Shader,
+                .shader = { 2, 0 }
+            },
+            0,
+            vkrg::bind::ShaderResource{
+                .descriptor_count = (uint32_t)offsets_info.size(),
+                .images = offsets_info.data()
+            })
+        );
+
+    VkDescriptorBufferInfo matrix_buffer_info = {};
+    matrix_buffer_info.buffer = _state->matrix_buffer;
+    matrix_buffer_info.offset = 0;
+    matrix_buffer_info.range = sizeof(MatrixBlock);
+    bindings.push_back(
+        _state->sparse_runtime.BindShaderResource(
+            vkrg::layout::BindingPoint{
+                .node = sparse_region_node,
+                .stage_index = 0,
+                .type = vkrg::layout::BindingType_Shader,
+                .shader = { 0, 0 }
+            },
+            0,
+            vkrg::bind::ShaderResource{
+                .descriptor_count = 1,
+                .buffers = &matrix_buffer_info
+            })
+        );
+
+    vkUpdateDescriptorSets(_vulkan->device, bindings.size(), bindings.data(), 0u, nullptr);
+}
+
 vkrg::layout::DispatchGraph PixelCyclingRenderGraph()
 {
     vkrg::layout::DispatchGraph output = {};
@@ -1237,65 +1342,23 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     LoadRegion(_state, _vulkan);
     LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
 
-    {
-        vkrg::bind::PNextMap pNext_map = {};
-
-        for (vkrg::layout::DispatchNode const& node : _state->sparse_graph.nodes)
-        {
-            if (node.name == "SparseRegionDispatch")
-            {
-                static uint32_t desc_counts[2] = { 0u, 0u };
-                desc_counts[0] = (uint32_t)_state->region_package.masks.size();
-                desc_counts[1] = (uint32_t)_state->region_package.offsets.size();
-
-                static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_allocs[2];
-                desc_count_allocs[0] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
-                desc_count_allocs[1] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
-
-                desc_count_allocs[0].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
-                desc_count_allocs[0].pNext = nullptr;
-                desc_count_allocs[0].descriptorSetCount = 1;
-                desc_count_allocs[0].pDescriptorCounts = &desc_counts[0];
-
-                desc_count_allocs[1].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
-                desc_count_allocs[1].pNext = nullptr;
-                desc_count_allocs[1].descriptorSetCount = 1;
-                desc_count_allocs[1].pDescriptorCounts = &desc_counts[1];
-
-                //void* pnext_begin = &desc_count_alloc;
-
-                pNext_map.emplace("sparse_region", std::vector<vkrg::bind::PNextEntry>{
-                    { 1, (void*)&desc_count_allocs[0] },
-                    { 2, (void*)&desc_count_allocs[1] }
-                });
-            }
-        }
-
-        _state->sparse_runtime.GenerateStaticRuntime();
-        _state->sparse_runtime.UpdateDynamicRuntime(pNext_map);
-    }
+    _state->sparse_runtime.GenerateStaticRuntime();
 
     {
         vkrg::bind::PNextMap pNext_map = {};
 
-        for (vkrg::layout::DispatchNode const& node : _state->forward_graph.nodes)
-        {
-            if (node.name == "MainWorldDispatch")
-            {
-                static uint32_t desc_count = 0u;
-                static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc = {};
-                desc_count = (uint32_t)_state->section_textures.size();
-                desc_count_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
-                desc_count_alloc.pNext = nullptr;
-                desc_count_alloc.descriptorSetCount = 1;
-                desc_count_alloc.pDescriptorCounts = &desc_count;
-                void* pnext_begin = &desc_count_alloc;
+        static uint32_t desc_count = 0u;
+        static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc = {};
+        desc_count = (uint32_t)_state->section_textures.size();
+        desc_count_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+        desc_count_alloc.pNext = nullptr;
+        desc_count_alloc.descriptorSetCount = 1;
+        desc_count_alloc.pDescriptorCounts = &desc_count;
+        void* pnext_begin = &desc_count_alloc;
 
-                pNext_map.emplace("render_region", std::vector<vkrg::bind::PNextEntry>{
-                    vkrg::bind::PNextEntry{ 0, (void*)&desc_count_alloc }
-                });
-            }
-        }
+        pNext_map.emplace("render_region", std::vector<vkrg::bind::PNextEntry>{
+            vkrg::bind::PNextEntry{ 0, (void*)&desc_count_alloc }
+        });
 
         _state->forward_runtime.GenerateStaticRuntime();
         _state->forward_runtime.UpdateDynamicRuntime(pNext_map);
@@ -1304,24 +1367,18 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     {
         vkrg::bind::PNextMap pNext_map = {};
 
-        for (vkrg::layout::DispatchNode const& node : _state->pixel_cycling_graph.nodes)
-        {
-            if (node.name == "MainWorldDispatch")
-            {
-                static uint32_t desc_count = 0u;
-                static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc = {};
-                desc_count = (uint32_t)_state->section_textures.size();
-                desc_count_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
-                desc_count_alloc.pNext = nullptr;
-                desc_count_alloc.descriptorSetCount = 1;
-                desc_count_alloc.pDescriptorCounts = &desc_count;
-                void* pnext_begin = &desc_count_alloc;
+        static uint32_t desc_count = 0u;
+        static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc = {};
+        desc_count = (uint32_t)_state->section_textures.size();
+        desc_count_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+        desc_count_alloc.pNext = nullptr;
+        desc_count_alloc.descriptorSetCount = 1;
+        desc_count_alloc.pDescriptorCounts = &desc_count;
+        void* pnext_begin = &desc_count_alloc;
 
-                pNext_map.emplace("render_region", std::vector<vkrg::bind::PNextEntry>{
-                    vkrg::bind::PNextEntry{ 0, (void*)&desc_count_alloc }
-                });
-            }
-        }
+        pNext_map.emplace("render_region", std::vector<vkrg::bind::PNextEntry>{
+            vkrg::bind::PNextEntry{ 0, (void*)&desc_count_alloc }
+        });
 
         _state->pixel_cycling_runtime.GenerateStaticRuntime();
         _state->pixel_cycling_runtime.UpdateDynamicRuntime(pNext_map);
@@ -1525,86 +1582,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         }
     }
 
-    {
-        vkrg::layout::DispatchNode const& sparse_region_node =
-            *std::find_if(_state->sparse_graph.nodes.begin(), _state->sparse_graph.nodes.end(),
-                          [](vkrg::layout::DispatchNode const& node) {
-                              return node.name == "SparseRegionDispatch";
-                          });
-
-        std::vector<VkWriteDescriptorSet> bindings = {};
-
-        std::vector<VkDescriptorImageInfo> nodes_info{};
-        for (vktk::Texture const& node : _state->region_package.masks)
-        {
-            VkDescriptorImageInfo region_image_info{};
-            region_image_info.sampler = _state->sampler;
-            region_image_info.imageView = node.view;
-            region_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            nodes_info.push_back(region_image_info);
-        }
-
-        bindings.push_back(
-            _state->sparse_runtime.BindShaderResource(
-                vkrg::layout::BindingPoint{
-                    .node = &sparse_region_node,
-                    .stage_index = 0,
-                    .type = vkrg::layout::BindingType_Shader,
-                    .shader = { 1, 0 }
-                },
-                0,
-                vkrg::bind::ShaderResource{
-                    .descriptor_count = (uint32_t)nodes_info.size(),
-                    .images = nodes_info.data()
-                })
-            );
-
-        std::vector<VkDescriptorImageInfo> offsets_info{};
-        for (vktk::Texture const& offsets : _state->region_package.offsets)
-        {
-            VkDescriptorImageInfo offsets_image_info{};
-            offsets_image_info.sampler = _state->sampler;
-            offsets_image_info.imageView = offsets.view;
-            offsets_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            offsets_info.push_back(offsets_image_info);
-        }
-
-        bindings.push_back(
-            _state->sparse_runtime.BindShaderResource(
-                vkrg::layout::BindingPoint{
-                    .node = &sparse_region_node,
-                    .stage_index = 0,
-                    .type = vkrg::layout::BindingType_Shader,
-                    .shader = { 2, 0 }
-                },
-                0,
-                vkrg::bind::ShaderResource{
-                    .descriptor_count = (uint32_t)offsets_info.size(),
-                    .images = offsets_info.data()
-                })
-            );
-
-        VkDescriptorBufferInfo matrix_buffer_info = {};
-        matrix_buffer_info.buffer = _state->matrix_buffer;
-        matrix_buffer_info.offset = 0;
-        matrix_buffer_info.range = sizeof(MatrixBlock);
-        bindings.push_back(
-            _state->sparse_runtime.BindShaderResource(
-                vkrg::layout::BindingPoint{
-                    .node = &sparse_region_node,
-                    .stage_index = 0,
-                    .type = vkrg::layout::BindingType_Shader,
-                    .shader = { 0, 0 }
-                },
-                0,
-                vkrg::bind::ShaderResource{
-                    .descriptor_count = 1,
-                    .buffers = &matrix_buffer_info
-                })
-            );
-
-        vkUpdateDescriptorSets(_vulkan->device, bindings.size(), bindings.data(), 0u, nullptr);
-    }
+    SparseRegionUpdateBindings(_state, _vulkan);
 
     vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
     command_buffer.Begin();
@@ -1836,6 +1814,8 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
             uint32_t area_size = 4u;
             uint32_t node_size = 4u;
             _state->region_package = UploadVoxelRegion(_vulkan, _state->voxel_region, area_size, node_size);
+
+            SparseRegionUpdateBindings(_state, _vulkan);
         }
     }
 

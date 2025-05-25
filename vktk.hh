@@ -499,6 +499,8 @@ struct DispatchGraph {
     std::unordered_map<DispatchNode const*, std::vector<uint32_t>> edges_in;
     std::unordered_map<DispatchNode const*, std::vector<uint32_t>> edges_out;
 
+    DispatchNode const* operator[](char const* node_id) const;
+
     void InsertEdge(GraphEdge const& edge);
     std::vector<vktk::Context::RenderPassAttachment> RenderPassDescription(
         uint32_t _node_index,
