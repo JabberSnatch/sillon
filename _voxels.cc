@@ -1284,7 +1284,11 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         voxtk::Region<uint8_t> mask{ numtk::vec3u{ 2, 2, 2 }, uint8_t(0) };
         mask.Set({ 0, 0, 0 }, { 2, 2, 2 }, uint8_t(0));
 
-        _state->voxel_region = src.BitwiseAnd(mask, numtk::vec3u{ 9, 4, 9 });
+        voxtk::Region<uint8_t> src_shifted = src.Shift(numtk::vec3u{ 0, 7, 0 });
+
+        //_state->voxel_region = src.BitwiseAnd(mask, numtk::vec3u{ 0, 7, 0 });
+        _state->voxel_region = src_shifted;
+        //_state->voxel_region = src;
 
         area_size = 4u;
         node_size = 4u;
@@ -1809,7 +1813,8 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
             voxtk::Region<uint8_t> mask{ numtk::vec3u{ 2, 2, 2 }, uint8_t(0) };
             mask.Set({ 0, 0, 0 }, { 2, 2, 2 }, uint8_t(0));
 
-            _state->voxel_region = src.BitwiseAnd(mask, _state->stencil_location);
+            //_state->voxel_region = src.BitwiseAnd(mask, _state->stencil_location);
+            _state->voxel_region = src.Shift(_state->stencil_location);
 
             uint32_t area_size = 4u;
             uint32_t node_size = 4u;
