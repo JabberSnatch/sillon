@@ -79,7 +79,8 @@ struct VoxelRegionPackage
 };
 
 VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
-                                     voxtk::Region<uint8_t> const& region,
+                                     //voxtk::Region<uint8_t> const& region,
+                                     voxtk::BinaryRegion const& region,
                                      uint32_t area_size,
                                      uint32_t node_size);
 
@@ -123,7 +124,8 @@ struct voxel_state_t
     std::vector<vktk::Texture> section_textures{};
 
     numtk::vec3u stencil_location{ 0, 0, 0 };
-    voxtk::Region<uint8_t> voxel_region{ { 512u, 512u, 512u }, (uint8_t)0 };
+    //voxtk::Region<uint8_t> voxel_region{ { 512u, 512u, 512u }, (uint8_t)0 };
+    voxtk::BinaryRegion voxel_region{ { 512u, 512u, 512u } };
     VoxelRegionPackage region_package;
 };
 
@@ -596,7 +598,8 @@ vkrg::layout::DispatchGraph PixelCyclingRenderGraph()
     return output;
 }
 
-void DecodeChunk(voxtk::Region<uint8_t>& region,
+void DecodeChunk(voxtk::BinaryRegion& region,
+                 //voxtk::Region<uint8_t>& region,
                  mctk::MCAChunkData const& chunk_data,
                  numtk::vec2u const& chunk_xz)
 {
@@ -677,7 +680,8 @@ void DecodeChunk(voxtk::Region<uint8_t>& region,
 
                     if (palette_size == 1)
                     {
-                        region.Set(section_begin, section_end, (uint8_t)0);
+                        //region.Set(section_begin, section_end, (uint8_t)0);
+                        region.Set(numtk::bounds3u{ section_begin, section_end-section_begin }, true);
                         continue;
                     }
 
@@ -709,7 +713,8 @@ void DecodeChunk(voxtk::Region<uint8_t>& region,
                         numtk::vec3u point = section_begin + numtk::vec3u{ x, y, z };
                         if (palette_data[block_id] != "air"
                             && palette_data[block_id] != "glow_lichen")
-                            region.Set(point, (uint8_t)block_id);
+                            //region.Set(point, (uint8_t)block_id);
+                            region.Set(point, true);
 
                         data_offset += bit_count;
                         ++block_index;
@@ -720,7 +725,7 @@ void DecodeChunk(voxtk::Region<uint8_t>& region,
     }
 }
 
-voxtk::Region<uint8_t> DeserialiseRegion(std::string const& file_path)
+voxtk::BinaryRegion DeserialiseRegion(std::string const& file_path)
 {
     systk::Timer scope_time{ "DeserialiseRegion",
         [](std::string const& tag, float time) {
@@ -730,7 +735,8 @@ voxtk::Region<uint8_t> DeserialiseRegion(std::string const& file_path)
 
     std::vector<uint8_t> region_file = systk::LoadFile(file_path.c_str());
     mctk::MCAFileData mca_data = mctk::MCADecode(region_file.data(), region_file.size());
-    voxtk::Region<uint8_t> output{ numtk::vec3u{ 512u, 512u, 512u }, (uint8_t)0 };
+    //voxtk::Region<uint8_t> output{ numtk::vec3u{ 512u, 512u, 512u }, (uint8_t)0 };
+    voxtk::BinaryRegion output{ { 512u, 512u, 512u } };
 
     for (uint32_t index = 0; index < 1024; ++index)
     {
@@ -747,7 +753,8 @@ void LoadSection(voxel_state_t* state, vktk::Context* vulkan, vktk::CommandBuffe
 {
     std::vector<std::unique_ptr<uint8_t[]>> mip_levels = {};
 
-    voxtk::Region<uint8_t> const& region = state->voxel_region;
+    //voxtk::Region<uint8_t> const& region = state->voxel_region;
+    voxtk::BinaryRegion const& region = state->voxel_region;
     uint16_t section_count = state->section_map[coords[0] + coords[1]*32 + coords[2]*32*32];
     if (section_count != 0u && section_count != 4096u)
     {
@@ -945,7 +952,8 @@ void LoadRegion(voxel_state_t* state, vktk::Context* vulkan)
         }
     };
 
-    voxtk::Region<uint8_t> const& region = state->voxel_region;
+    //voxtk::Region<uint8_t> const& region = state->voxel_region;
+    voxtk::BinaryRegion const& region = state->voxel_region;
 
     state->section_map.resize(32*32*32);
 
@@ -1007,7 +1015,8 @@ void LoadRegion(voxel_state_t* state, vktk::Context* vulkan)
 }
 
 VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
-                                     voxtk::Region<uint8_t> const& region,
+                                     //voxtk::Region<uint8_t> const& region,
+                                     voxtk::BinaryRegion const& region,
                                      uint32_t area_size,
                                      uint32_t node_size)
 {
@@ -1030,18 +1039,22 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
     uint32_t kChunkMortonShift = 2;
     uint32_t kLevelMortonShift = (kNodeMortonShift+kChunkMortonShift)*3;
 
-    std::vector<voxtk::Region<uint8_t>> lods = {};
+    //std::vector<voxtk::Region<uint8_t>> lods = {};
+    std::vector<voxtk::BinaryRegion> lods = {};
 
-    voxtk::Region<uint8_t> const* src = &region;
+    //voxtk::Region<uint8_t> const* src = &region;
+    voxtk::BinaryRegion const* src = &region;
     for (uint32_t lod_size = kScaleRatio, src_index = 0u;
          lod_size > 1;
          (lod_size /= node_size*4, ++src_index))
     {
-        lods.push_back(voxtk::Region<uint8_t>{ { lod_size, lod_size, lod_size }, (uint8_t)0 });
+        //lods.push_back(voxtk::Region<uint8_t>{ { lod_size, lod_size, lod_size }, (uint8_t)0 });
+        lods.push_back(voxtk::BinaryRegion{ numtk::vec3u::Constant(lod_size) });
 
         if (src_index)
             src = &lods[src_index-1];
-        voxtk::Region<uint8_t>& dst = lods.back();
+        //voxtk::Region<uint8_t>& dst = lods.back();
+        voxtk::BinaryRegion& dst = lods.back();
 
         for (uint32_t dstz = 0; dstz < dst.size.z; ++dstz)
         {
@@ -1053,7 +1066,8 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
 
                     bool bit = []
                         (uint32_t node_size,
-                         voxtk::Region<uint8_t> const& src,
+                         //voxtk::Region<uint8_t> const& src,
+                         voxtk::BinaryRegion const& src,
                          numtk::vec3u const& dstbase) {
                         for (uint32_t srcz = 0; srcz < node_size; ++srcz)
                         {
@@ -1063,7 +1077,8 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                                 {
                                     numtk::vec3u srcbase = dstbase*node_size*4
                                         + numtk::vec3u{ srcx, srcy, srcz }*4;
-                                    uint64_t srcbits = src.ExtractKernel(srcbase);
+                                    //uint64_t srcbits = src.ExtractKernel(srcbase);
+                                    uint64_t srcbits = src.GetEnclosingKernel(srcbase);
                                     if (srcbits != 0)
                                         return true;
                                 }
@@ -1078,8 +1093,9 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
         }
     }
 
-    lods.push_back(voxtk::Region<uint8_t>{ { 1, 1, 1 }, (uint8_t)0 });
-    lods.back().Set( { 0, 0, 0 }, true);
+    //lods.push_back(voxtk::Region<uint8_t>{ { 1, 1, 1 }, (uint8_t)0 });
+    lods.push_back(voxtk::BinaryRegion{ numtk::vec3u::Constant(1) });
+    lods.back().Set(numtk::vec3u::Constant(0), true);
 
     uint32_t current_offset = 1u;
     uint32_t group_size = 1u;
@@ -1099,7 +1115,8 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
              , shift_depth += kLevelMortonShift)
     {
         uint32_t lod_index = lod_count-1 - level_index;
-        voxtk::Region<uint8_t> const& lod = lods[lod_count-1 - level_index];
+        //voxtk::Region<uint8_t> const& lod = lods[lod_count-1 - level_index];
+        voxtk::BinaryRegion const& lod = lods[lod_count-1 - level_index];
         numtk::vec3u nextlod_size = numtk::max(lod.size / (node_size * 4),
                                                numtk::vec3u::Constant(1));
         numtk::vec3u nextlod_chunkcount = numtk::max(nextlod_size / 4,
@@ -1151,7 +1168,8 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                                         zindex * 4
                                     } + lod_base;
 
-                                    uint64_t bits = lod.ExtractKernel(base);
+                                    //uint64_t bits = lod.ExtractKernel(base);
+                                    uint64_t bits = lod.GetEnclosingKernel(base);
                                     output[xindex + yindex*node_size + zindex*node_size*node_size] = bits;
 
                                     level_offsets.push_back(current_offset);
@@ -1225,7 +1243,8 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                                     zindex * 4
                                 } + lod0_base;
 
-                                uint64_t bits = region.ExtractKernel(base);
+                                //uint64_t bits = region.ExtractKernel(base);
+                                uint64_t bits = region.GetEnclosingKernel(base);
                                 output[xindex + yindex*node_size + zindex*node_size*node_size] = bits;
                             }
                         }
@@ -1275,18 +1294,23 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     uint32_t area_size = 0u;
     uint32_t node_size = 0u;
     {
-        voxtk::Region<uint8_t> src{ numtk::vec3u{ 16, 16, 16 }, uint8_t(0) };
+        //voxtk::Region<uint8_t> src{ numtk::vec3u{ 16, 16, 16 }, uint8_t(0) };
+        voxtk::BinaryRegion src{ numtk::vec3u{ 16, 16, 16 } };
         for (uint32_t z = 0; z < 16; ++z)
             for (uint32_t y = 0; y < 16; ++y)
                 for (uint32_t x = 0; x < 16; ++x)
-                    src.Set({ x, y, z }, !!(((x&1) + (y&1) + (z&1)) & 1));
+                    src.Set(numtk::vec3u{ x, y, z }, !!(((x&1) + (y&1) + (z&1)) & 1));
 
-        voxtk::Region<uint8_t> mask{ numtk::vec3u{ 2, 2, 2 }, uint8_t(0) };
-        mask.Set({ 0, 0, 0 }, { 2, 2, 2 }, uint8_t(0));
+        //voxtk::Region<uint8_t> mask{ numtk::vec3u{ 2, 2, 2 }, uint8_t(0) };
+        voxtk::BinaryRegion mask{ numtk::vec3u{ 2, 2, 2 } };
+        //mask.Set({ 0, 0, 0 }, { 2, 2, 2 }, uint8_t(0));
+        mask.Set(numtk::bounds3u{{ 0, 0, 0 }, { 2, 2, 2 }}, true);
 
-        voxtk::Region<uint8_t> src_shifted = src.Shift(numtk::vec3u{ 0, 7, 0 });
+        //voxtk::Region<uint8_t> src_shifted = src.Shift(numtk::vec3u{ 0, 7, 0 });
+        voxtk::BinaryRegion src_shifted = src.Shift(numtk::vec3i{ 0, 7, 0 });
 
-        _state->voxel_region = src.BitwiseAnd(mask, numtk::vec3u{ 0, 7, 0 });
+        //_state->voxel_region = src.BitwiseAnd(mask, numtk::vec3u{ 0, 7, 0 });
+        _state->voxel_region = src.BitwiseAnd(numtk::vec3i{ 0, 7, 0 }, mask);
         //_state->voxel_region = src_shifted;
         //_state->voxel_region = src;
 
@@ -1804,16 +1828,20 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         _state->stencil_location = numtk::min(_state->stencil_location, numtk::vec3u::Constant(16));
 
         {
-            voxtk::Region<uint8_t> src{ numtk::vec3u{ 16, 16, 16 }, uint8_t(0) };
+            //voxtk::Region<uint8_t> src{ numtk::vec3u{ 16, 16, 16 }, uint8_t(0) };
+            voxtk::BinaryRegion src{ numtk::vec3u{ 16, 16, 16 } };
             for (uint32_t z = 0; z < 16; ++z)
                 for (uint32_t y = 0; y < 16; ++y)
                     for (uint32_t x = 0; x < 16; ++x)
-                        src.Set({ x, y, z }, !!(((x&1) + (y&1) + (z&1)) & 1));
+                        src.Set(numtk::vec3u{ x, y, z }, !!(((x&1) + (y&1) + (z&1)) & 1));
 
-            voxtk::Region<uint8_t> mask{ numtk::vec3u{ 3, 3, 3 }, uint8_t(0) };
-            mask.Set({ 0, 0, 0 }, { 3, 3, 3 }, uint8_t(0));
+            //voxtk::Region<uint8_t> mask{ numtk::vec3u{ 3, 3, 3 }, uint8_t(0) };
+            voxtk::BinaryRegion mask{ numtk::vec3u{ 3, 3, 3 } };
+            //mask.Set({ 0, 0, 0 }, { 3, 3, 3 }, uint8_t(0));
+            mask.Set(numtk::bounds3u{{ 0, 0, 0 }, { 3, 3, 3 }}, true);
 
-            _state->voxel_region = src.BitwiseAnd(mask, _state->stencil_location);
+            //_state->voxel_region = src.BitwiseAnd(mask, _state->stencil_location);
+            _state->voxel_region = src.BitwiseAnd(_state->stencil_location.cast<int32_t>(), mask);
             //_state->voxel_region = src.Shift(_state->stencil_location);
 
             uint32_t area_size = 4u;
