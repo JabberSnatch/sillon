@@ -123,7 +123,7 @@ struct voxel_state_t
     uint32_t section_index = 0;
     std::vector<vktk::Texture> section_textures{};
 
-    numtk::vec3u stencil_location{ 0, 0, 0 };
+    numtk::vec3i stencil_location{ 0, 0, 0 };
     //voxtk::Region<uint8_t> voxel_region{ { 512u, 512u, 512u }, (uint8_t)0 };
     voxtk::BinaryRegion voxel_region{ { 512u, 512u, 512u } };
     VoxelRegionPackage region_package;
@@ -1294,22 +1294,17 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     uint32_t area_size = 0u;
     uint32_t node_size = 0u;
     {
-        //voxtk::Region<uint8_t> src{ numtk::vec3u{ 16, 16, 16 }, uint8_t(0) };
         voxtk::BinaryRegion src{ numtk::vec3u{ 16, 16, 16 } };
         for (uint32_t z = 0; z < 16; ++z)
             for (uint32_t y = 0; y < 16; ++y)
                 for (uint32_t x = 0; x < 16; ++x)
                     src.Set(numtk::vec3u{ x, y, z }, !!(((x&1) + (y&1) + (z&1)) & 1));
 
-        //voxtk::Region<uint8_t> mask{ numtk::vec3u{ 2, 2, 2 }, uint8_t(0) };
         voxtk::BinaryRegion mask{ numtk::vec3u{ 2, 2, 2 } };
-        //mask.Set({ 0, 0, 0 }, { 2, 2, 2 }, uint8_t(0));
         mask.Set(numtk::bounds3u{{ 0, 0, 0 }, { 2, 2, 2 }}, true);
 
-        //voxtk::Region<uint8_t> src_shifted = src.Shift(numtk::vec3u{ 0, 7, 0 });
-        voxtk::BinaryRegion src_shifted = src.Shift(numtk::vec3i{ 0, 7, 0 });
+        voxtk::BinaryRegion src_shifted = src.Shift(numtk::vec3i{ 0, -7, 0 });
 
-        //_state->voxel_region = src.BitwiseAnd(mask, numtk::vec3u{ 0, 7, 0 });
         _state->voxel_region = src.BitwiseAnd(numtk::vec3i{ 0, 7, 0 }, mask);
         //_state->voxel_region = src_shifted;
         //_state->voxel_region = src;
@@ -1824,8 +1819,10 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
     if (stencil_delta != numtk::vec3i::Constant(0))
     {
-        _state->stencil_location += stencil_delta.cast<uint32_t>();
-        _state->stencil_location = numtk::min(_state->stencil_location, numtk::vec3u::Constant(16));
+        _state->stencil_location += stencil_delta;
+        _state->stencil_location = numtk::min(numtk::max(_state->stencil_location,
+                                                         numtk::vec3i::Constant(-16)),
+                                              numtk::vec3i::Constant(16));
 
         {
             //voxtk::Region<uint8_t> src{ numtk::vec3u{ 16, 16, 16 }, uint8_t(0) };
@@ -1841,8 +1838,8 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
             mask.Set(numtk::bounds3u{{ 0, 0, 0 }, { 3, 3, 3 }}, true);
 
             //_state->voxel_region = src.BitwiseAnd(mask, _state->stencil_location);
-            _state->voxel_region = src.BitwiseAnd(_state->stencil_location.cast<int32_t>(), mask);
-            //_state->voxel_region = src.Shift(_state->stencil_location);
+            //_state->voxel_region = src.BitwiseAnd(_state->stencil_location.cast<int32_t>(), mask);
+            _state->voxel_region = src.Shift(_state->stencil_location);
 
             uint32_t area_size = 4u;
             uint32_t node_size = 4u;
