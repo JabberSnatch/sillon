@@ -125,6 +125,7 @@ struct voxel_state_t
 
     numtk::vec3i stencil_location{ 0, 0, 0 };
     //voxtk::Region<uint8_t> voxel_region{ { 512u, 512u, 512u }, (uint8_t)0 };
+    voxtk::BinaryRegion initial_region;
     voxtk::BinaryRegion voxel_region{ { 512u, 512u, 512u } };
     VoxelRegionPackage region_package;
 };
@@ -1261,6 +1262,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 {
     voxel_state_t* _state = (voxel_state_t*)_pstate;
 
+#if 0
     {
         numtk::vec3i offset_axis{ 1, 0, 1 };
 
@@ -1290,9 +1292,11 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
         int i = 0;
     }
+#endif
 
     uint32_t area_size = 0u;
     uint32_t node_size = 0u;
+#if 0
     {
         voxtk::BinaryRegion src{ numtk::vec3u{ 16, 16, 16 } };
         for (uint32_t z = 0; z < 16; ++z)
@@ -1313,6 +1317,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         node_size = 4u;
         int i = 0;
     }
+#endif
 
     _state->forward_graph = FullFrameRenderGraph();
     _state->forward_runtime.vulkan = _vulkan;
@@ -1333,7 +1338,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
 #else
 
-#if 0
+#if 1
 #if 1
     _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
     area_size = 128u;
@@ -1358,12 +1363,15 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
 #endif
 
+    _state->initial_region = _state->voxel_region;
     _state->region_package = UploadVoxelRegion(_vulkan, _state->voxel_region, area_size, node_size);
 
 #endif
 
+#ifdef TRAVERSAL_V1
     LoadRegion(_state, _vulkan);
     LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
+#endif
 
     _state->sparse_runtime.GenerateStaticRuntime();
 
@@ -1804,6 +1812,10 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         _state->region_package.display_depth = std::max(_state->region_package.display_depth-1, 0);
 
     numtk::vec3i stencil_delta{ 0, 0, 0 };
+    int32_t shift_factor = 1;
+    if (_input->mod_down & iotk::fKeyMod::kAlt)
+        shift_factor = 10;
+
     if (_input->key_down['u'] && !_past_input->key_down['u'])
         stencil_delta += numtk::vec3i{ 0, 1, 0 };
     if (_input->key_down['j'] && !_past_input->key_down['j'])
@@ -1817,9 +1829,18 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
     if (_input->key_down['i'] && !_past_input->key_down['i'])
         stencil_delta += numtk::vec3i{ 0, 0, 1 };
 
+    stencil_delta *= shift_factor;
+
     if (stencil_delta != numtk::vec3i::Constant(0))
     {
         _state->stencil_location += stencil_delta;
+
+        _state->voxel_region = _state->initial_region.Shift(_state->stencil_location);
+        _state->region_package = UploadVoxelRegion(_vulkan, _state->voxel_region,
+                                                   _state->region_package.area_size,
+                                                   _state->region_package.node_size);
+        SparseRegionUpdateBindings(_state, _vulkan);
+#if 0
         _state->stencil_location = numtk::min(numtk::max(_state->stencil_location,
                                                          numtk::vec3i::Constant(-16)),
                                               numtk::vec3i::Constant(16));
@@ -1847,6 +1868,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
             SparseRegionUpdateBindings(_state, _vulkan);
         }
+#endif
     }
 
     _state->camera.Update(_input, _past_input);
