@@ -1339,7 +1339,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 #else
 
 #if 1
-#if 1
+#if 0
     _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
     area_size = 128u;
     node_size = 8u;
