@@ -1835,12 +1835,14 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
     {
         _state->stencil_location += stencil_delta;
 
+#if 1
         _state->voxel_region = _state->initial_region.Shift(_state->stencil_location);
         _state->region_package = UploadVoxelRegion(_vulkan, _state->voxel_region,
                                                    _state->region_package.area_size,
                                                    _state->region_package.node_size);
         SparseRegionUpdateBindings(_state, _vulkan);
-#if 0
+
+#else
         _state->stencil_location = numtk::min(numtk::max(_state->stencil_location,
                                                          numtk::vec3i::Constant(-16)),
                                               numtk::vec3i::Constant(16));

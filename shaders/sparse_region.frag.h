@@ -387,7 +387,7 @@ void main()
     {
         float frag_depth = trav.w + entry_depth;
 
-#if 1
+#if 0
         color.xyz = frag_depth.xxx;
         color.w = 1.0;
         return;
