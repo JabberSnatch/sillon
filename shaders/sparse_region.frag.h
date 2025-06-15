@@ -17,7 +17,7 @@ layout(std140, set = 0, binding = 0) uniform MatrixBlock {
 layout(push_constant, std430) uniform PushConstants {
     vec3 light_dir;
 
-    float area_size;
+    float indirect_contribution;
     float node_size;
     int stack_depth;
 };
@@ -400,7 +400,34 @@ void main()
 
         float diffuse = max(0.0, dot(light_dir, trav.xyz));
 
-        color.xyz = vec3(mix(shadow.xxx * diffuse, vec3(0.3, 0.5, 0.5), (1.0 - fog).xxx));
+        float indirect = 0.0;
+        for (uint sample_index = 0; sample_index < 8; ++sample_index)
+        {
+            uint th_index = sample_index / 4;
+            uint ph_index = sample_index % 4;
+            float theta = 3.14159265 * float(th_index + 0.5);
+            float phi = 3.14159265 * 2.0 * float(ph_index);
+            vec3 ts_sample = vec3(
+                cos(theta) * cos(phi),
+                cos(theta) * sin(phi),
+                sin(theta)
+            );
+
+            vec3 n = trav.xyz;
+            vec3 t = cross(vec3(0.0, 1.0, 0.0), n);
+            if (dot(t, t) == 0.0)
+                t = cross(vec3(0.0, 0.0, 1.0), n);
+            vec3 b = cross(n, t);
+
+            vec3 second_ray = t * ts_sample.x + b * ts_sample.y + n * ts_sample.z;
+            float second_hitt = RegionTraversal4(hitp + second_ray*0.0001, second_ray).w;
+            vec3 second_hitp = hitp + second_ray*second_hitt;
+            float sample_v = RegionTraversal4(second_hitp + light_dir*0.0001, light_dir).w >= 0.0 ? 1.0 : 0.0;
+
+            indirect += (sample_v * dot(second_ray, light_dir)) / 8.0;
+        }
+
+        color.xyz = vec3(mix(shadow.xxx * diffuse + indirect.xxx * indirect_contribution, vec3(0.3, 0.5, 0.5), (1.0 - fog).xxx));
 #endif
     }
     else
