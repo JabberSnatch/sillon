@@ -401,12 +401,14 @@ void main()
         float diffuse = max(0.0, dot(light_dir, trav.xyz));
 
         float indirect = 0.0;
-        for (uint sample_index = 0; sample_index < 8; ++sample_index)
+        vec3 avg_dir = vec3(0.0);
+#if 1
+        for (uint sample_index = 0; sample_index < 16; ++sample_index)
         {
             uint th_index = sample_index / 4;
             uint ph_index = sample_index % 4;
-            float theta = 3.14159265 * float(th_index + 0.5);
-            float phi = 3.14159265 * 2.0 * float(ph_index);
+            float theta = 3.14159265 * 0.5 * (float(th_index + 0.5) / 4.0);
+            float phi = 3.14159265 * 2.0 * (float(ph_index) / 4.0);
             vec3 ts_sample = vec3(
                 cos(theta) * cos(phi),
                 cos(theta) * sin(phi),
@@ -418,16 +420,40 @@ void main()
             if (dot(t, t) == 0.0)
                 t = cross(vec3(0.0, 0.0, 1.0), n);
             vec3 b = cross(n, t);
+            t = cross(b, n);
 
             vec3 second_ray = t * ts_sample.x + b * ts_sample.y + n * ts_sample.z;
             float second_hitt = RegionTraversal4(hitp + second_ray*0.0001, second_ray).w;
             vec3 second_hitp = hitp + second_ray*second_hitt;
-            float sample_v = RegionTraversal4(second_hitp + light_dir*0.0001, light_dir).w >= 0.0 ? 1.0 : 0.0;
+            float sample_v = RegionTraversal4(second_hitp + light_dir*0.0001, light_dir).w >= 0.0 ? 0.0 : 1.0;
+            avg_dir += second_ray;
 
-            indirect += (sample_v * dot(second_ray, light_dir)) / 8.0;
+            indirect += (sample_v * max(0.0, dot(-second_ray, light_dir))) / 16.0;
         }
+#endif
 
-        color.xyz = vec3(mix(shadow.xxx * diffuse + indirect.xxx * indirect_contribution, vec3(0.3, 0.5, 0.5), (1.0 - fog).xxx));
+#if 0
+        {
+            vec3 second_ray = normalize(trav.xyz + vec3(0.0, -0.9, 0.0));
+            vec4 second_hit = RegionTraversal4(hitp + trav.xyz*0.0001, second_ray);
+            if (second_hit.w >= 0.0)
+            {
+                vec3 second_hitp = hitp + second_ray*(second_hit.w+0.0001);
+                float sample_v = RegionTraversal4(second_hitp + second_hit.xyz*0.01, light_dir).w >= 0.0 ? 0.0 : 1.0;
+                indirect = (sample_v * max(0.0, dot(-second_ray, light_dir)));
+            }
+            else
+            {
+                color = vec4(1.0, 0.0, 1.0, 1.0);
+                return;
+            }
+            //color.xyz = second_ray * 0.5 + vec3(0.5);
+        }
+#endif
+
+        //color.xyz = vec3(mix(shadow.xxx * diffuse + indirect.xxx * indirect_contribution, vec3(0.3, 0.5, 0.5), (1.0 - fog).xxx));
+        color.xyz = shadow.xxx * diffuse + indirect.xxx * indirect_contribution;
+        //color.xyz = indirect.xxx * indirect_contribution;
 #endif
     }
     else
