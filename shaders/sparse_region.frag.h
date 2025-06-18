@@ -35,6 +35,38 @@ layout(set = 2, binding = 0) uniform usampler3D offsets[];
 #define CHUNK_SIZE 4.0
 #define STACK_SIZE 5
 
+
+float uint2float(uint i) {return uintBitsToFloat(0x3F800000u | (i >> 9)) - 1.0;}
+vec2 uint2float(uvec2 i) {return vec2(uint2float(i.x), uint2float(i.y));}
+uint bitfieldReverse(uint x) {
+    x = ((x & 0xAAAAAAAAu) >> 1) | ((x & 0x55555555u) << 1);
+    x = ((x & 0xCCCCCCCCu) >> 2) | ((x & 0x33333333u) << 2);
+    x = ((x & 0xF0F0F0F0u) >> 4) | ((x & 0x0F0F0F0Fu) << 4);
+    x = ((x & 0xFF00FF00u) >> 8) | ((x & 0x00FF00FFu) << 8);
+    return (x >> 16) | (x << 16);
+}
+uint interleave(uint x) {
+    x &= 0x0000FFFFu;
+    x = (x | (x << 8)) & 0x00FF00FFu;
+    x = (x | (x << 4)) & 0x0F0F0F0Fu;
+    x = (x | (x << 2)) & 0x33333333u;
+    x = (x | (x << 1)) & 0x55555555u;
+    return x;
+}
+uint morton2D(uvec2 p) {return interleave(p.x) | (interleave(p.y) << 1);}
+uint OwenHash4(uint x, uint seed) {x = bitfieldReverse(x); x ^= x * 0x3D20ADEAu; x ^= (x >> 1) & (x << 1) & 0x55555555u; x += seed; x *= (seed >> 16) | 1u; x ^= (x >> 1) & (x << 1) & 0x55555555u; x ^= x * 0x05526c56u; x ^= x * 0x53a22864u; return 0xFFFF0000u & x;}
+uvec2 plasticSequence(uint i) {return i * uvec2(3242174889u, 2447445414u);}
+vec2 OwenPlastic(uint i, uint seed) {return uint2float(plasticSequence(bitfieldReverse(OwenHash4(i, seed ^ 0xF8ADE99Au))));}
+mat3 genTB(vec3 N) {
+     float s = N.z < 0.0 ? -1.0 : 1.0;
+     float a = -1.0 / (s + N.z);
+     float b = N.x * N.y * a;
+     return mat3(
+         vec3(1.0 + s * N.x * N.x * a, s * b, -s * N.x),
+         vec3(b, s + N.y * N.y * a, -N.y),
+         N);
+ }
+
 vec3 RegionTraversal0(vec3 org, vec3 dir)
 {
     uvec2 data = uvec2(0);
@@ -361,6 +393,7 @@ void main()
     vec2 uv =
         (vec2(gl_FragCoord.xy) - vec2(screen_offset.xy))
         / vec2(screen_size.xy);
+    uint pixelID = morton2D(uvec2(gl_FragCoord.xy));
 
     vec3 dir =
         inverse(mat3(view_model)) *
@@ -402,19 +435,29 @@ void main()
 
         float indirect = 0.0;
         vec3 avg_dir = vec3(0.0);
-#if 1
+if (indirect_contribution != 0.0) {
         for (uint sample_index = 0; sample_index < 16; ++sample_index)
         {
+
+#if 0
             uint th_index = sample_index / 4;
             uint ph_index = sample_index % 4;
             float theta = 3.14159265 * 0.5 * (float(th_index + 0.5) / 4.0);
             float phi = 3.14159265 * 2.0 * (float(ph_index) / 4.0);
+#else
+
+            vec2 owen_sample = OwenPlastic(pixelID * 16 + sample_index, 0);
+            float theta = owen_sample.x * 3.14159265 * 0.5;
+            float phi = owen_sample.y * 3.14159265 * 2.0;
+#endif
+
             vec3 ts_sample = vec3(
                 cos(theta) * cos(phi),
                 cos(theta) * sin(phi),
                 sin(theta)
             );
 
+#if 0
             vec3 n = trav.xyz;
             vec3 t = cross(vec3(0.0, 1.0, 0.0), n);
             if (dot(t, t) == 0.0)
@@ -423,36 +466,31 @@ void main()
             t = cross(b, n);
 
             vec3 second_ray = t * ts_sample.x + b * ts_sample.y + n * ts_sample.z;
-            float second_hitt = RegionTraversal4(hitp + second_ray*0.0001, second_ray).w;
-            vec3 second_hitp = hitp + second_ray*second_hitt;
-            float sample_v = RegionTraversal4(second_hitp + light_dir*0.0001, light_dir).w >= 0.0 ? 0.0 : 1.0;
-            avg_dir += second_ray;
-
-            indirect += (sample_v * max(0.0, dot(-second_ray, light_dir))) / 16.0;
-        }
 #endif
+            mat3 tb_mat = genTB(trav.xyz);
+            vec3 second_ray = tb_mat * ts_sample;
 
-#if 0
-        {
-            vec3 second_ray = normalize(trav.xyz + vec3(0.0, -0.9, 0.0));
-            vec4 second_hit = RegionTraversal4(hitp + trav.xyz*0.0001, second_ray);
-            if (second_hit.w >= 0.0)
+            if (dot(second_ray, trav.xyz) <= 0.0)
+                continue;
+
+            vec4 second_hit = RegionTraversal4(hitp + second_ray*0.0001, second_ray);
+            vec3 second_hitp = hitp + second_ray*second_hit.w;
+            if (dot(second_hit.xyz, light_dir) <= 0.0)
+                continue;
+
             {
-                vec3 second_hitp = hitp + second_ray*(second_hit.w+0.0001);
-                float sample_v = RegionTraversal4(second_hitp + second_hit.xyz*0.01, light_dir).w >= 0.0 ? 0.0 : 1.0;
-                indirect = (sample_v * max(0.0, dot(-second_ray, light_dir)));
+                float sample_v = RegionTraversal4(second_hitp + light_dir*0.0001, light_dir).w >= 0.0 ? 0.0 : 1.0;
+                avg_dir += second_ray;
+                indirect += (sample_v * max(0.0, dot(-second_ray, light_dir))) / 16.0;
             }
-            else
-            {
-                color = vec4(1.0, 0.0, 1.0, 1.0);
-                return;
-            }
-            //color.xyz = second_ray * 0.5 + vec3(0.5);
         }
-#endif
+}
 
         //color.xyz = vec3(mix(shadow.xxx * diffuse + indirect.xxx * indirect_contribution, vec3(0.3, 0.5, 0.5), (1.0 - fog).xxx));
         color.xyz = shadow.xxx * diffuse + indirect.xxx * indirect_contribution;
+        //color.x = shadow * diffuse;
+        //color.y = 1.0 - step(indirect * indirect_contribution, 0.0);
+        //color.z = 0.0;
         //color.xyz = indirect.xxx * indirect_contribution;
 #endif
     }
