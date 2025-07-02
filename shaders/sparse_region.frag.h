@@ -17,7 +17,7 @@ layout(std140, set = 0, binding = 0) uniform MatrixBlock {
 layout(push_constant, std430) uniform PushConstants {
     vec3 light_dir;
 
-    float indirect_contribution;
+    float display_mode;
     float node_size;
     int stack_depth;
 };
@@ -435,59 +435,68 @@ void main()
 
         float indirect = 0.0;
         vec3 avg_dir = vec3(0.0);
-if (indirect_contribution != 0.0) {
-        for (uint sample_index = 0; sample_index < 16; ++sample_index)
+        float avg_t = 0.0;
+        if (display_mode != 0.0)
         {
+            for (uint sample_index = 0; sample_index < 16; ++sample_index)
+            {
 
 #if 0
-            uint th_index = sample_index / 4;
-            uint ph_index = sample_index % 4;
-            float theta = 3.14159265 * 0.5 * (float(th_index + 0.5) / 4.0);
-            float phi = 3.14159265 * 2.0 * (float(ph_index) / 4.0);
+                uint th_index = sample_index / 4;
+                uint ph_index = sample_index % 4;
+                float theta = 3.14159265 * 0.5 * (float(th_index + 0.5) / 4.0);
+                float phi = 3.14159265 * 2.0 * (float(ph_index) / 4.0);
 #else
 
-            vec2 owen_sample = OwenPlastic(pixelID * 16 + sample_index, 0);
-            float theta = owen_sample.x * 3.14159265 * 0.5;
-            float phi = owen_sample.y * 3.14159265 * 2.0;
+                vec2 owen_sample = OwenPlastic(pixelID * 16 + sample_index, 0);
+                float theta = owen_sample.x * 3.14159265 * 0.5;
+                float phi = owen_sample.y * 3.14159265 * 2.0;
 #endif
 
-            vec3 ts_sample = vec3(
-                cos(theta) * cos(phi),
-                cos(theta) * sin(phi),
-                sin(theta)
-            );
+                vec3 ts_sample = vec3(
+                    cos(theta) * cos(phi),
+                    cos(theta) * sin(phi),
+                    sin(theta)
+                    );
 
 #if 0
-            vec3 n = trav.xyz;
-            vec3 t = cross(vec3(0.0, 1.0, 0.0), n);
-            if (dot(t, t) == 0.0)
-                t = cross(vec3(0.0, 0.0, 1.0), n);
-            vec3 b = cross(n, t);
-            t = cross(b, n);
+                vec3 n = trav.xyz;
+                vec3 t = cross(vec3(0.0, 1.0, 0.0), n);
+                if (dot(t, t) == 0.0)
+                    t = cross(vec3(0.0, 0.0, 1.0), n);
+                vec3 b = cross(n, t);
+                t = cross(b, n);
 
-            vec3 second_ray = t * ts_sample.x + b * ts_sample.y + n * ts_sample.z;
+                vec3 second_ray = t * ts_sample.x + b * ts_sample.y + n * ts_sample.z;
 #endif
-            mat3 tb_mat = genTB(trav.xyz);
-            vec3 second_ray = tb_mat * ts_sample;
+                mat3 tb_mat = genTB(trav.xyz);
+                vec3 second_ray = tb_mat * ts_sample;
 
-            if (dot(second_ray, trav.xyz) <= 0.0)
-                continue;
+                if (dot(second_ray, trav.xyz) <= 0.0)
+                    continue;
 
-            vec4 second_hit = RegionTraversal4(hitp + second_ray*0.0001, second_ray);
-            vec3 second_hitp = hitp + second_ray*second_hit.w;
-            if (dot(second_hit.xyz, light_dir) <= 0.0)
-                continue;
+                vec4 second_hit = RegionTraversal4(hitp + second_ray*0.0001, second_ray);
+                vec3 second_hitp = hitp + second_ray*second_hit.w;
+                if (dot(second_hit.xyz, light_dir) <= 0.0)
+                    continue;
 
-            {
-                float sample_v = RegionTraversal4(second_hitp + light_dir*0.0001, light_dir).w >= 0.0 ? 0.0 : 1.0;
-                avg_dir += second_ray;
-                indirect += (sample_v * max(0.0, dot(-second_ray, light_dir))) / 16.0;
+                {
+                    float sample_t = RegionTraversal4(second_hitp + light_dir*0.0001, light_dir).w;
+                    float sample_v = sample_t >= 0.0 ? 0.0 : 1.0;
+                    avg_dir += second_ray;
+                    indirect += (sample_v * max(0.0, dot(-second_ray, light_dir))) / 16.0;
+                    avg_t += sample_v;
+                }
             }
         }
-}
 
         //color.xyz = vec3(mix(shadow.xxx * diffuse + indirect.xxx * indirect_contribution, vec3(0.3, 0.5, 0.5), (1.0 - fog).xxx));
-        color.xyz = shadow.xxx * diffuse + indirect.xxx * indirect_contribution;
+        if (display_mode != 2.0)
+            color.xyz = shadow.xxx * diffuse + indirect.xxx;
+        else
+            color.xyz = avg_t.xxx/16.0;
+
+        //color.xyz *= light_dir * 0.25 + vec3(1.5);
         //color.x = shadow * diffuse;
         //color.y = 1.0 - step(indirect * indirect_contribution, 0.0);
         //color.z = 0.0;
@@ -495,7 +504,7 @@ if (indirect_contribution != 0.0) {
 #endif
     }
     else
-        color.xyz = trav.xyz;
+        color.xyz = light_dir * 0.5 + vec3(0.5) + trav.xyz;//trav.xyz;
     color.w = 1.0;
 }
 

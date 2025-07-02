@@ -129,7 +129,7 @@ struct voxel_state_t
     voxtk::BinaryRegion initial_region;
     voxtk::BinaryRegion voxel_region{ { 512u, 512u, 512u } };
     VoxelRegionPackage region_package;
-    bool indirect_lighting = false;
+    uint32_t display_mode = 0;
 };
 
 struct MatrixBlock
@@ -145,7 +145,7 @@ struct MatrixBlock
 struct SparseRegionPushConstants
 {
     numtk::vec3f light_dir;
-    float area_scale;
+    float display_mode;
     float node_size;
     int32_t stack_depth;
 };
@@ -1288,7 +1288,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
     uint32_t area_size = 0u;
     uint32_t node_size = 0u;
-#if 0
+#if 1
     {
         voxtk::BinaryRegion src{ numtk::vec3u{ 16, 16, 16 } };
         for (uint32_t z = 0; z < 16; ++z)
@@ -1330,7 +1330,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
 #else
 
-#if 1
+#if 0
 #if 1
     _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
     area_size = 128u;
@@ -1804,10 +1804,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         _state->region_package.display_depth = std::max(_state->region_package.display_depth-1, 0);
 
     if (!_input->key_down['l'] && _past_input->key_down['l'])
-    {
-        _state->indirect_lighting = !_state->indirect_lighting;
-        std::cout << "coucou" << std::endl;
-    }
+        _state->display_mode = ((_state->display_mode+1) % 3);
 
     numtk::vec3i stencil_delta{ 0, 0, 0 };
     int32_t shift_factor = 1;
@@ -1833,7 +1830,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
     {
         _state->stencil_location += stencil_delta;
 
-#if 1
+#if 0
         _state->voxel_region = _state->initial_region.Shift(_state->stencil_location);
         _state->region_package = UploadVoxelRegion(_vulkan, _state->voxel_region,
                                                    _state->region_package.area_size,
@@ -1859,8 +1856,8 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
             mask.Set(numtk::bounds3u{{ 0, 0, 0 }, { 3, 3, 3 }}, true);
 
             //_state->voxel_region = src.BitwiseAnd(mask, _state->stencil_location);
-            //_state->voxel_region = src.BitwiseAnd(_state->stencil_location.cast<int32_t>(), mask);
-            _state->voxel_region = src.Shift(_state->stencil_location);
+            _state->voxel_region = src.BitwiseAnd(_state->stencil_location.cast<int32_t>(), mask);
+            //_state->voxel_region = src.Shift(_state->stencil_location);
 
             uint32_t area_size = 4u;
             uint32_t node_size = 4u;
@@ -1987,6 +1984,8 @@ void Draw(void* _pstate,
         std::sin(_state->sun_spherical[1]),
         std::cos(_state->sun_spherical[1]) * std::sin(_state->sun_spherical[0])
     };
+
+    std::cout << sun_dir.x << " " << sun_dir.y << " " << sun_dir.z << std::endl;
 
     SkyboxPushConstants skybox_params = {};
     skybox_params.projection = numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how);
@@ -2118,7 +2117,7 @@ void Draw(void* _pstate,
                 },
                 0);
         push_constants->light_dir = sun_dir;
-        push_constants->area_scale = _state->indirect_lighting ? 1.f : 0.f;
+        push_constants->display_mode = (float)_state->display_mode;
         push_constants->node_size = (float)_state->region_package.node_size;
         push_constants->stack_depth = std::max(_state->region_package.display_depth-1, 0);
 
