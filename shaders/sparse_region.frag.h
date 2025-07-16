@@ -472,10 +472,14 @@ void main()
                 mat3 tb_mat = genTB(trav.xyz);
                 vec3 second_ray = tb_mat * ts_sample;
 
+                avg_dir += second_ray / 16.0;
                 if (dot(second_ray, trav.xyz) <= 0.0)
                     continue;
 
-                vec4 second_hit = RegionTraversal4(hitp + second_ray*0.0001, second_ray);
+                vec4 second_hit = RegionTraversal4(hitp + trav.xyz*0.0001, second_ray);
+                if (second_hit.w < 0.0)
+                    continue;
+
                 vec3 second_hitp = hitp + second_ray*second_hit.w;
                 if (dot(second_hit.xyz, light_dir) <= 0.0)
                     continue;
@@ -483,7 +487,7 @@ void main()
                 {
                     float sample_t = RegionTraversal4(second_hitp + light_dir*0.0001, light_dir).w;
                     float sample_v = sample_t >= 0.0 ? 0.0 : 1.0;
-                    avg_dir += second_ray;
+                    avg_dir += second_ray / 16.0;
                     indirect += (sample_v * max(0.0, dot(-second_ray, light_dir))) / 16.0;
                     avg_t += sample_v;
                 }
@@ -491,10 +495,16 @@ void main()
         }
 
         //color.xyz = vec3(mix(shadow.xxx * diffuse + indirect.xxx * indirect_contribution, vec3(0.3, 0.5, 0.5), (1.0 - fog).xxx));
-        if (display_mode != 2.0)
+        if (display_mode < 2.0)
             color.xyz = shadow.xxx * diffuse + indirect.xxx;
-        else
+#if 0
+        else if (display_mode == 2.0)
             color.xyz = avg_t.xxx/16.0;
+        else if (display_mode == 3.0)
+            color.xyz = dot(trav.xyz, light_dir).xxx;
+        else if (display_mode == 4.0)
+            color.xyz = avg_dir * 0.5 + vec3(0.5);
+#endif
 
         //color.xyz *= light_dir * 0.25 + vec3(1.5);
         //color.x = shadow * diffuse;

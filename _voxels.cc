@@ -1330,7 +1330,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
 #else
 
-#if 0
+#if 1
 #if 1
     _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
     area_size = 128u;
@@ -1804,7 +1804,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         _state->region_package.display_depth = std::max(_state->region_package.display_depth-1, 0);
 
     if (!_input->key_down['l'] && _past_input->key_down['l'])
-        _state->display_mode = ((_state->display_mode+1) % 3);
+        _state->display_mode = ((_state->display_mode+1) % 2);
 
     numtk::vec3i stencil_delta{ 0, 0, 0 };
     int32_t shift_factor = 1;
@@ -1830,7 +1830,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
     {
         _state->stencil_location += stencil_delta;
 
-#if 0
+#if 1
         _state->voxel_region = _state->initial_region.Shift(_state->stencil_location);
         _state->region_package = UploadVoxelRegion(_vulkan, _state->voxel_region,
                                                    _state->region_package.area_size,
@@ -1979,13 +1979,13 @@ void Draw(void* _pstate,
             { _state->matrix_buffer, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_UNIFORM_READ_BIT }
         });
 
-    numtk::vec3f sun_dir{
+    numtk::vec3f sun_dir = numtk::vec3f{
         std::cos(_state->sun_spherical[1]) * std::cos(_state->sun_spherical[0]),
         std::sin(_state->sun_spherical[1]),
         std::cos(_state->sun_spherical[1]) * std::sin(_state->sun_spherical[0])
-    };
+    }.normalise();
 
-    std::cout << sun_dir.x << " " << sun_dir.y << " " << sun_dir.z << std::endl;
+    //std::cout << sun_dir.x << " " << sun_dir.y << " " << sun_dir.z << std::endl;
 
     SkyboxPushConstants skybox_params = {};
     skybox_params.projection = numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how);
