@@ -4,10 +4,12 @@
 #define MCTK_IMPLEMENTATION
 #include "mctk/mctk.hh"
 
-#include "systk.hh"
 #include <numtk.hh>
-#include "vktk.hh"
 #include <dstk.hh>
+
+#include "guitk.hh"
+#include "systk.hh"
+#include "vktk.hh"
 
 #define VOXTK_IMPLEMENTATION
 #include <voxtk.hh>
@@ -87,6 +89,8 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
 
 struct voxel_state_t
 {
+    guitk::Context gui_context;
+
     float time = 0.f;
 
     //TurntableCamera camera;
@@ -1253,6 +1257,7 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
 void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 {
     voxel_state_t* _state = (voxel_state_t*)_pstate;
+    _state->gui_context = guitk::CreateContext();
 
 #if 0
     {
@@ -1775,6 +1780,11 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 {
     voxel_state_t* _state = (voxel_state_t*)_pstate;
 
+    guitk::BeginRecord(_state->gui_context);
+    guitk::BeginFrame(_state->gui_context);
+    guitk::EndFrame(_state->gui_context);
+    guitk::EndRecord(_state->gui_context);
+
     std::cout << _input->time_delta << std::endl;
     _state->time += _input->time_delta;
 
@@ -2205,6 +2215,8 @@ void Shutdown(void* _pstate,
         _vulkan->ScheduleFenceDestroy(_state->last_submit);
         _state->last_submit = VK_NULL_HANDLE;
     }
+
+     guitk::DeleteContext(_state->gui_context);
 }
 
 void TurntableCamera::Update(iotk::input_t const* _input,
