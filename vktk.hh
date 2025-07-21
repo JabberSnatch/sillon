@@ -456,6 +456,10 @@ struct PushConstantsLocation {
     uint32_t range_index;
 };
 
+struct VertexInputLocation {
+    uint32_t binding_index;
+};
+
 enum BindingType {
     BindingType_Shader,
     BindingType_Framebuffer,
@@ -472,6 +476,7 @@ struct BindingPoint {
         ShaderLocation shader;
         FramebufferLocation framebuffer;
         PushConstantsLocation push_constants;
+        VertexInputLocation vertex_input;
     };
 };
 
@@ -520,6 +525,11 @@ struct ShaderResource {
         VkDescriptorImageInfo const* images;
         VkDescriptorBufferInfo const* buffers;
     };
+};
+
+struct VertexInput {
+    VkBuffer buffer;
+    VkDeviceSize offset;
 };
 
 enum DispatchCommand {
@@ -629,6 +639,8 @@ struct DispatchContext {
                              uint32_t _instance_index,
                              bind::GraphicsCommand const& _command);
 
+    void BindVertexInput(layout::BindingPoint const& _location,
+                         bind::VertexInput const& _vertex_input);
     void* BindPushConstants(layout::BindingPoint const& _location,
                             uint32_t _instance_index);
     VkWriteDescriptorSet BindShaderResource(layout::BindingPoint const& _location,
