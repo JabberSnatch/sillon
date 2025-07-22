@@ -90,6 +90,7 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
 struct voxel_state_t
 {
     guitk::Context gui_context;
+    vktk::Buffer gui_geometry;
 
     float time = 0.f;
 
@@ -1780,10 +1781,27 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 {
     voxel_state_t* _state = (voxel_state_t*)_pstate;
 
-    guitk::BeginRecord(_state->gui_context);
-    guitk::BeginFrame(_state->gui_context);
-    guitk::EndFrame(_state->gui_context);
-    guitk::EndRecord(_state->gui_context);
+    {
+        guitk::BeginRecord(_state->gui_context);
+        guitk::BeginFrame(_state->gui_context);
+        guitk::EndFrame(_state->gui_context);
+        guitk::WidgetStates const* gui_record = guitk::EndRecord(_state->gui_context);
+
+        _state->gui_geometry = _vulkan->CreateBuffer(
+            sizeof(numtk::vec2f) * 4 * gui_record->frames.size(),
+            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            [gui_record](void* buffer){
+                numtk::vec2f* vertex_data = (numtk::vec2f*)buffer;
+                for (guitk::Frame const& frame : gui_record->frames)
+                {
+                    vertex_data[0] = frame.bounds.min.cast<float>();
+                    vertex_data[1] = numtk::vec2f{ (float)frame.bounds.min.x(), (float)(frame.bounds.min.y()+frame.bounds.extent.y()) };
+                    vertex_data[2] = frame.bounds.max().cast<float>();
+                    vertex_data[3] = numtk::vec2f{ (float)(frame.bounds.min.x()+frame.bounds.extent.x()), (float)frame.bounds.min.y() };
+                }
+            },
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    }
 
     std::cout << _input->time_delta << std::endl;
     _state->time += _input->time_delta;
@@ -2155,7 +2173,12 @@ void Draw(void* _pstate,
     command_buffer.End();
 
     if (_state->last_submit != VK_NULL_HANDLE)
+    {
+        _vulkan->ScheduleRoutine(_state->last_submit, [buffer = _state->gui_geometry](vktk::Context& _vulkan){
+            _vulkan.DestroyBuffer(buffer);
+        });
         _vulkan->ScheduleFenceDestroy(_state->last_submit);
+    }
 
     VkPipelineStageFlags wait_dst_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     command_buffer.Submit(nullptr, &_acquire_semaphore, &wait_dst_stage, 1u,

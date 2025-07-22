@@ -173,11 +173,26 @@ struct CommandBuffer {
     std::vector<Buffer> pending_destroys = {};
     operator VkCommandBuffer() { return handle; }
 
+    struct SubmitInfo {
+        VkSemaphore* signal_semaphore = nullptr;
+        VkSemaphore const* wait_semaphores = nullptr;
+        VkPipelineStageFlags const* wait_stages = nullptr;
+        uint32_t wait_count = 0u;
+        VkFence* signal_fence;
+    };
+
     void Submit(VkSemaphore* _signal_semaphore = nullptr,
                 VkSemaphore const* _wait_semaphores = nullptr,
                 VkPipelineStageFlags const* _wait_stages = nullptr,
                 uint32_t _wait_count = 0u,
                 VkFence* _signal_fence = nullptr);
+    void Submit(SubmitInfo const& _submit_info) {
+        Submit(_submit_info.signal_semaphore,
+               _submit_info.wait_semaphores,
+               _submit_info.wait_stages,
+               _submit_info.wait_count,
+               _submit_info.signal_fence);
+    }
 
     void Begin();
 
@@ -323,8 +338,7 @@ struct Context
                         VkBufferUsageFlags _usage,
                         std::function<void(void*)> const& _upload_callback,
                         VkMemoryPropertyFlags _memory_flags =
-                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
-                        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     void DestroyBuffer(Buffer const& _buffer) const;
 
     Texture CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,

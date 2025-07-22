@@ -1,27 +1,14 @@
 #pragma once
 
+#include <vector>
+#include <numtk.hh>
+
 namespace guitk
 {
 
 struct Context_t;
 
 using Context = Context_t*;
-
-Context CreateContext();
-void DeleteContext(Context);
-
-void BeginRecord(Context);
-void EndRecord(Context);
-
-void SetCanvasSize(Context, numtk::vec2u const& size);
-
-void BeginFrame(Context);
-void EndFrame(Context);
-
-} // namespace guitk
-
-
-namespace guitk {
 
 struct Frame
 {
@@ -36,6 +23,22 @@ struct WidgetStates
     Frame* current_frame;
     std::vector<Frame> frames;
 };
+
+Context CreateContext();
+void DeleteContext(Context);
+
+void BeginRecord(Context);
+WidgetStates const* EndRecord(Context);
+
+void SetCanvasSize(Context, numtk::vec2u const& size);
+
+void BeginFrame(Context);
+void EndFrame(Context);
+
+} // namespace guitk
+
+
+namespace guitk {
 
 struct Context_t
 {
@@ -53,10 +56,11 @@ void BeginRecord(Context context_)
     context_->current_record = WidgetStates{};
 }
 
-void EndRecord(Context context_)
+WidgetStates const* EndRecord(Context context_)
 {
     context_->record_open = false;
     context_->last_record = std::move(context_->current_record);
+    return &context_->last_record;
 }
 
 void SetCanvasSize(Context context_, numtk::vec2u const& size_)

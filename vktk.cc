@@ -1396,6 +1396,61 @@ Buffer Context::CreateBuffer(uint32_t _size,
     return buffer;
 }
 
+Buffer Context::CreateBuffer(uint32_t _size,
+                             VkBufferUsageFlags _usage,
+                             std::function<void(void*)> const& _upload_callback,
+                             VkMemoryPropertyFlags _memory_flags)
+{
+    Buffer result = CreateBuffer(_size, _usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, _memory_flags);
+
+    Buffer staging = CreateBuffer(_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+    void* mapped_data = nullptr;
+    CHECKCALL(vkMapMemory,
+              device,
+              staging.alloc.memory,
+              staging.alloc.offset,
+              staging.alloc.size,
+              0u, &mapped_data);
+    _upload_callback(mapped_data);
+    vkUnmapMemory(device, staging.alloc.memory);
+
+    vktk::CommandBuffer command_buffer = CreateCommandBuffer(present_queue);
+    command_buffer.Begin();
+
+    command_buffer.BufferTransitions(
+        VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        {
+            { result, VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT },
+            { staging, VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT }
+        });
+
+    VkBufferCopy copy_region{ 0, 0, _size };
+    vkCmdCopyBuffer(command_buffer, staging, result, 1, &copy_region);
+
+    VkFence staging_fence = {};
+    VkFenceCreateInfo fence_info = {};
+    fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fence_info.pNext = nullptr;
+    fence_info.flags = 0;
+    CHECKCALL(vkCreateFence,
+              device, &fence_info, nullptr, &staging_fence);
+
+    command_buffer.End();
+
+    CommandBuffer::SubmitInfo submit_info = {};
+    submit_info.signal_fence = &staging_fence;
+    command_buffer.Submit(submit_info);
+
+    ScheduleRoutine(staging_fence, [staging](Context& _context) {
+        std::cout << "[ScheduledRoutine] staging buffer destroyed "
+                  << std::hex << staging.buffer << std::dec << std::endl;
+        _context.DestroyBuffer(staging);
+    });
+    ScheduleFenceDestroy(staging_fence);
+
+    return result;
+}
+
 void Context::DestroyBuffer(Buffer const& _buffer) const
 {
     vkDestroyBuffer(device, _buffer, nullptr);
