@@ -1527,9 +1527,11 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                         .images = section_images_info.data()
                     });
 
-            desc_writes.push_back(region_binding);
+            if (region_image_info.imageView)
+                desc_writes.push_back(region_binding);
             desc_writes.push_back(matrix_binding);
-            desc_writes.push_back(section_bindings);
+            if (!section_images_info.empty())
+                desc_writes.push_back(section_bindings);
 
             vkUpdateDescriptorSets(_vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
         }
@@ -1603,9 +1605,11 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                         .images = section_images_info.data()
                     });
 
-            desc_writes.push_back(region_binding);
+            if (region_image_info.imageView)
+                desc_writes.push_back(region_binding);
             desc_writes.push_back(matrix_binding);
-            desc_writes.push_back(section_bindings);
+            if (!section_images_info.empty())
+                desc_writes.push_back(section_bindings);
 
             vkUpdateDescriptorSets(_vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
         }
