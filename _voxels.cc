@@ -1424,11 +1424,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         VK_BUFFER_USAGE_TRANSFER_DST_BIT
         | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
 
-    _state->staging_area = nullptr;
-    CHECKCALL(vkMapMemory,
-              _vulkan->device, _state->staging_buffer.alloc.memory,
-              _state->staging_buffer.alloc.offset, _state->staging_buffer.alloc.size,
-              0, &_state->staging_area);
+    _state->staging_area = _state->staging_buffer.alloc.map;
 
     MatrixBlock* matrices = (MatrixBlock*)_state->staging_area;
     for (uint32_t index = 0; index < 64; ++index)
@@ -2228,8 +2224,6 @@ void Shutdown(void* _pstate,
 
     _vulkan->DestroyTexture(_state->region_texture);
     _state->region_texture = vktk::Texture{};
-
-    vkUnmapMemory(_vulkan->device, _state->staging_buffer.alloc.memory);
 
     _vulkan->DestroyBuffer(_state->matrix_buffer);
     _vulkan->DestroyBuffer(_state->staging_buffer);

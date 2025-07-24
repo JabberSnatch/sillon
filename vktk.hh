@@ -65,6 +65,7 @@ struct Allocation
     VkDeviceMemory memory;
     VkDeviceSize offset;
     VkDeviceSize size;
+    void* map;
 };
 
 struct Allocator
@@ -80,6 +81,7 @@ struct Allocator
         uint32_t memory_type;
         std::vector<VkDeviceMemory> chunks; // 128 MB
         std::vector<BlockRange> free_list;
+        std::vector<void*> maps;
     };
     VkDevice device;
     VkPhysicalDeviceMemoryProperties memory_properties;
@@ -90,6 +92,8 @@ struct Allocator
     Allocation Alloc(VkMemoryPropertyFlags _memory_flags,
                      uint32_t _size,
                      VkDeviceSize _alignment);
+
+    void Free(Allocation const& _alloc);
 
     uint32_t SelectMemoryType(VkMemoryPropertyFlags _flags, uint32_t _required_size);
     void AllocateChunk(ChunkStorage& _storage);

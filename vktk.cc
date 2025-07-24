@@ -455,15 +455,8 @@ void CommandBuffer::UpdateTexture(Texture _texture, VkOffset3D _offset, VkExtent
         * _extent.depth;
     Buffer staging = queue.context->CreateBuffer(staging_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
 
-    void* mapped_data = nullptr;
-    CHECKCALL(vkMapMemory,
-              queue.context->device,
-              staging.alloc.memory,
-              staging.alloc.offset,
-              staging.alloc.size,
-              0u, &mapped_data);
+    void* mapped_data = staging.alloc.map;
     _upload_callback(mapped_data);
-    vkUnmapMemory(queue.context->device, staging.alloc.memory);
 
     BufferTransitions(VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
                       {
@@ -679,7 +672,11 @@ Allocation Allocator::Alloc(VkMemoryPropertyFlags _memory_flags,
     if (range.first == range.second)
         storage.free_list.erase(storage.free_list.begin() + range_index);
 
-    return Allocation{ memory_type, chunk, offset, _size };
+    void* map = nullptr;
+    if (!storage.maps.empty())
+        map = ((uint8_t*)storage.maps[chunk_index]) + offset;
+
+    return Allocation{ memory_type, chunk, offset, _size, map };
 }
 
 Allocation Allocator::Alloc(VkMemoryPropertyFlags _memory_flags,
@@ -695,6 +692,10 @@ Allocation Allocator::Alloc(VkMemoryPropertyFlags _memory_flags,
     Allocation alloc = Alloc(_memory_flags, (_size + padding));
     alloc.offset += _alignment - (alloc.offset & padding);
     return alloc;
+}
+
+void Allocator::Free(Allocation const& _alloc)
+{
 }
 
 uint32_t Allocator::SelectMemoryType(VkMemoryPropertyFlags _flags, uint32_t _required_size)
@@ -727,13 +728,24 @@ void Allocator::AllocateChunk(ChunkStorage& _storage)
         (_storage.chunks.size()+1) * kChunkBlockCount
     });
     _storage.chunks.push_back(device_memory);
+
+    if (memory_properties.memoryTypes[_storage.memory_type].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
+    {
+        void* map = nullptr;
+        CHECKCALL(vkMapMemory, device, device_memory, 0, VK_WHOLE_SIZE, 0u, &map);
+        _storage.maps.push_back(map);
+    }
 }
 
 void Allocator::Release()
 {
     for (ChunkStorage& heap : heaps)
         for (VkDeviceMemory chunk : heap.chunks)
+        {
+            if (!heap.maps.empty())
+                vkUnmapMemory(device, chunk);
             vkFreeMemory(device, chunk, nullptr);
+        }
 
     heaps.clear();
 }
@@ -1404,15 +1416,8 @@ Buffer Context::CreateBuffer(uint32_t _size,
     Buffer result = CreateBuffer(_size, _usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, _memory_flags);
 
     Buffer staging = CreateBuffer(_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-    void* mapped_data = nullptr;
-    CHECKCALL(vkMapMemory,
-              device,
-              staging.alloc.memory,
-              staging.alloc.offset,
-              staging.alloc.size,
-              0u, &mapped_data);
+    void* mapped_data = staging.alloc.map;
     _upload_callback(mapped_data);
-    vkUnmapMemory(device, staging.alloc.memory);
 
     vktk::CommandBuffer command_buffer = CreateCommandBuffer(present_queue);
     command_buffer.Begin();
@@ -1508,15 +1513,8 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
     uint64_t staging_size = _width * _height * _depth * VkFormatBytesPerUnit(_format);
     Buffer staging = CreateBuffer(staging_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
 
-    void* mapped_data = nullptr;
-    CHECKCALL(vkMapMemory,
-              device,
-              staging.alloc.memory,
-              staging.alloc.offset,
-              staging.alloc.size,
-              0u, &mapped_data);
+    void* mapped_data = staging.alloc.map;
     _upload_callback(mapped_data);
-    vkUnmapMemory(device, staging.alloc.memory);
 
     vktk::CommandBuffer command_buffer = CreateCommandBuffer(present_queue);
     command_buffer.Begin();
