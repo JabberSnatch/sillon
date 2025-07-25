@@ -119,7 +119,7 @@ struct Texture {
 
 struct Swapchain {
     VkExtent2D size = { 0, 0 };
-    Context const* vulkan;
+    Context* vulkan;
 
     VkFormat format;
     VkRenderPass render_pass;
@@ -343,7 +343,7 @@ struct Context
                         std::function<void(void*)> const& _upload_callback,
                         VkMemoryPropertyFlags _memory_flags =
                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    void DestroyBuffer(Buffer const& _buffer) const;
+    void DestroyBuffer(Buffer const& _buffer);
 
     Texture CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
                           VkImageType _type, VkFormat _format, VkImageUsageFlags _usage);
@@ -355,7 +355,7 @@ struct Context
     Texture CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
                           VkImageType _type, VkFormat _format, VkImageUsageFlags _usage,
                           std::function<void(void*)> const& _upload_callback);
-    void DestroyTexture(Texture const& _texture) const;
+    void DestroyTexture(Texture const& _texture);
 
     VkImageView CreateImageView(Texture const& _texture) const;
 

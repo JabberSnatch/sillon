@@ -17,6 +17,7 @@
 
 #include <shaderc/shaderc.hpp>
 
+#include <cassert>
 #include <cstring>
 #include <iostream>
 #include <numeric>
@@ -696,6 +697,36 @@ Allocation Allocator::Alloc(VkMemoryPropertyFlags _memory_flags,
 
 void Allocator::Free(Allocation const& _alloc)
 {
+    auto heap_iterator = std::lower_bound(heaps.begin(), heaps.end(), _alloc.memory_type,
+                                          [](ChunkStorage const& _lhs, uint32_t _rhs) {
+                                              return _lhs.memory_type < _rhs;
+                                          });
+    assert(heap_iterator != heaps.end());
+
+    ChunkStorage& storage = *heap_iterator;
+    uint64_t alloc_begin = _alloc.offset / kBlockSize;
+    uint64_t alloc_end = alloc_begin + (_alloc.size / kBlockSize) + ((_alloc.size % kBlockSize != 0) ? 1 : 0);
+
+    auto range_iterator = std::lower_bound(storage.free_list.begin(), storage.free_list.end(), alloc_begin,
+                                           [](BlockRange const& _lhs, uint64_t _rhs) {
+                                               return _lhs.first < _rhs;
+                                           });
+    assert(range_iterator != storage.free_list.end());
+
+    if (range_iterator != storage.free_list.begin()
+        && std::prev(range_iterator)->second == alloc_begin)
+    {
+        range_iterator = std::prev(range_iterator);
+        range_iterator->second = alloc_end;
+    }
+    else
+        range_iterator = storage.free_list.insert(range_iterator, { alloc_begin, alloc_end });
+
+    if (range_iterator->second == std::next(range_iterator)->first)
+    {
+        range_iterator->second = std::next(range_iterator)->second;
+        storage.free_list.erase(std::next(range_iterator));
+    }
 }
 
 uint32_t Allocator::SelectMemoryType(VkMemoryPropertyFlags _flags, uint32_t _required_size)
@@ -1456,9 +1487,10 @@ Buffer Context::CreateBuffer(uint32_t _size,
     return result;
 }
 
-void Context::DestroyBuffer(Buffer const& _buffer) const
+void Context::DestroyBuffer(Buffer const& _buffer)
 {
     vkDestroyBuffer(device, _buffer, nullptr);
+    allocator.Free(_buffer.alloc);
 }
 
 Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
@@ -1622,7 +1654,7 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
     return result;
 }
 
-void Context::DestroyTexture(Texture const& _texture) const
+void Context::DestroyTexture(Texture const& _texture)
 {
     vkDestroyImageView(device, _texture.view, nullptr);
     vkDestroyImage(device, _texture.image, nullptr);
