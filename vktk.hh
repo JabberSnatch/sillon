@@ -570,6 +570,7 @@ struct FramebufferArea {
 struct DispatchInstance {
     GraphicsCommand graphics;
     std::vector<std::unique_ptr<uint8_t[]>> push_constants;
+    std::vector<VertexInput> vertex_inputs;
 };
 
 struct DispatchStage {
@@ -658,6 +659,7 @@ struct DispatchContext {
                              bind::GraphicsCommand const& _command);
 
     void BindVertexInput(layout::BindingPoint const& _location,
+                         uint32_t _instance_index,
                          bind::VertexInput const& _vertex_input);
     void* BindPushConstants(layout::BindingPoint const& _location,
                             uint32_t _instance_index);

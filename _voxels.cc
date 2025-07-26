@@ -86,7 +86,7 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                                      uint32_t area_size,
                                      uint32_t node_size);
 
-void SparseRegionUpdateBindings(voxel_state_t* _state, vktk::Context* _vulkan);
+void SparseRegionUpdateBindings(struct voxel_state_t* _state, vktk::Context* _vulkan);
 
 struct voxel_state_t
 {
@@ -167,9 +167,11 @@ vkrg::layout::DispatchStage RegionPassDispatchStageInfo();
 vkrg::layout::DispatchStage SparseRegionDispatchStageInfo();
 vkrg::layout::DispatchStage SkyboxDispatchStageInfo();
 vkrg::layout::DispatchStage ResolveDispatchStageInfo();
+vkrg::layout::DispatchStage GUIDispatchStageInfo();
 
 vkrg::layout::DispatchNode MainWorldDispatchInfo();
 vkrg::layout::DispatchNode ResolveDispatchInfo();
+vkrg::layout::DispatchNode GUIDispatchInfo();
 
 vkrg::layout::DispatchGraph SparseRegionRenderGraph();
 vkrg::layout::DispatchGraph FullFrameRenderGraph();
@@ -1470,6 +1472,23 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                 }
             },
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        vkrg::layout::DispatchNode const& sparse_region_node =
+            *std::find_if(_state->sparse_graph.nodes.begin(), _state->sparse_graph.nodes.end(),
+                          [](vkrg::layout::DispatchNode const& node) {
+                              return node.name == "SparseRegionDispatch";
+                          });
+
+        _state->sparse_runtime.BindGraphicsCommand(
+            &sparse_region_node, 1, 0, { vkrg::bind::DispatchCommand_Draw, (uint32_t)gui_record->frames.size() * 4, 1 });
+        _state->sparse_runtime.BindVertexInput(
+            { .node = &sparse_region_node,
+              .stage_index = 1,
+              .type = vkrg::layout::BindingType_VertexInput,
+              .vertex_input = vkrg::layout::VertexInputLocation{ 0 } },
+            0,
+            { _state->gui_geometry, 0 }
+            );
     }
 
     std::cout << _input->time_delta << std::endl;
@@ -2266,6 +2285,41 @@ vkrg::layout::DispatchStage ResolveDispatchStageInfo()
     return output;
 }
 
+vkrg::layout::DispatchStage GUIDispatchStageInfo()
+{
+    vkrg::layout::DispatchStage output = {};
+    output.name = "gui";
+
+    output.shaders = std::vector<vkrg::layout::ShaderStage>{
+        { VK_SHADER_STAGE_VERTEX_BIT,
+          { "#version 450",
+            "layout(location = 0) in vec2 point;"
+            "void main() { gl_Position = vec4(point / 500.0, 0.0, 1.0); }"
+          }
+        },
+        { VK_SHADER_STAGE_FRAGMENT_BIT,
+          { "#version 450",
+            "layout(location = 0) out vec4 color;"
+            "void main() { color = vec4(1.0, 0.0, 1.0, 1.0); }"
+          }
+        }
+    };
+
+    output.group_instance_count = 1;
+
+    output.graphics.state_overrides = std::vector<vktk::Context::StateOverride>{
+        { vktk::StateOverrideTag::DepthTestEnable, VK_FALSE },
+        { vktk::StateOverrideTag::DepthWriteEnable, VK_FALSE }
+    };
+    output.graphics.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    output.graphics.input_layout = std::vector<vktk::Context::VertexInput>{
+        { 0, 0, VK_VERTEX_INPUT_RATE_VERTEX, VK_FORMAT_R32G32_SFLOAT,
+          0, sizeof(numtk::vec2f) }
+    };
+
+    return output;
+}
+
 vkrg::layout::DispatchNode MainWorldDispatchInfo()
 {
     vkrg::layout::DispatchNode output{};
@@ -2320,6 +2374,7 @@ vkrg::layout::DispatchGraph SparseRegionRenderGraph()
     node.mode = vkrg::layout::DispatchMode_Graphics;
     node.sequence = std::vector<vkrg::layout::DispatchStage>{
         SparseRegionDispatchStageInfo(),
+        GUIDispatchStageInfo()
     };
 
     node.graphics.attachments = std::vector<vkrg::layout::RenderAttachment>{

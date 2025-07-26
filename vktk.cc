@@ -2677,6 +2677,31 @@ DispatchContext::BindGraphicsCommand(layout::DispatchNode const* _node,
     graphics = _command;
 }
 
+void
+DispatchContext::BindVertexInput(layout::BindingPoint const& _location,
+                                 uint32_t _instance_index,
+                                 bind::VertexInput const& _vertex_input)
+{
+    layout::DispatchStage const& stage = _location.node->sequence[_location.stage_index];
+
+    uint32_t node_index = (uint32_t)(_location.node - graph->nodes.data());
+    if (nodes_bindings.size() < node_index+1)
+        nodes_bindings.resize(node_index+1);
+
+    bind::DispatchNode& node_bindings = nodes_bindings[node_index];
+    if (node_bindings.stages.size() < _location.stage_index+1)
+        node_bindings.stages.resize(_location.stage_index+1);
+    if (node_bindings.stages[_location.stage_index].instances.size() < _instance_index+1)
+        node_bindings.stages[_location.stage_index].instances.resize(_instance_index+1);
+
+    bind::DispatchStage& stage_bindings = node_bindings.stages[_location.stage_index];
+    bind::DispatchInstance& instance = stage_bindings.instances[_instance_index];
+
+    if (instance.vertex_inputs.size() < _location.vertex_input.binding_index+1)
+        instance.vertex_inputs.resize(_location.vertex_input.binding_index+1);
+    instance.vertex_inputs[_location.vertex_input.binding_index] = _vertex_input;
+}
+
 void*
 DispatchContext::BindPushConstants(layout::BindingPoint const& _location,
                                    uint32_t _instance_index)
