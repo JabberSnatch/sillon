@@ -87,11 +87,11 @@ struct Allocator
     VkPhysicalDeviceMemoryProperties memory_properties;
     std::vector<ChunkStorage> heaps = {};
 
-    Allocation Alloc(VkMemoryPropertyFlags _memory_flags,
-                     uint32_t _size);
-    Allocation Alloc(VkMemoryPropertyFlags _memory_flags,
-                     uint32_t _size,
-                     VkDeviceSize _alignment);
+    Allocation Allocate(VkMemoryPropertyFlags _memory_flags,
+                        uint32_t _size);
+    Allocation Allocate(VkMemoryPropertyFlags _memory_flags,
+                        uint32_t _size,
+                        VkDeviceSize _alignment);
 
     void Free(Allocation const& _alloc);
 

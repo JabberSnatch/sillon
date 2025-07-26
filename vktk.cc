@@ -628,7 +628,7 @@ void CommandBuffer::End()
     vkEndCommandBuffer(handle);
 }
 
-Allocation Allocator::Alloc(VkMemoryPropertyFlags _memory_flags,
+Allocation Allocator::Allocate(VkMemoryPropertyFlags _memory_flags,
                             uint32_t _size)
 {
     uint32_t memory_type = SelectMemoryType(_memory_flags, _size);
@@ -680,7 +680,7 @@ Allocation Allocator::Alloc(VkMemoryPropertyFlags _memory_flags,
     return Allocation{ memory_type, chunk, offset, _size, map };
 }
 
-Allocation Allocator::Alloc(VkMemoryPropertyFlags _memory_flags,
+Allocation Allocator::Allocate(VkMemoryPropertyFlags _memory_flags,
                             uint32_t _size,
                             VkDeviceSize _alignment)
 {
@@ -688,9 +688,9 @@ Allocation Allocator::Alloc(VkMemoryPropertyFlags _memory_flags,
     if (_alignment > kBlockSize)
         padding = _alignment-1;
     else
-        return Alloc(_memory_flags, _size);
+        return Allocate(_memory_flags, _size);
 
-    Allocation alloc = Alloc(_memory_flags, (_size + padding));
+    Allocation alloc = Allocate(_memory_flags, (_size + padding));
     alloc.offset += _alignment - (alloc.offset & padding);
     return alloc;
 }
@@ -1433,7 +1433,7 @@ Buffer Context::CreateBuffer(uint32_t _size,
     VkMemoryRequirements reqs = {};
     vkGetBufferMemoryRequirements(device, buffer.buffer, &reqs);
 
-    buffer.alloc = allocator.Alloc(_memory_flags, _size, reqs.alignment);
+    buffer.alloc = allocator.Allocate(_memory_flags, _size, reqs.alignment);
     CHECKCALL(vkBindBufferMemory, device, buffer.buffer, buffer.alloc.memory, buffer.alloc.offset);
 
     return buffer;
@@ -1528,7 +1528,7 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
     VkMemoryRequirements requirements{};
     vkGetImageMemoryRequirements(device, texture.image, &requirements);
 
-    texture.alloc = allocator.Alloc(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, requirements.size, requirements.alignment);
+    texture.alloc = allocator.Allocate(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, requirements.size, requirements.alignment);
     CHECKCALL(vkBindImageMemory, device, texture.image, texture.alloc.memory, texture.alloc.offset);
 
     texture.view = CreateImageView(texture);
