@@ -1489,6 +1489,13 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
             0,
             { _state->gui_geometry, 0 }
             );
+        _state->sparse_runtime.BindBarrier(&sparse_region_node, 1, {
+            .type = vkrg::bind::BufferResource,
+            .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
+            .access = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .buffer = _state->gui_geometry
+        });
+
     }
 
     std::cout << _input->time_delta << std::endl;
@@ -1861,7 +1868,7 @@ void Draw(void* _pstate,
     if (_state->last_submit != VK_NULL_HANDLE)
     {
         _vulkan->ScheduleRoutine(_state->last_submit, [buffer = _state->gui_geometry](vktk::Context& _vulkan){
-            _vulkan.DestroyBuffer(buffer);
+            //_vulkan.DestroyBuffer(buffer);
         });
         _vulkan->ScheduleFenceDestroy(_state->last_submit);
     }

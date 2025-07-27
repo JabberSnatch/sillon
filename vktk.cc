@@ -2531,6 +2531,18 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
         vkCmdSetViewport(_command_buffer, 0, 1, &viewport);
         vkCmdSetScissor(_command_buffer, 0, 1, &scissor);
 
+        for (uint32_t stage_index = 0u;
+             stage_index < (uint32_t)node_info.sequence.size();
+             ++stage_index)
+        {
+            for (auto&& barrier : bindings.stages[stage_index].buffer_barriers)
+                _command_buffer.BufferTransitions(barrier.second.first.stage,
+                                                  barrier.second.second.stage,
+                                                  {{ barrier.first,
+                                                     barrier.second.first.access,
+                                                     barrier.second.second.access }});
+        }
+
         VkRenderPassBeginInfo rp_begin_info{};
         rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         rp_begin_info.pNext = nullptr;
@@ -2550,16 +2562,18 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                               VK_PIPELINE_BIND_POINT_GRAPHICS,
                               framebuffer.stages[stage_index]);
 
-            for (uint32_t dispatch_index = 0u;
-                 dispatch_index < node_info.sequence[stage_index].invocation_count;
-                 ++dispatch_index)
+            for (uint32_t invoc_index = 0u;
+                 invoc_index < node_info.sequence[stage_index].invocation_count;
+                 ++invoc_index)
             {
+                bind::DispatchInvocation const& invocation = bindings.stages[stage_index].invocations[invoc_index];
+
                 for (uint32_t group_index = 0u;
                      group_index < (uint32_t)node_info.sequence[stage_index].binding_groups.size();
                      ++group_index)
                 {
                     VkDescriptorSet descset =
-                        dynamic.stages[stage_index].binding_groups[group_index].sets[dispatch_index];
+                        dynamic.stages[stage_index].binding_groups[group_index].sets[invoc_index];
                     vkCmdBindDescriptorSets(_command_buffer,
                                             VK_PIPELINE_BIND_POINT_GRAPHICS,
                                             runtime.stages[stage_index].pipeline_layout,
@@ -2576,7 +2590,7 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                         node_info.sequence[stage_index].push_constants[range_index];
                     void* memory = bindings
                         .stages[stage_index]
-                        .invocations[dispatch_index]
+                        .invocations[invoc_index]
                         .push_constants[range_index].get();
                     vkCmdPushConstants(_command_buffer,
                                        runtime.stages[stage_index].pipeline_layout,
@@ -2586,8 +2600,19 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                                        memory);
                 }
 
-                bind::GraphicsCommand const& graphics_command =
-                    bindings.stages[stage_index].invocations[dispatch_index].graphics;
+                for (uint32_t vertex_input_index = 0;
+                     vertex_input_index < (uint32_t)invocation.vertex_inputs.size();
+                     ++vertex_input_index)
+                {
+                    bind::VertexInput const& binding = invocation.vertex_inputs[vertex_input_index];
+                    if (binding.buffer == VK_NULL_HANDLE)
+                        continue;
+
+                    vkCmdBindVertexBuffers(_command_buffer, vertex_input_index, 1,
+                                           &binding.buffer, &binding.offset);
+                }
+
+                bind::GraphicsCommand const& graphics_command = invocation.graphics;
 
                 switch(graphics_command.command)
                 {
@@ -2605,6 +2630,29 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
 
         vkCmdEndRenderPass(_command_buffer);
     }
+}
+
+void
+DispatchContext::BindBarrier(layout::DispatchNode const* _node,
+                             uint32_t _stage_index,
+                             bind::ResourceBarrier const& _barrier)
+{
+    uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
+    if (nodes_bindings.size() < node_index+1)
+        nodes_bindings.resize(node_index+1);
+
+    bind::DispatchNode& node_bindings = nodes_bindings[node_index];
+    if (node_bindings.stages.size() < _stage_index+1)
+        node_bindings.stages.resize(_stage_index+1);
+
+    bind::DispatchStage& stage_bindings = node_bindings.stages[_stage_index];
+    stage_bindings.barriers.push_back(_barrier);
+
+    if (_barrier.type == bind::BufferResource)
+        stage_bindings.buffer_barriers[_barrier.buffer].first = bind::AccessInfo{
+            _barrier.stage,
+            _barrier.access
+        };
 }
 
 void
@@ -2700,6 +2748,11 @@ DispatchContext::BindVertexInput(layout::BindingPoint const& _location,
     if (invocation.vertex_inputs.size() < _location.vertex_input.binding_index+1)
         invocation.vertex_inputs.resize(_location.vertex_input.binding_index+1);
     invocation.vertex_inputs[_location.vertex_input.binding_index] = _vertex_input;
+
+    stage_bindings.buffer_barriers[_vertex_input.buffer].second = bind::AccessInfo{
+        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+        VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT
+    };
 }
 
 void*

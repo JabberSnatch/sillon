@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <tuple>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -550,6 +551,26 @@ struct VertexInput {
     VkDeviceSize offset;
 };
 
+enum ResourceType {
+    BufferResource,
+    ImageResource
+};
+
+struct ResourceBarrier {
+    ResourceType type;
+    VkPipelineStageFlags stage;
+    VkAccessFlags access;
+    union {
+        VkBuffer buffer;
+        VkImage image;
+    };
+};
+
+struct AccessInfo {
+    VkPipelineStageFlags stage;
+    VkAccessFlags access;
+};
+
 enum DispatchCommand {
     DispatchCommand_Draw,
     DispatchCommand_DrawIndexed,
@@ -571,10 +592,18 @@ struct DispatchInvocation {
     GraphicsCommand graphics;
     std::vector<std::unique_ptr<uint8_t[]>> push_constants;
     std::vector<VertexInput> vertex_inputs;
+
+    DispatchInvocation() = default;
+    DispatchInvocation(DispatchInvocation&&) = default;
 };
 
 struct DispatchStage {
     std::vector<DispatchInvocation> invocations;
+    std::vector<ResourceBarrier> barriers;
+    std::unordered_map<VkBuffer, std::pair<AccessInfo, AccessInfo>> buffer_barriers;
+
+    DispatchStage() = default;
+    DispatchStage(DispatchStage&&) = default;
 };
 
 struct DispatchNode {
@@ -632,6 +661,7 @@ struct DispatchNodeDynamic {
 struct DispatchContext {
     vktk::Context* vulkan;
     layout::DispatchGraph const* graph;
+
     std::vector<DispatchNodeStatic> nodes_static;
     std::vector<DispatchNodeFramebuffer> nodes_framebuffer;
     std::vector<DispatchNodeDynamic> nodes_dynamic;
@@ -645,6 +675,10 @@ struct DispatchContext {
     void GenerateFramebufferRuntime(VkFormat const* _swapchain_format = nullptr);
     void UpdateDynamicRuntime(bind::PNextMap const& _pNext_map = {});
     void Dispatch(vktk::CommandBuffer& _command_buffer) const;
+
+    void BindBarrier(layout::DispatchNode const* _node,
+                     uint32_t _stage_index,
+                     bind::ResourceBarrier const& _barrier);
 
     void BindSwapchain(layout::DispatchNode const* _node,
                        vktk::Swapchain const& _swapchain);
