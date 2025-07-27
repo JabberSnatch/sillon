@@ -1459,7 +1459,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         guitk::WidgetStates const* gui_record = guitk::EndRecord(_state->gui_context);
 
         _state->gui_geometry = _vulkan->CreateBuffer(
-            sizeof(numtk::vec2f) * 4 * gui_record->frames.size(),
+            sizeof(numtk::vec2f) * 6 * gui_record->frames.size(),
             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
             [gui_record](void* buffer){
                 numtk::vec2f* vertex_data = (numtk::vec2f*)buffer;
@@ -1469,6 +1469,8 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                     vertex_data[1] = numtk::vec2f{ (float)frame.bounds.min.x(), (float)(frame.bounds.min.y()+frame.bounds.extent.y()) };
                     vertex_data[2] = frame.bounds.max().cast<float>();
                     vertex_data[3] = numtk::vec2f{ (float)(frame.bounds.min.x()+frame.bounds.extent.x()), (float)frame.bounds.min.y() };
+                    vertex_data[4] = frame.bounds.min.cast<float>();
+                    vertex_data[5] = frame.bounds.max().cast<float>();
                 }
             },
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
@@ -1480,7 +1482,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                           });
 
         _state->sparse_runtime.BindGraphicsCommand(
-            &sparse_region_node, 1, 0, { vkrg::bind::DispatchCommand_Draw, (uint32_t)gui_record->frames.size() * 4, 1 });
+            &sparse_region_node, 1, 0, { vkrg::bind::DispatchCommand_Draw, (uint32_t)gui_record->frames.size() * 6, 1 });
         _state->sparse_runtime.BindVertexInput(
             { .node = &sparse_region_node,
               .stage_index = 1,
