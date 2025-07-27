@@ -2137,7 +2137,7 @@ vkrg::layout::DispatchStage RegionPassDispatchStageInfo()
         }
     };
 
-    output.group_instance_count = 64;
+    output.invocation_count = 64;
     output.binding_groups.push_back(vkrg::layout::StageBindingGroup{
         {
             { VK_SHADER_STAGE_ALL, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
@@ -2183,7 +2183,7 @@ vkrg::layout::DispatchStage SparseRegionDispatchStageInfo()
         }
     };
 
-    output.group_instance_count = 1;
+    output.invocation_count = 1;
 
     output.binding_groups.push_back(vkrg::layout::StageBindingGroup{
         {
@@ -2235,7 +2235,7 @@ vkrg::layout::DispatchStage SkyboxDispatchStageInfo()
         }
     };
 
-    output.group_instance_count = 1;
+    output.invocation_count = 1;
     output.binding_groups = std::vector<vkrg::layout::StageBindingGroup>{};
     output.push_constants = std::vector<vkrg::layout::PushConstantRange>{
         { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SkyboxPushConstants) }
@@ -2266,7 +2266,7 @@ vkrg::layout::DispatchStage ResolveDispatchStageInfo()
         }
     };
 
-    output.group_instance_count = 1;
+    output.invocation_count = 1;
     output.binding_groups.push_back(vkrg::layout::StageBindingGroup{
         {
             { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -2305,7 +2305,7 @@ vkrg::layout::DispatchStage GUIDispatchStageInfo()
         }
     };
 
-    output.group_instance_count = 1;
+    output.invocation_count = 1;
 
     output.graphics.state_overrides = std::vector<vktk::Context::StateOverride>{
         { vktk::StateOverrideTag::DepthTestEnable, VK_FALSE },

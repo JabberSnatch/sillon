@@ -425,7 +425,7 @@ struct GraphicsStage {
 struct DispatchStage {
     std::string name;
     std::vector<ShaderStage> shaders;
-    uint32_t group_instance_count;
+    uint32_t invocation_count;
     std::vector<StageBindingGroup> binding_groups;
     std::vector<PushConstantRange> push_constants;
     GraphicsStage graphics;
@@ -567,14 +567,14 @@ struct FramebufferArea {
     numtk::bounds2f viewport;
 };
 
-struct DispatchInstance {
+struct DispatchInvocation {
     GraphicsCommand graphics;
     std::vector<std::unique_ptr<uint8_t[]>> push_constants;
     std::vector<VertexInput> vertex_inputs;
 };
 
 struct DispatchStage {
-    std::vector<DispatchInstance> instances;
+    std::vector<DispatchInvocation> invocations;
 };
 
 struct DispatchNode {
@@ -655,16 +655,16 @@ struct DispatchContext {
                              bind::FramebufferArea const& _area);
     void BindGraphicsCommand(layout::DispatchNode const* _node,
                              uint32_t _stage_index,
-                             uint32_t _instance_index,
+                             uint32_t _invoc_index,
                              bind::GraphicsCommand const& _command);
 
     void BindVertexInput(layout::BindingPoint const& _location,
-                         uint32_t _instance_index,
+                         uint32_t _invoc_index,
                          bind::VertexInput const& _vertex_input);
     void* BindPushConstants(layout::BindingPoint const& _location,
-                            uint32_t _instance_index);
+                            uint32_t _invoc_index);
     VkWriteDescriptorSet BindShaderResource(layout::BindingPoint const& _location,
-                                            uint32_t _instance_index,
+                                            uint32_t _invoc_index,
                                             bind::ShaderResource const& _resources);
 };
 
