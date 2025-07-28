@@ -77,7 +77,7 @@ void BeginFrame(Context context_) {
         return;
 
     states.frames.emplace_back(Frame{
-        Frame::kOffsetIncrement * states.frames.size(),
+        Frame::kOffsetIncrement * (states.frames.size() + 1),
         Frame::kEmptySize
     });
     states.current_frame = &states.frames.back();
