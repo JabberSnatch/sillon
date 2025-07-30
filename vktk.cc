@@ -2536,11 +2536,14 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
              ++stage_index)
         {
             for (auto&& barrier : bindings.stages[stage_index].buffer_barriers)
-                _command_buffer.BufferTransitions(barrier.second.first.stage,
-                                                  barrier.second.second.stage,
-                                                  {{ barrier.first,
-                                                     barrier.second.first.access,
-                                                     barrier.second.second.access }});
+                if (barrier.second.first.stage)
+                {
+                    _command_buffer.BufferTransitions(barrier.second.first.stage,
+                                                      barrier.second.second.stage,
+                                                      {{ barrier.first,
+                                                           barrier.second.first.access,
+                                                           barrier.second.second.access }});
+                }
         }
 
         VkRenderPassBeginInfo rp_begin_info{};
@@ -2796,6 +2799,17 @@ DispatchContext::BindShaderResource(layout::BindingPoint const& _location,
     layout::StageBindingGroup const& binding_group = stage.binding_groups[_location.shader.group_index];
     layout::StageBinding const& binding = binding_group.bindings[_location.shader.binding_index];
 
+    if (nodes_bindings.size() < node_index+1)
+        nodes_bindings.resize(node_index+1);
+
+    bind::DispatchNode& node_bindings = nodes_bindings[node_index];
+    if (node_bindings.stages.size() < _location.stage_index+1)
+        node_bindings.stages.resize(_location.stage_index+1);
+    if (node_bindings.stages[_location.stage_index].invocations.size() < _invoc_index+1)
+        node_bindings.stages[_location.stage_index].invocations.resize(_invoc_index+1);
+
+    bind::DispatchStage& stage_bindings = node_bindings.stages[_location.stage_index];
+
     VkWriteDescriptorSet desc_write = {};
     desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     desc_write.pNext = nullptr;
@@ -2807,6 +2821,29 @@ DispatchContext::BindShaderResource(layout::BindingPoint const& _location,
     desc_write.pImageInfo = _resources.images;
     desc_write.pBufferInfo = _resources.buffers;
     desc_write.pTexelBufferView = nullptr;
+
+    switch (binding.type)
+    {
+    case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+    case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+        for (uint32_t desc_index = 0u; desc_index < _resources.descriptor_count; ++desc_index)
+            stage_bindings.buffer_barriers[_resources.buffers[desc_index].buffer].second = bind::AccessInfo{
+                binding.stages,
+                VK_ACCESS_UNIFORM_READ_BIT
+            };
+        break;
+
+    case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+    case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+        for (uint32_t desc_index = 0u; desc_index < _resources.descriptor_count; ++desc_index)
+            stage_bindings.buffer_barriers[_resources.buffers[desc_index].buffer].second = bind::AccessInfo{
+                binding.stages,
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT
+            };
+        break;
+    default:
+        break;
+    }
 
     return desc_write;
 }

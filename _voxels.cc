@@ -92,6 +92,7 @@ struct voxel_state_t
 {
     guitk::Context gui_context;
     vktk::Buffer gui_geometry;
+    vktk::Buffer gui_geometry_;
     guitk::WidgetStates const* current_gui_record;
 
     float time = 0.f;
@@ -1455,11 +1456,15 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
     {
         guitk::BeginRecord(_state->gui_context);
-        guitk::BeginFrame(_state->gui_context);
-        guitk::EndFrame(_state->gui_context);
+        for (uint32_t i = 0; i < 20; ++i)
+        {
+            guitk::BeginFrame(_state->gui_context);
+            guitk::EndFrame(_state->gui_context);
+        }
         guitk::WidgetStates const* gui_record = guitk::EndRecord(_state->gui_context);
         _state->current_gui_record = gui_record;
 
+#if 0
         _state->gui_geometry = _vulkan->CreateBuffer(
             sizeof(numtk::vec2f) * 6 * gui_record->frames.size(),
             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
@@ -1476,6 +1481,21 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                 }
             },
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+#endif
+
+        _state->gui_geometry_ = _vulkan->CreateBuffer(
+            sizeof(numtk::vec2f) * 2 * gui_record->frames.size(),
+            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            [gui_record](void* buffer){
+                numtk::vec2f* uniform_data = (numtk::vec2f*)buffer;
+                for (uint32_t frame_index = 0u; frame_index < gui_record->frames.size(); ++frame_index)
+                {
+                    guitk::Frame const& frame = gui_record->frames[frame_index];
+                    uniform_data[0 + frame_index*2] = frame.bounds.min.cast<float>();
+                    uniform_data[1 + frame_index*2] = frame.bounds.extent.cast<float>();
+                }
+            },
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
         vkrg::layout::DispatchNode const& sparse_region_node =
             *std::find_if(_state->sparse_graph.nodes.begin(), _state->sparse_graph.nodes.end(),
@@ -1484,7 +1504,13 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                           });
 
         _state->sparse_runtime.BindGraphicsCommand(
-            &sparse_region_node, 1, 0, { vkrg::bind::DispatchCommand_Draw, (uint32_t)gui_record->frames.size() * 6, 1 });
+            &sparse_region_node, 1, 0, {
+                vkrg::bind::DispatchCommand_Draw,
+                (uint32_t)gui_record->frames.size() * 6,
+                (uint32_t)gui_record->frames.size()
+            });
+
+#if 0
         _state->sparse_runtime.BindVertexInput(
             { .node = &sparse_region_node,
               .stage_index = 1,
@@ -1493,12 +1519,45 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
             0,
             { _state->gui_geometry, 0 }
             );
+
         _state->sparse_runtime.BindBarrier(&sparse_region_node, 1, {
             .type = vkrg::bind::BufferResource,
             .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
             .access = VK_ACCESS_TRANSFER_WRITE_BIT,
             .buffer = _state->gui_geometry
         });
+
+#else
+
+        {
+            VkDescriptorBufferInfo buffer_info = {};
+            buffer_info.buffer = _state->gui_geometry_;
+            buffer_info.offset = 0;
+            buffer_info.range = VK_WHOLE_SIZE;
+
+            VkWriteDescriptorSet binding =
+                _state->sparse_runtime.BindShaderResource(
+                    { .node = &sparse_region_node,
+                      .stage_index = 1,
+                      .type = vkrg::layout::BindingType_Shader,
+                      .shader = { 0, 0 }
+                    },
+                    0,
+                    vkrg::bind::ShaderResource{
+                        .descriptor_count = 1,
+                        .buffers = &buffer_info
+                    });
+
+            vkUpdateDescriptorSets(_vulkan->device, 1, &binding, 0u, nullptr);
+        }
+
+        _state->sparse_runtime.BindBarrier(&sparse_region_node, 1, {
+            .type = vkrg::bind::BufferResource,
+            .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
+            .access = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .buffer = _state->gui_geometry_
+        });
+#endif
 
     }
 
@@ -2317,24 +2376,37 @@ vkrg::layout::DispatchStage GUIDispatchStageInfo()
     output.shaders = std::vector<vkrg::layout::ShaderStage>{
         { VK_SHADER_STAGE_VERTEX_BIT,
           { "#version 450",
-            "layout(location = 0) in vec2 iVS_point;"
-            "layout(location = 0) out vec2 iFS_point;"
+            "layout(location = 0) out vec3 iFS_point;"
+            "layout(std140, set = 0, binding = 0) readonly buffer Frames { vec4 frame[]; } frame_descs;"
             "layout(push_constant, std430) uniform PushConstants { vec2 viewport_size; vec2 frame_offset; vec2 frame_size; };"
+            "const vec2 kFactors[] = vec2[6]("
+            "vec2(0.0, 0.0),"
+            "vec2(0.0, 1.0),"
+            "vec2(1.0, 1.0),"
+            "vec2(1.0, 0.0),"
+            "vec2(0.0, 0.0),"
+            "vec2(1.0, 1.0));"
             "void main() {"
-            "gl_Position = vec4((iVS_point / viewport_size) * 2.0 - vec2(1.0), 0.0, 1.0);"
-            "iFS_point = iVS_point - frame_offset - frame_size/2.0;"
+            "vec2 _frame_offset = frame_descs.frame[gl_InstanceIndex].xy;"
+            "vec2 _frame_size = frame_descs.frame[gl_InstanceIndex].zw;"
+            "vec2 frame_point = vec2(_frame_offset + kFactors[gl_VertexIndex]*_frame_size);"
+            "gl_Position = vec4((frame_point / viewport_size) * 2.0 - vec2(1.0), 0.0, 1.0);"
+            "iFS_point = vec3(frame_point - _frame_offset - _frame_size/2.0, float(gl_InstanceIndex));"
             "}"
           }
         },
 
         { VK_SHADER_STAGE_FRAGMENT_BIT,
           { "#version 450",
-            "layout(location = 0) in vec2 iFS_point;"
+            "layout(location = 0) in vec3 iFS_point;"
             "layout(location = 0) out vec4 color;"
+            "layout(std140, set = 0, binding = 0) readonly buffer Frames { vec4 frame[]; } frame_descs;"
             "layout(push_constant, std430) uniform PushConstants { vec2 viewport_size; vec2 frame_offset; vec2 frame_size; };"
             "void main() {"
             "\n#define BORDER_SIZE 10.0\n"
-            "vec2 frame_coords = abs(iFS_point) - (frame_size/2.0-vec2(BORDER_SIZE));"
+            "vec2 _frame_offset = frame_descs.frame[uint(iFS_point.z)].xy;"
+            "vec2 _frame_size = frame_descs.frame[uint(iFS_point.z)].zw;"
+            "vec2 frame_coords = abs(iFS_point.xy) - (_frame_size/2.0-vec2(BORDER_SIZE));"
             "float border_distance = length(max(vec2(0.0), frame_coords));"
             "float border_color = min(smoothstep(0.0, BORDER_SIZE/2.0, border_distance), smoothstep(BORDER_SIZE, BORDER_SIZE/2.0, border_distance));"
             "color = vec4(border_color.xxx, 1.0);"
@@ -2344,6 +2416,13 @@ vkrg::layout::DispatchStage GUIDispatchStageInfo()
     };
 
     output.invocation_count = 1;
+
+    output.binding_groups.push_back(vkrg::layout::StageBindingGroup{
+        {
+            { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+              0, 1 },
+        }
+    });
 
     output.push_constants = std::vector<vkrg::layout::PushConstantRange>{
         { VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(numtk::vec2f) * 3 }
@@ -2355,8 +2434,10 @@ vkrg::layout::DispatchStage GUIDispatchStageInfo()
     };
     output.graphics.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     output.graphics.input_layout = std::vector<vktk::Context::VertexInput>{
+#if 0
         { 0, 0, VK_VERTEX_INPUT_RATE_VERTEX, VK_FORMAT_R32G32_SFLOAT,
           0, sizeof(numtk::vec2f) }
+#endif
     };
 
     return output;
