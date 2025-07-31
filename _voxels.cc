@@ -1464,6 +1464,59 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         guitk::WidgetStates const* gui_record = guitk::EndRecord(_state->gui_context);
         _state->current_gui_record = gui_record;
 
+        static float const kBorderSize = 10.f;
+        static numtk::vec2f const kBorderOffsets[] = {
+            { kBorderSize, 0 },
+            { 0, kBorderSize },
+            { kBorderSize, kBorderSize },
+            { -kBorderSize, kBorderSize }
+        };
+
+        std::vector<uint32_t> indices = {
+            0, 1, 2,  2, 1, 3,
+            4, 5, 6,  6, 5, 7,
+            8, 9, 10,  10, 9, 11,
+            12, 13, 14,  14, 13, 15,
+
+            3, 7, 2,  2, 7, 5,
+            7, 11, 6,  6, 11, 9,
+            11, 15, 10,  10, 15, 13,
+            15, 3, 14,  14, 3, 1,
+
+            3, 7, 11,  11, 7, 15
+        };
+
+        std::vector<numtk::vec2f> vertices = {};
+        vertices.resize(gui_record->frames.size()*16);
+        for (uint32_t frame_index = 0u; frame_index < gui_record->frames.size(); ++frame_index)
+        {
+            guitk::Frame const& frame = gui_record->frames[frame_index];
+            numtk::vec2f* base = &vertices[frame_index*16];
+            base[0] = frame.bounds.min.cast<float>();
+            base[1] = base[0] + kBorderOffsets[0];
+            base[2] = base[0] + kBorderOffsets[1];
+            base[3] = base[0] + kBorderOffsets[2];
+
+            base[4] = numtk::vec2f{
+                (float)(frame.bounds.min.x()+frame.bounds.extent.x()),
+                (float)frame.bounds.min.y() };
+            base[5] = base[4] + kBorderOffsets[1];
+            base[6] = base[4] - kBorderOffsets[0];
+            base[7] = base[4] + kBorderOffsets[3];
+
+            base[8] = numtk::vec2f{
+                (float)frame.bounds.min.x(),
+                (float)(frame.bounds.min.y()+frame.bounds.extent.y()) };
+            base[9] = base[8] - kBorderOffsets[1];
+            base[10] = base[8] + kBorderOffsets[0];
+            base[11] = base[8] - kBorderOffsets[3];
+
+            base[12] = frame.bounds.max().cast<float>();
+            base[13] = base[12] - kBorderOffsets[0];
+            base[14] = base[12] - kBorderOffsets[1];
+            base[15] = base[12] - kBorderOffsets[2];
+        }
+
 #if 0
         _state->gui_geometry = _vulkan->CreateBuffer(
             sizeof(numtk::vec2f) * 6 * gui_record->frames.size(),
