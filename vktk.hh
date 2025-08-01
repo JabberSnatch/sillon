@@ -551,6 +551,11 @@ struct VertexInput {
     VkDeviceSize offset;
 };
 
+struct IndexInput {
+    VkBuffer buffer;
+    VkDeviceSize offset;
+};
+
 enum ResourceType {
     BufferResource,
     ImageResource
@@ -592,6 +597,7 @@ struct DispatchInvocation {
     GraphicsCommand graphics;
     std::vector<std::unique_ptr<uint8_t[]>> push_constants;
     std::vector<VertexInput> vertex_inputs;
+    IndexInput index_input;
 
     DispatchInvocation() = default;
     DispatchInvocation(DispatchInvocation&&) = default;
@@ -695,6 +701,10 @@ struct DispatchContext {
     void BindVertexInput(layout::BindingPoint const& _location,
                          uint32_t _invoc_index,
                          bind::VertexInput const& _vertex_input);
+    void BindIndexInput(layout::DispatchNode const* _node,
+                        uint32_t _stage_index,
+                        uint32_t _invoc_index,
+                        bind::IndexInput const& _index_input);
     void* BindPushConstants(layout::BindingPoint const& _location,
                             uint32_t _invoc_index);
     VkWriteDescriptorSet BindShaderResource(layout::BindingPoint const& _location,

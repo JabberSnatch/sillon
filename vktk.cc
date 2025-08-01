@@ -2615,16 +2615,29 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                                            &binding.buffer, &binding.offset);
                 }
 
+                bool indexed_draw = (invocation.index_input.buffer != VK_NULL_HANDLE);
+                if (indexed_draw)
+                    vkCmdBindIndexBuffer(_command_buffer,
+                                         invocation.index_input.buffer,
+                                         invocation.index_input.offset,
+                                         VK_INDEX_TYPE_UINT32);
+
                 bind::GraphicsCommand const& graphics_command = invocation.graphics;
 
                 switch(graphics_command.command)
                 {
                 case bind::DispatchCommand_Draw:
                 {
-                    vkCmdDraw(_command_buffer,
-                              graphics_command.vertex_count,
-                              graphics_command.instance_count,
-                              0, 0);
+                    if (!indexed_draw)
+                        vkCmdDraw(_command_buffer,
+                                  graphics_command.vertex_count,
+                                  graphics_command.instance_count,
+                                  0, 0);
+                    else
+                        vkCmdDrawIndexed(_command_buffer,
+                                         graphics_command.vertex_count,
+                                         graphics_command.instance_count,
+                                         0, 0, 0);
                 } break;
                 default: break;
                 }
@@ -2755,6 +2768,35 @@ DispatchContext::BindVertexInput(layout::BindingPoint const& _location,
     stage_bindings.buffer_barriers[_vertex_input.buffer].second = bind::AccessInfo{
         VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
         VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT
+    };
+}
+
+void
+DispatchContext::BindIndexInput(layout::DispatchNode const* _node,
+                                uint32_t _stage_index,
+                                uint32_t _invoc_index,
+                                bind::IndexInput const& _index_input)
+{
+    layout::DispatchStage const& stage = _node->sequence[_stage_index];
+
+    uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
+    if (nodes_bindings.size() < node_index+1)
+        nodes_bindings.resize(node_index+1);
+
+    bind::DispatchNode& node_bindings = nodes_bindings[node_index];
+    if (node_bindings.stages.size() < _stage_index+1)
+        node_bindings.stages.resize(_stage_index+1);
+    if (node_bindings.stages[_stage_index].invocations.size() < _invoc_index+1)
+        node_bindings.stages[_stage_index].invocations.resize(_invoc_index+1);
+
+    bind::DispatchStage& stage_bindings = node_bindings.stages[_stage_index];
+    bind::DispatchInvocation& invocation = stage_bindings.invocations[_invoc_index];
+
+    invocation.index_input = _index_input;
+
+    stage_bindings.buffer_barriers[_index_input.buffer].second = bind::AccessInfo{
+        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+        VK_ACCESS_INDEX_READ_BIT
     };
 }
 
