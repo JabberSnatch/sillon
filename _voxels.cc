@@ -1482,22 +1482,6 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         guitk::WidgetStates const* gui_record = guitk::EndRecord(_state->gui_context);
         _state->current_gui_record = gui_record;
 
-#if 0
-        std::vector<uint32_t> indices = {
-            0, 1, 2,  2, 1, 3,
-            4, 5, 6,  6, 5, 7,
-            8, 9, 10,  10, 9, 11,
-            12, 13, 14,  14, 13, 15,
-
-            3, 7, 2,  2, 7, 5,
-            7, 11, 6,  6, 11, 9,
-            11, 15, 10,  10, 15, 13,
-            15, 3, 14,  14, 3, 1,
-
-            3, 7, 11,  11, 7, 15
-        };
-#endif
-
         _state->gui_frame_indices = _vulkan->CreateBuffer(
             sizeof(uint32_t) * 6 * 9,
             VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
@@ -1585,7 +1569,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                 vertices[4] = numtk::vec2f{ 1.f, 0.f };
                 vertices[5] = vertices[4] + kBorderOffsets[1];
                 vertices[6] = vertices[4] - kBorderOffsets[0];
-                vertices[7] = vertices[5] + kBorderOffsets[3];
+                vertices[7] = vertices[4] + kBorderOffsets[3];
 
                 vertices[8] = numtk::vec2f{ 1.f, 1.f };
                 vertices[9] = vertices[8] - kBorderOffsets[0];
@@ -2644,7 +2628,7 @@ vkrg::layout::DispatchStage GUIDispatchStageInfo()
 #endif
 
             "vec2 frame_coords = iFS_point - vec2(0.5);"
-            "float border_distance = length(max(vec2(0.0), frame_coords));"
+            "float border_distance = length(frame_coords);"
             "float border_color = min(smoothstep(0.0, 0.25, border_distance), smoothstep(0.5, 0.25, border_distance));"
             "color = vec4(border_color.xxx, 1.0);"
             "}"
