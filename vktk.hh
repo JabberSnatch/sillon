@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -13,12 +14,28 @@
 
 #include "toolkits/numtk.hh"
 
+#ifdef NDEBUG
+
 #define CHECKCALL(func, ...)                                            \
     {                                                                   \
         VkResult const vkr = func(__VA_ARGS__);                         \
         if (vkr != VK_SUCCESS)                                          \
             std::cout << #func " " << vktk::VkResultToStr(vkr) << std::endl; \
     }
+
+#else
+
+#define CHECKCALL(func, ...)                                            \
+    {                                                                   \
+        VkResult const vkr = func(__VA_ARGS__);                         \
+        if (vkr != VK_SUCCESS)                                          \
+        {                                                               \
+            std::cout << #func " " << vktk::VkResultToStr(vkr) << std::endl; \
+            assert(false);                                              \
+        }                                                               \
+    }
+
+#endif
 
 #define GetInstanceProcAddress(proc, inst, table)                       \
     table.proc = (PFN_vk##proc)vkGetInstanceProcAddr(inst, "vk" #proc);
@@ -87,6 +104,7 @@ struct Allocator
     VkDevice device;
     VkPhysicalDeviceMemoryProperties memory_properties;
     std::vector<ChunkStorage> heaps = {};
+    uint64_t allocated_memory = 0ull;
 
     Allocation Allocate(VkMemoryPropertyFlags _memory_flags,
                         uint32_t _size);
@@ -375,6 +393,8 @@ struct Context
     Queue copy_queue = {};
 
     Allocator allocator = {};
+
+    uint32_t fence_count = 0;
 
     using SynchronisedRoutine = std::function<void(Context&)>;
     void ScheduleRoutine(VkFence _fence, SynchronisedRoutine _routine);

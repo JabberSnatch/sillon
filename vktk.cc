@@ -350,6 +350,7 @@ void Queue::Submit(VkCommandBuffer const* _command_buffers,
         fence_info.pNext = nullptr;
         fence_info.flags = 0;
         CHECKCALL(vkCreateFence, context->device, &fence_info, nullptr, _signal_fence);
+        ++context->fence_count;
     }
 
     VkSubmitInfo submit_info{};
@@ -753,6 +754,8 @@ void Allocator::AllocateChunk(ChunkStorage& _storage)
     allocate_info.memoryTypeIndex = _storage.memory_type;
     VkDeviceMemory device_memory = {};
     CHECKCALL(vkAllocateMemory, device, &allocate_info, nullptr, &device_memory);
+
+    allocated_memory += kChunkSize;
 
     _storage.free_list.push_back({
         _storage.chunks.size() * kChunkBlockCount,
@@ -1626,6 +1629,7 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
     fence_info.flags = 0;
     CHECKCALL(vkCreateFence,
               device, &fence_info, nullptr, &staging_fence);
+    ++fence_count;
 
     VkSubmitInfo submit_info{};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -1792,6 +1796,7 @@ void Context::TryScheduledRoutines()
             continue;
 
         vkDestroyFence(device, fence, nullptr);
+        --fence_count;
 #if 0
         std::cout << "[PollFences] destroying fence " << std::hex
                   << fence << std::dec << std::endl;
@@ -1824,6 +1829,7 @@ void Context::WaitScheduledRoutines()
     {
         CHECKCALL(vkWaitForFences, device, 1, &fence, VK_TRUE, ~0ull);
         vkDestroyFence(device, fence, nullptr);
+        --fence_count;
         std::cout << "[WaitFences] destroying fence " << std::hex
                   << fence << std::dec << std::endl;
     }

@@ -780,6 +780,11 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
         }
     }
 
+    uint32_t max_fence_count = 0u;
+
+    vktk::CommandBuffer upload_commands = vulkan->CreateCommandBuffer(vulkan->present_queue);
+    upload_commands.Begin();
+
     uint32_t level1_count = 1 << shift_depth;
     for (uint32_t index = 0u; index < level1_count; ++index)
     {
@@ -794,34 +799,44 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
 
         numtk::vec3u const lod0_base = lod1_base * node_size*4u;
 
-        package.masks.push_back(
-            vulkan->CreateTexture(
-                node_size, node_size, node_size,
-                VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
-                VK_IMAGE_USAGE_SAMPLED_BIT,
-                [&region, &lod0_base, node_size](void* mapped_data) {
-                    uint64_t* output = (uint64_t*)mapped_data;
-                    for (uint32_t zindex = 0; zindex < node_size; ++zindex)
-                    {
-                        for (uint32_t yindex = 0; yindex < node_size; ++yindex)
-                        {
-                            for (uint32_t xindex = 0; xindex < node_size; ++xindex)
-                            {
-                                numtk::vec3u base = numtk::vec3u{
-                                    xindex * 4,
-                                    yindex * 4,
-                                    zindex * 4
-                                } + lod0_base;
+        vktk::Texture texture = vulkan->CreateTexture(
+            node_size, node_size, node_size,
+            VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
+            VK_IMAGE_USAGE_SAMPLED_BIT);
 
-                                uint64_t bits = region.GetEnclosingKernel(base);
-                                output[xindex + yindex*node_size + zindex*node_size*node_size] = bits;
-                            }
+        upload_commands.UpdateTexture(
+            texture,
+            VkOffset3D{ 0, 0, 0 },
+            VkExtent3D{ node_size, node_size, node_size },
+            [&region, &lod0_base, node_size](void* mapped_data) {
+                uint64_t* output = (uint64_t*)mapped_data;
+                for (uint32_t zindex = 0; zindex < node_size; ++zindex)
+                {
+                    for (uint32_t yindex = 0; yindex < node_size; ++yindex)
+                    {
+                        for (uint32_t xindex = 0; xindex < node_size; ++xindex)
+                        {
+                            numtk::vec3u base = numtk::vec3u{
+                                xindex * 4,
+                                yindex * 4,
+                                zindex * 4
+                            } + lod0_base;
+
+                            uint64_t bits = region.GetEnclosingKernel(base);
+                            output[xindex + yindex*node_size + zindex*node_size*node_size] = bits;
                         }
                     }
                 }
-            )
+            }
         );
+
+        package.masks.push_back(texture);
+
+        max_fence_count = std::max(max_fence_count, vulkan->fence_count);
     }
+
+    upload_commands.End();
+    upload_commands.Submit();
 
     return package;
 }
