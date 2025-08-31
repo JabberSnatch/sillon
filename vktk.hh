@@ -159,6 +159,21 @@ struct DescriptorPool {
     VkDescriptorSetLayout layout;
 };
 
+struct DynamicDescriptorPool {
+    static constexpr uint32_t kPoolSize = 128;
+
+    struct vktk::Context* context;
+    VkDescriptorSetLayout layout;
+    std::vector<VkDescriptorPool> pools;
+    std::vector<std::unordered_set<VkDescriptorSet>> sets;
+    uint32_t pool_count;
+
+    std::vector<VkDescriptorPoolSize> sizes;
+
+    VkDescriptorSet AllocateDescriptorSet(void const* _pNext = nullptr);
+    void FreeDescriptorSet(VkDescriptorSet);
+};
+
 struct BufferTransition {
     VkBuffer buffer = VK_NULL_HANDLE;
     VkAccessFlags src_access = VK_ACCESS_NONE;
@@ -351,6 +366,9 @@ struct Context
         uint32_t _max_sets,
         std::vector<DescriptorSetBindingPoint> const& _bindings);
     void DestroyDescriptorPool(DescriptorPool const& _pool) const;
+
+    DynamicDescriptorPool CreateDynamicDescriptorPool(std::vector<DescriptorSetBindingPoint> const& _bindings);
+    void DestroyDynamicDescriptorPool(DynamicDescriptorPool const& _pool) const;
 
     Buffer CreateBuffer(uint32_t _size,
                         VkBufferUsageFlags _usage,

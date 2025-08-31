@@ -1398,14 +1398,14 @@ DescriptorPool Context::CreateDescriptorPool(
     flags_info.bindingCount = (uint32_t)flags.size();
     flags_info.pBindingFlags = flags.data();
 
-    VkDescriptorSetLayoutCreateInfo descset_create{};
-    descset_create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    descset_create.pNext = &flags_info;
-    descset_create.flags = 0u;
-    descset_create.bindingCount = (uint32_t)bindings.size();
-    descset_create.pBindings = bindings.data();
+    VkDescriptorSetLayoutCreateInfo layout_create{};
+    layout_create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layout_create.pNext = &flags_info;
+    layout_create.flags = 0u;
+    layout_create.bindingCount = (uint32_t)bindings.size();
+    layout_create.pBindings = bindings.data();
     CHECKCALL(vkCreateDescriptorSetLayout, device,
-              &descset_create, nullptr, &output.layout);
+              &layout_create, nullptr, &output.layout);
 
     return output;
 }
@@ -1414,6 +1414,93 @@ void Context::DestroyDescriptorPool(DescriptorPool const& _pool) const
 {
     vkDestroyDescriptorPool(device, _pool.pool, nullptr);
     vkDestroyDescriptorSetLayout(device, _pool.layout, nullptr);
+}
+
+DynamicDescriptorPool Context::CreateDynamicDescriptorPool(
+    std::vector<DescriptorSetBindingPoint> const& _bindings)
+{
+    DynamicDescriptorPool output = {};
+    output.context = this;
+
+    std::unordered_map<VkDescriptorType, uint32_t> counts = {};
+    std::vector<VkDescriptorSetLayoutBinding> bindings = {};
+    std::vector<VkDescriptorBindingFlags> flags = {};
+
+    for (DescriptorSetBindingPoint const& binding : _bindings)
+    {
+        if (counts.count(binding.type) == 0)
+            counts.emplace(binding.type, 0u);
+        counts[binding.type] += binding.count;
+
+        VkDescriptorSetLayoutBinding layout_binding = {};
+        layout_binding.binding = bindings.size();
+        layout_binding.descriptorType = binding.type;
+        layout_binding.descriptorCount = binding.count;
+        layout_binding.stageFlags = binding.shader_stages;
+        layout_binding.pImmutableSamplers = nullptr;
+        bindings.emplace_back(layout_binding);
+        flags.emplace_back(binding.flags);
+    }
+
+    output.sizes.clear();
+    for (auto const& count : counts)
+        output.sizes.push_back(VkDescriptorPoolSize{ count.first, count.second * DynamicDescriptorPool::kPoolSize });
+
+    VkDescriptorSetLayoutBindingFlagsCreateInfo flags_info{};
+    flags_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+    flags_info.pNext = nullptr;
+    flags_info.bindingCount = (uint32_t)flags.size();
+    flags_info.pBindingFlags = flags.data();
+
+    VkDescriptorSetLayoutCreateInfo layout_create{};
+    layout_create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layout_create.pNext = &flags_info;
+    layout_create.flags = 0u;
+    layout_create.bindingCount = (uint32_t)bindings.size();
+    layout_create.pBindings = bindings.data();
+    CHECKCALL(vkCreateDescriptorSetLayout, device,
+              &layout_create, nullptr, &output.layout);
+
+    return output;
+}
+
+void Context::DestroyDynamicDescriptorPool(DynamicDescriptorPool const& _pool) const
+{
+    for (VkDescriptorPool pool : _pool.pools)
+        vkDestroyDescriptorPool(device, pool, nullptr);
+    vkDestroyDescriptorSetLayout(device, _pool.layout, nullptr);
+}
+
+VkDescriptorSet DynamicDescriptorPool::AllocateDescriptorSet(void const* _pNext)
+{
+    if (pool_count >= pools.size() * kPoolSize)
+    {
+        VkDescriptorPool pool = {};
+
+        VkDescriptorPoolCreateInfo descpool_create = {};
+        descpool_create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        descpool_create.pNext = nullptr;
+        descpool_create.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+        descpool_create.maxSets = kPoolSize;
+        descpool_create.poolSizeCount = (uint32_t)sizes.size();
+        descpool_create.pPoolSizes = sizes.data();
+        CHECKCALL(vkCreateDescriptorPool, context->device,
+                  &descpool_create, nullptr, &pool);
+
+        pools.push_back(pool);
+    }
+
+    VkDescriptorSet output = {};
+    VkDescriptorSetAllocateInfo descset_allocate{};
+    descset_allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    descset_allocate.pNext = _pNext;
+    descset_allocate.descriptorPool = pools.back();
+    descset_allocate.descriptorSetCount = 1u;
+    descset_allocate.pSetLayouts = &layout;
+    CHECKCALL(vkAllocateDescriptorSets, context->device,
+              &descset_allocate, &output);
+
+    return output;
 }
 
 Buffer Context::CreateBuffer(uint32_t _size,
