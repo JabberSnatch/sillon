@@ -869,7 +869,7 @@ void SparseRegionUpdateBindings(voxel_state_t* _state, vktk::Context* _vulkan)
             { 2, (void*)&desc_count_allocs[1] }
         });
 
-        _state->sparse_runtime.UpdateDynamicRuntime(pNext_map);
+        _state->sparse_runtime.ResetDynamicRuntime(pNext_map);
     }
 
     vkrg::layout::DispatchNode const* sparse_region_node = _state->sparse_graph["SparseRegionDispatch"];
@@ -1081,7 +1081,8 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         });
 
         _state->forward_runtime.GenerateStaticRuntime();
-        _state->forward_runtime.UpdateDynamicRuntime(pNext_map);
+        _state->forward_runtime.ClearDynamicRuntime();
+        _state->forward_runtime.ResetDynamicRuntime(pNext_map);
     }
 
     {
@@ -1101,7 +1102,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         });
 
         _state->pixel_cycling_runtime.GenerateStaticRuntime();
-        _state->pixel_cycling_runtime.UpdateDynamicRuntime(pNext_map);
+        _state->pixel_cycling_runtime.ResetDynamicRuntime(pNext_map);
     }
 
     _state->staging_buffer = _vulkan->CreateBuffer(

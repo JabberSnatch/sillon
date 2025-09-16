@@ -166,12 +166,14 @@ struct DynamicDescriptorPool {
     VkDescriptorSetLayout layout;
     std::vector<VkDescriptorPool> pools;
     std::vector<std::unordered_set<VkDescriptorSet>> sets;
-    uint32_t pool_count;
+    std::vector<uint32_t> set_counts;
+    uint32_t first_free_pool = ~0u;
+    uint32_t total_set_count = 0;
 
     std::vector<VkDescriptorPoolSize> sizes;
 
     VkDescriptorSet AllocateDescriptorSet(void const* _pNext = nullptr);
-    void FreeDescriptorSet(VkDescriptorSet);
+    void FreeDescriptorSet(VkDescriptorSet _set);
 };
 
 struct BufferTransition {
@@ -669,7 +671,8 @@ namespace runtime
 {
 
 struct StageBindingGroupStatic {
-    vktk::DescriptorPool pool;
+    //vktk::DescriptorPool pool;
+    vktk::DynamicDescriptorPool pool;
 };
 
 struct DispatchStageStatic {
@@ -695,6 +698,7 @@ struct StageBindingGroupDynamic {
 };
 
 struct DispatchStageDynamic {
+    uint32_t invocation_count;
     std::vector<StageBindingGroupDynamic> binding_groups;
 };
 
@@ -717,8 +721,13 @@ struct DispatchContext {
 
     void GenerateStaticRuntime();
     void GenerateFramebufferRuntime(VkFormat const* _swapchain_format = nullptr);
-    void UpdateDynamicRuntime(bind::PNextMap const& _pNext_map = {});
+    void ResetDynamicRuntime(bind::PNextMap const& _pNext_map = {});
     void Dispatch(vktk::CommandBuffer& _command_buffer) const;
+
+    void ReserveInvocations(layout::DispatchNode const* _node,
+                            uint32_t _stage_index,
+                            uint32_t _invocation_count,
+                            bind::PNextMap const& _pNext_map = {});
 
     void BindBarrier(layout::DispatchNode const* _node,
                      uint32_t _stage_index,
