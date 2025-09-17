@@ -2801,6 +2801,7 @@ DispatchContext::ReserveInvocations(layout::DispatchNode const* _node,
     if (_pNext_map.count(stage_name))
         stage_pnexts = _pNext_map.at(stage_name);
 
+    stage_runtime.invocation_count += _invocation_count;
     for (uint32_t group_index = 0u; group_index < (uint32_t)stage_layout.binding_groups.size(); ++group_index)
     {
         StageBindingGroupDynamic& group_runtime = stage_runtime.binding_groups[group_index];

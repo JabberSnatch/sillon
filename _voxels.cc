@@ -1656,12 +1656,47 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                               return node.name == "SparseRegionDispatch";
                           });
 
-        _state->sparse_runtime.BindGraphicsCommand(
-            &sparse_region_node, 1, 0, {
-                vkrg::bind::DispatchCommand_Draw,
-                6*9,//(uint32_t)gui_record->frames.size() * 6,
-                1//(uint32_t)gui_record->frames.size()
-            });
+        static bool static_flag = false;
+        for (uint32_t index = 0u; index < (uint32_t)gui_record->frames.size(); ++index)
+        {
+            if (!static_flag)
+            {
+                _state->sparse_runtime.ReserveInvocations(&sparse_region_node, 1, 1);
+
+                _state->sparse_runtime.BindGraphicsCommand(
+                    &sparse_region_node, 1, index, {
+                        vkrg::bind::DispatchCommand_Draw,
+                        6*9,//(uint32_t)gui_record->frames.size() * 6,
+                        1//(uint32_t)gui_record->frames.size()
+                    });
+            }
+
+            {
+                _state->sparse_runtime.BindVertexInput(
+                    { .node = &sparse_region_node,
+                      .stage_index = 1,
+                      .type = vkrg::layout::BindingType_VertexInput,
+                      .vertex_input = vkrg::layout::VertexInputLocation{ 0 } },
+                    index,
+                    { _state->gui_frames_vertices, index * sizeof(numtk::vec2f) * 16 }
+                    );
+
+                _state->sparse_runtime.BindVertexInput(
+                    { .node = &sparse_region_node,
+                      .stage_index = 1,
+                      .type = vkrg::layout::BindingType_VertexInput,
+                      .vertex_input = vkrg::layout::VertexInputLocation{ 1 } },
+                    index,
+                    { _state->gui_frame_uv, 0 }
+                    );
+
+                _state->sparse_runtime.BindIndexInput(
+                    &sparse_region_node, 1, index,
+                    { _state->gui_frame_indices, 0 }
+                    );
+            }
+        }
+        static_flag = true;
 
 #if 0
 #if 0
@@ -1734,29 +1769,6 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
             .access = VK_ACCESS_TRANSFER_WRITE_BIT,
             .buffer = _state->gui_frame_uv
         });
-
-        _state->sparse_runtime.BindVertexInput(
-            { .node = &sparse_region_node,
-              .stage_index = 1,
-              .type = vkrg::layout::BindingType_VertexInput,
-              .vertex_input = vkrg::layout::VertexInputLocation{ 0 } },
-            0,
-            { _state->gui_frames_vertices, 0 }
-            );
-
-        _state->sparse_runtime.BindVertexInput(
-            { .node = &sparse_region_node,
-              .stage_index = 1,
-              .type = vkrg::layout::BindingType_VertexInput,
-              .vertex_input = vkrg::layout::VertexInputLocation{ 1 } },
-            0,
-            { _state->gui_frame_uv, 0 }
-            );
-
-        _state->sparse_runtime.BindIndexInput(
-            &sparse_region_node, 1, 0,
-            { _state->gui_frame_indices, 0 }
-            );
 #endif
 
     }
@@ -2105,18 +2117,21 @@ void Draw(void* _pstate,
         push_constants->node_size = (float)_state->region_package.node_size;
         push_constants->stack_depth = std::max(_state->region_package.display_depth-1, 0);
 
-        numtk::vec2f* gui_push_constants =
-            (numtk::vec2f*)_state->sparse_runtime.BindPushConstants(
-                vkrg::layout::BindingPoint{
-                    .node = &sparse_region_node,
-                    .stage_index = 1,
-                    .type = vkrg::layout::BindingType_PushConstantRange,
-                    .push_constants = { 0 }
-                },
-                0);
-        gui_push_constants[0] = { (float)_swapchain.size.width, (float)_swapchain.size.height };
-        gui_push_constants[1] = _state->current_gui_record->frames[0].bounds.min.cast<float>();
-        gui_push_constants[2] = _state->current_gui_record->frames[0].bounds.extent.cast<float>();
+        for (uint32_t index = 0u; index < (uint32_t)_state->current_gui_record->frames.size(); ++index)
+        {
+            numtk::vec2f* gui_push_constants =
+                (numtk::vec2f*)_state->sparse_runtime.BindPushConstants(
+                    vkrg::layout::BindingPoint{
+                        .node = &sparse_region_node,
+                        .stage_index = 1,
+                        .type = vkrg::layout::BindingType_PushConstantRange,
+                        .push_constants = { 0 }
+                    },
+                    index);
+            gui_push_constants[0] = { (float)_swapchain.size.width, (float)_swapchain.size.height };
+            gui_push_constants[1] = _state->current_gui_record->frames[index].bounds.min.cast<float>();
+            gui_push_constants[2] = _state->current_gui_record->frames[index].bounds.extent.cast<float>();
+        }
 
         _state->sparse_runtime.BindFramebufferArea(
             &sparse_region_node,
@@ -2637,7 +2652,7 @@ vkrg::layout::DispatchStage GUIDispatchStageInfo()
         }
     };
 
-    output.invocation_count = 1;
+    output.invocation_count = 0;
 
 #if 0
     output.binding_groups.push_back(vkrg::layout::StageBindingGroup{
