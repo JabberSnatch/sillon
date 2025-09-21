@@ -1607,6 +1607,9 @@ Buffer Context::CreateBuffer(uint32_t _size,
 
 void Context::DestroyBuffer(Buffer const& _buffer)
 {
+    if (!_buffer.buffer)
+        return;
+
     vkDestroyBuffer(device, _buffer, nullptr);
     allocator.Free(_buffer.alloc);
 }
@@ -2670,6 +2673,9 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
              stage_index < (uint32_t)node_info.sequence.size();
              ++stage_index)
         {
+            if (stage_index >= bindings.stages.size())
+                break;
+
             for (auto&& barrier : bindings.stages[stage_index].buffer_barriers)
                 if (barrier.second.first.stage)
                 {
