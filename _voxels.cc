@@ -4,10 +4,12 @@
 #define MCTK_IMPLEMENTATION
 #include "mctk/mctk.hh"
 
-#include "systk.hh"
 #include <numtk.hh>
-#include "vktk.hh"
 #include <dstk.hh>
+
+#include "guitk.hh"
+#include "systk.hh"
+#include "vktk.hh"
 
 #define VOXTK_IMPLEMENTATION
 #include <voxtk.hh>
@@ -80,13 +82,20 @@ struct VoxelRegionPackage
 };
 
 VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
-                                     //voxtk::Region<uint8_t> const& region,
                                      voxtk::BinaryRegion const& region,
                                      uint32_t area_size,
                                      uint32_t node_size);
 
+void SparseRegionUpdateBindings(struct voxel_state_t* _state, vktk::Context* _vulkan);
+
 struct voxel_state_t
 {
+    guitk::Context gui_context;
+    vktk::Buffer gui_frame_indices;
+    vktk::Buffer gui_frames_vertices;
+    vktk::Buffer gui_frame_uv;
+    guitk::WidgetStates const* current_gui_record;
+
     float time = 0.f;
 
     //TurntableCamera camera;
@@ -125,7 +134,6 @@ struct voxel_state_t
     std::vector<vktk::Texture> section_textures{};
 
     numtk::vec3i stencil_location{ 0, 0, 0 };
-    //voxtk::Region<uint8_t> voxel_region{ { 512u, 512u, 512u }, (uint8_t)0 };
     voxtk::BinaryRegion initial_region;
     voxtk::BinaryRegion voxel_region{ { 512u, 512u, 512u } };
     VoxelRegionPackage region_package;
@@ -158,451 +166,21 @@ struct SkyboxPushConstants
     numtk::vec3f light_dir;
 };
 
-vkrg::layout::DispatchStage RegionPassDispatchStageInfo()
-{
-    vkrg::layout::DispatchStage output{};
-    output.name = "render_region";
+vkrg::layout::DispatchStage RegionPassDispatchStageInfo();
+vkrg::layout::DispatchStage SparseRegionDispatchStageInfo();
+vkrg::layout::DispatchStage SkyboxDispatchStageInfo();
+vkrg::layout::DispatchStage ResolveDispatchStageInfo();
+vkrg::layout::DispatchStage GUIDispatchStageInfo();
 
-    output.shaders = std::vector<vkrg::layout::ShaderStage>{
-        { VK_SHADER_STAGE_VERTEX_BIT,
-          { "#version 450",
-            "#define CW_CUBE",
-            #include "shaders/cube_vertices.vert.h"
-            ,
-            #include "shaders/draw_cube.vert.h"
-          }
-        },
-        { VK_SHADER_STAGE_FRAGMENT_BIT,
-          { "#version 450",
-            #include "shaders/voxel_traversal.h"
-            ,
-            #include "shaders/render_region.frag.h"
-          }
-        }
-    };
+vkrg::layout::DispatchNode MainWorldDispatchInfo();
+vkrg::layout::DispatchNode ResolveDispatchInfo();
+vkrg::layout::DispatchNode GUIDispatchInfo();
 
-    output.group_instance_count = 64;
-    output.binding_groups.push_back(vkrg::layout::StageBindingGroup{
-        {
-            { VK_SHADER_STAGE_ALL, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-              0, 1 },
-            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              0, 1 },
-            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT, 32*32*32 },
-        }
-    });
-
-    output.push_constants = std::vector<vkrg::layout::PushConstantRange>{
-        { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(numtk::vec3f) }
-    };
-
-    output.graphics.state_overrides = std::vector<vktk::Context::StateOverride>{};
-    output.graphics.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    output.graphics.input_layout = std::vector<vktk::Context::VertexInput>{};
-
-    return output;
-}
-
-vkrg::layout::DispatchStage SparseRegionDispatchStageInfo()
-{
-    vkrg::layout::DispatchStage output = {};
-    output.name = "sparse_region";
-
-    output.shaders = std::vector<vkrg::layout::ShaderStage>{
-        { VK_SHADER_STAGE_VERTEX_BIT,
-          { "#version 450",
-            "#define CW_CUBE",
-            #include "shaders/cube_vertices.vert.h"
-            ,
-            #include "shaders/draw_cube.vert.h"
-          }
-        },
-        { VK_SHADER_STAGE_FRAGMENT_BIT,
-          { "#version 450",
-            #include "shaders/voxel_traversal.h"
-            ,
-            #include "shaders/sparse_region.frag.h"
-          }
-        }
-    };
-
-    output.group_instance_count = 1;
-
-    output.binding_groups.push_back(vkrg::layout::StageBindingGroup{
-        {
-            { VK_SHADER_STAGE_ALL, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-              0, 1 },
-        }
-    });
-
-    output.binding_groups.push_back(vkrg::layout::StageBindingGroup{
-        {
-            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT, 512*512 },
-        }
-    });
-
-    output.binding_groups.push_back(vkrg::layout::StageBindingGroup{
-        {
-            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT, 512*512 },
-        }
-    });
-
-    output.push_constants = std::vector<vkrg::layout::PushConstantRange>{
-        { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SparseRegionPushConstants) }
-    };
-
-    output.graphics.state_overrides = std::vector<vktk::Context::StateOverride>{};
-    output.graphics.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    output.graphics.input_layout = std::vector<vktk::Context::VertexInput>{};
-
-    return output;
-}
-
-vkrg::layout::DispatchStage SkyboxDispatchStageInfo()
-{
-    vkrg::layout::DispatchStage output = {};
-    output.name = "skybox";
-
-    output.shaders = std::vector<vkrg::layout::ShaderStage>{
-        { VK_SHADER_STAGE_VERTEX_BIT,
-          { "#version 450",
-            #include "shaders/full_screen.vert.h"
-          }
-        },
-        { VK_SHADER_STAGE_FRAGMENT_BIT,
-          { "#version 450",
-            #include "shaders/skybox.frag.h"
-          }
-        }
-    };
-
-    output.group_instance_count = 1;
-    output.binding_groups = std::vector<vkrg::layout::StageBindingGroup>{};
-    output.push_constants = std::vector<vkrg::layout::PushConstantRange>{
-        { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SkyboxPushConstants) }
-    };
-
-    output.graphics.state_overrides = std::vector<vktk::Context::StateOverride>{};
-    output.graphics.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    output.graphics.input_layout = std::vector<vktk::Context::VertexInput>{};
-
-    return output;
-}
-
-vkrg::layout::DispatchStage ResolveDispatchStageInfo()
-{
-    vkrg::layout::DispatchStage output = {};
-    output.name = "resolve";
-
-    output.shaders = std::vector<vkrg::layout::ShaderStage>{
-        { VK_SHADER_STAGE_VERTEX_BIT,
-          { "#version 450",
-            #include "shaders/full_screen.vert.h"
-          }
-        },
-        { VK_SHADER_STAGE_FRAGMENT_BIT,
-          { "#version 450",
-            #include "shaders/resolve.frag.h"
-          }
-        }
-    };
-
-    output.group_instance_count = 1;
-    output.binding_groups.push_back(vkrg::layout::StageBindingGroup{
-        {
-            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              0, 1 }
-        }
-    });
-
-    output.push_constants = std::vector<vkrg::layout::PushConstantRange>{
-        { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(numtk::vec2i) }
-    };
-
-    output.graphics.state_overrides = std::vector<vktk::Context::StateOverride>{};
-    output.graphics.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    output.graphics.input_layout = std::vector<vktk::Context::VertexInput>{};
-
-    return output;
-}
-
-vkrg::layout::DispatchNode MainWorldDispatchInfo()
-{
-    vkrg::layout::DispatchNode output{};
-    output.name = "MainWorldDispatch";
-    output.mode = vkrg::layout::DispatchMode_Graphics;
-    output.sequence = std::vector<vkrg::layout::DispatchStage>{
-        RegionPassDispatchStageInfo(),
-        SkyboxDispatchStageInfo()
-    };
-
-    output.graphics.attachments = std::vector<vkrg::layout::RenderAttachment>{
-        {
-            VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
-            numtk::vec4f{ 0.f, 1.f, 1.f, 0.f }
-        },
-        {
-            VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
-            vkrg::layout::ClearValue{ 1.f, 0u }
-        }
-    };
-
-    return output;
-}
-
-vkrg::layout::DispatchNode ResolveDispatchInfo()
-{
-    vkrg::layout::DispatchNode output{};
-    output.name = "ResolveDispatch";
-    output.mode = vkrg::layout::DispatchMode_Graphics;
-    output.sequence = std::vector<vkrg::layout::DispatchStage>{
-        ResolveDispatchStageInfo()
-    };
-
-    output.graphics.attachments = std::vector<vkrg::layout::RenderAttachment>{
-        {
-            VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
-            numtk::vec4f{ 0.f, 1.f, 1.f, 0.f }
-        },
-        {
-            VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
-            vkrg::layout::ClearValue{ 1.f, 0u }
-        }
-    };
-
-    return output;
-}
-
-vkrg::layout::DispatchGraph FullFrameRenderGraph()
-{
-    vkrg::layout::DispatchGraph output = {};
-    output.nodes.push_back(MainWorldDispatchInfo());
-
-    output.InsertEdge(vkrg::layout::GraphEdge{
-        vkrg::layout::EdgeType_Image,
-        vkrg::layout::BindingPoint{
-            .node = &output.nodes[0],
-            .stage_index = (uint32_t)-1,
-            .type = vkrg::layout::BindingType_Framebuffer,
-            .framebuffer = { 0 }
-        },
-        vkrg::layout::BindingPoint{
-            .node = nullptr,
-            .stage_index = (uint32_t)-1,
-            .type = vkrg::layout::BindingType_Present
-        }
-    });
-
-    return output;
-}
-
-vkrg::layout::DispatchGraph SparseRegionRenderGraph()
-{
-    vkrg::layout::DispatchNode node{};
-    node.name = "SparseRegionDispatch";
-    node.mode = vkrg::layout::DispatchMode_Graphics;
-    node.sequence = std::vector<vkrg::layout::DispatchStage>{
-        SparseRegionDispatchStageInfo(),
-    };
-
-    node.graphics.attachments = std::vector<vkrg::layout::RenderAttachment>{
-        {
-            VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
-            numtk::vec4f{ 0.f, 1.f, 1.f, 0.f }
-        },
-        {
-            VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
-            vkrg::layout::ClearValue{ 1.f, 0u }
-        }
-    };
-
-    vkrg::layout::DispatchGraph output = {};
-    output.nodes.push_back(node);
-
-    output.InsertEdge(vkrg::layout::GraphEdge{
-        vkrg::layout::EdgeType_Image,
-        vkrg::layout::BindingPoint{
-            .node = &output.nodes[0],
-            .stage_index = (uint32_t)-1,
-            .type = vkrg::layout::BindingType_Framebuffer,
-            .framebuffer = { 0 }
-        },
-        vkrg::layout::BindingPoint{
-            .node = nullptr,
-            .stage_index = (uint32_t)-1,
-            .type = vkrg::layout::BindingType_Present
-        }
-    });
-
-    return output;
-}
-
-void SparseRegionUpdateBindings(voxel_state_t* _state, vktk::Context* _vulkan)
-{
-    {
-        vkrg::bind::PNextMap pNext_map = {};
-
-        static uint32_t desc_counts[2] = { 0u, 0u };
-        desc_counts[0] = (uint32_t)_state->region_package.masks.size();
-        desc_counts[1] = (uint32_t)_state->region_package.offsets.size();
-
-        static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_allocs[2];
-        desc_count_allocs[0] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
-        desc_count_allocs[1] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
-
-        desc_count_allocs[0].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
-        desc_count_allocs[0].pNext = nullptr;
-        desc_count_allocs[0].descriptorSetCount = 1;
-        desc_count_allocs[0].pDescriptorCounts = &desc_counts[0];
-
-        desc_count_allocs[1].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
-        desc_count_allocs[1].pNext = nullptr;
-        desc_count_allocs[1].descriptorSetCount = 1;
-        desc_count_allocs[1].pDescriptorCounts = &desc_counts[1];
-
-        pNext_map.emplace("sparse_region", std::vector<vkrg::bind::PNextEntry>{
-            { 1, (void*)&desc_count_allocs[0] },
-            { 2, (void*)&desc_count_allocs[1] }
-        });
-
-        _state->sparse_runtime.UpdateDynamicRuntime(pNext_map);
-    }
-
-    vkrg::layout::DispatchNode const* sparse_region_node = _state->sparse_graph["SparseRegionDispatch"];
-    std::vector<VkWriteDescriptorSet> bindings = {};
-    std::vector<VkDescriptorImageInfo> nodes_info{};
-    for (vktk::Texture const& node : _state->region_package.masks)
-    {
-        VkDescriptorImageInfo region_image_info{};
-        region_image_info.sampler = _state->sampler;
-        region_image_info.imageView = node.view;
-        region_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        nodes_info.push_back(region_image_info);
-    }
-
-    bindings.push_back(
-        _state->sparse_runtime.BindShaderResource(
-            vkrg::layout::BindingPoint{
-                .node = sparse_region_node,
-                .stage_index = 0,
-                .type = vkrg::layout::BindingType_Shader,
-                .shader = { 1, 0 }
-            },
-            0,
-            vkrg::bind::ShaderResource{
-                .descriptor_count = (uint32_t)nodes_info.size(),
-                .images = nodes_info.data()
-            })
-        );
-
-    std::vector<VkDescriptorImageInfo> offsets_info{};
-    for (vktk::Texture const& offsets : _state->region_package.offsets)
-    {
-        VkDescriptorImageInfo offsets_image_info{};
-        offsets_image_info.sampler = _state->sampler;
-        offsets_image_info.imageView = offsets.view;
-        offsets_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        offsets_info.push_back(offsets_image_info);
-    }
-
-    bindings.push_back(
-        _state->sparse_runtime.BindShaderResource(
-            vkrg::layout::BindingPoint{
-                .node = sparse_region_node,
-                .stage_index = 0,
-                .type = vkrg::layout::BindingType_Shader,
-                .shader = { 2, 0 }
-            },
-            0,
-            vkrg::bind::ShaderResource{
-                .descriptor_count = (uint32_t)offsets_info.size(),
-                .images = offsets_info.data()
-            })
-        );
-
-    VkDescriptorBufferInfo matrix_buffer_info = {};
-    matrix_buffer_info.buffer = _state->matrix_buffer;
-    matrix_buffer_info.offset = 0;
-    matrix_buffer_info.range = sizeof(MatrixBlock);
-    bindings.push_back(
-        _state->sparse_runtime.BindShaderResource(
-            vkrg::layout::BindingPoint{
-                .node = sparse_region_node,
-                .stage_index = 0,
-                .type = vkrg::layout::BindingType_Shader,
-                .shader = { 0, 0 }
-            },
-            0,
-            vkrg::bind::ShaderResource{
-                .descriptor_count = 1,
-                .buffers = &matrix_buffer_info
-            })
-        );
-
-    vkUpdateDescriptorSets(_vulkan->device, bindings.size(), bindings.data(), 0u, nullptr);
-}
-
-vkrg::layout::DispatchGraph PixelCyclingRenderGraph()
-{
-    vkrg::layout::DispatchGraph output = {};
-    output.nodes.push_back(MainWorldDispatchInfo());
-    output.nodes.push_back(ResolveDispatchInfo());
-
-    output.InsertEdge(vkrg::layout::GraphEdge{
-        vkrg::layout::EdgeType_Image,
-        vkrg::layout::BindingPoint{
-            .node = &output.nodes[0],
-            .stage_index = (uint32_t)-1,
-            .type = vkrg::layout::BindingType_Framebuffer,
-            .framebuffer = { 0 }
-        },
-        vkrg::layout::BindingPoint{
-            .node = &output.nodes[1],
-            .stage_index = 0,
-            .type = vkrg::layout::BindingType_Shader,
-            .shader = { 0, 0 }
-        }
-    });
-
-    output.InsertEdge(vkrg::layout::GraphEdge{
-        vkrg::layout::EdgeType_Image,
-        vkrg::layout::BindingPoint{
-            .node = &output.nodes[1],
-            .stage_index = 0,
-            .type = vkrg::layout::BindingType_Shader,
-            .shader = { 0, 0 }
-        },
-        vkrg::layout::BindingPoint{
-            .node = &output.nodes[0],
-            .stage_index = (uint32_t)-1,
-            .type = vkrg::layout::BindingType_Framebuffer,
-            .framebuffer = { 0 }
-        }
-    });
-
-    output.InsertEdge(vkrg::layout::GraphEdge{
-        vkrg::layout::EdgeType_Image,
-        vkrg::layout::BindingPoint{
-            .node = &output.nodes[1],
-            .stage_index = (uint32_t)-1,
-            .type = vkrg::layout::BindingType_Framebuffer,
-            .framebuffer = { 0 }
-        },
-        vkrg::layout::BindingPoint{
-            .node = nullptr,
-            .stage_index = (uint32_t)-1,
-            .type = vkrg::layout::BindingType_Present
-        }
-    });
-
-    return output;
-}
+vkrg::layout::DispatchGraph SparseRegionRenderGraph();
+vkrg::layout::DispatchGraph FullFrameRenderGraph();
+vkrg::layout::DispatchGraph PixelCyclingRenderGraph();
 
 void DecodeChunk(voxtk::BinaryRegion& region,
-                 //voxtk::Region<uint8_t>& region,
                  mctk::MCAChunkData const& chunk_data,
                  numtk::vec2u const& chunk_xz)
 {
@@ -738,7 +316,6 @@ voxtk::BinaryRegion DeserialiseRegion(std::string const& file_path)
 
     std::vector<uint8_t> region_file = systk::LoadFile(file_path.c_str());
     mctk::MCAFileData mca_data = mctk::MCADecode(region_file.data(), region_file.size());
-    //voxtk::Region<uint8_t> output{ numtk::vec3u{ 512u, 512u, 512u }, (uint8_t)0 };
     voxtk::BinaryRegion output{ { 512u, 512u, 512u } };
 
     for (uint32_t index = 0; index < 1024; ++index)
@@ -756,7 +333,6 @@ void LoadSection(voxel_state_t* state, vktk::Context* vulkan, vktk::CommandBuffe
 {
     std::vector<std::unique_ptr<uint8_t[]>> mip_levels = {};
 
-    //voxtk::Region<uint8_t> const& region = state->voxel_region;
     voxtk::BinaryRegion const& region = state->voxel_region;
     uint16_t section_count = state->section_map[coords[0] + coords[1]*32 + coords[2]*32*32];
     if (section_count != 0u && section_count != 4096u)
@@ -955,7 +531,6 @@ void LoadRegion(voxel_state_t* state, vktk::Context* vulkan)
         }
     };
 
-    //voxtk::Region<uint8_t> const& region = state->voxel_region;
     voxtk::BinaryRegion const& region = state->voxel_region;
 
     state->section_map.resize(32*32*32);
@@ -1018,7 +593,6 @@ void LoadRegion(voxel_state_t* state, vktk::Context* vulkan)
 }
 
 VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
-                                     //voxtk::Region<uint8_t> const& region,
                                      voxtk::BinaryRegion const& region,
                                      uint32_t area_size,
                                      uint32_t node_size)
@@ -1204,6 +778,11 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
         }
     }
 
+    uint32_t max_fence_count = 0u;
+
+    vktk::CommandBuffer upload_commands = vulkan->CreateCommandBuffer(vulkan->present_queue);
+    upload_commands.Begin();
+
     uint32_t level1_count = 1 << shift_depth;
     for (uint32_t index = 0u; index < level1_count; ++index)
     {
@@ -1218,41 +797,181 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
 
         numtk::vec3u const lod0_base = lod1_base * node_size*4u;
 
-        package.masks.push_back(
-            vulkan->CreateTexture(
-                node_size, node_size, node_size,
-                VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
-                VK_IMAGE_USAGE_SAMPLED_BIT,
-                [&region, &lod0_base, node_size](void* mapped_data) {
-                    uint64_t* output = (uint64_t*)mapped_data;
-                    for (uint32_t zindex = 0; zindex < node_size; ++zindex)
-                    {
-                        for (uint32_t yindex = 0; yindex < node_size; ++yindex)
-                        {
-                            for (uint32_t xindex = 0; xindex < node_size; ++xindex)
-                            {
-                                numtk::vec3u base = numtk::vec3u{
-                                    xindex * 4,
-                                    yindex * 4,
-                                    zindex * 4
-                                } + lod0_base;
+        vktk::Texture texture = vulkan->CreateTexture(
+            node_size, node_size, node_size,
+            VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
+            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
-                                uint64_t bits = region.GetEnclosingKernel(base);
-                                output[xindex + yindex*node_size + zindex*node_size*node_size] = bits;
-                            }
+        upload_commands.ImageTransitions(
+            VK_PIPELINE_STAGE_HOST_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            {
+                {
+                    texture.image,
+                    VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT,
+                    VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                }
+            });
+
+        upload_commands.UpdateTexture(
+            texture,
+            VkOffset3D{ 0, 0, 0 },
+            VkExtent3D{ node_size, node_size, node_size },
+            [&region, &lod0_base, node_size](void* mapped_data) {
+                uint64_t* output = (uint64_t*)mapped_data;
+                for (uint32_t zindex = 0; zindex < node_size; ++zindex)
+                {
+                    for (uint32_t yindex = 0; yindex < node_size; ++yindex)
+                    {
+                        for (uint32_t xindex = 0; xindex < node_size; ++xindex)
+                        {
+                            numtk::vec3u base = numtk::vec3u{
+                                xindex * 4,
+                                yindex * 4,
+                                zindex * 4
+                            } + lod0_base;
+
+                            uint64_t bits = region.GetEnclosingKernel(base);
+                            output[xindex + yindex*node_size + zindex*node_size*node_size] = bits;
                         }
                     }
                 }
-            )
+            }
         );
+
+        upload_commands.ImageTransitions(
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            {
+                {
+                    texture.image,
+                    VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    VK_IMAGE_ASPECT_COLOR_BIT
+                }
+            });
+
+        package.masks.push_back(texture);
+
+        max_fence_count = std::max(max_fence_count, vulkan->fence_count);
     }
 
+    upload_commands.End();
+    upload_commands.Submit();
+
     return package;
+}
+
+void SparseRegionUpdateBindings(voxel_state_t* _state, vktk::Context* _vulkan)
+{
+    {
+        vkrg::bind::PNextMap pNext_map = {};
+
+        static uint32_t desc_counts[2] = { 0u, 0u };
+        desc_counts[0] = (uint32_t)_state->region_package.masks.size();
+        desc_counts[1] = (uint32_t)_state->region_package.offsets.size();
+
+        static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_allocs[2];
+        desc_count_allocs[0] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
+        desc_count_allocs[1] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
+
+        desc_count_allocs[0].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+        desc_count_allocs[0].pNext = nullptr;
+        desc_count_allocs[0].descriptorSetCount = 1;
+        desc_count_allocs[0].pDescriptorCounts = &desc_counts[0];
+
+        desc_count_allocs[1].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+        desc_count_allocs[1].pNext = nullptr;
+        desc_count_allocs[1].descriptorSetCount = 1;
+        desc_count_allocs[1].pDescriptorCounts = &desc_counts[1];
+
+        pNext_map.emplace("sparse_region", std::vector<vkrg::bind::PNextEntry>{
+            { 1, (void*)&desc_count_allocs[0] },
+            { 2, (void*)&desc_count_allocs[1] }
+        });
+
+        _state->sparse_runtime.ResetDynamicRuntime(pNext_map);
+    }
+
+    vkrg::layout::DispatchNode const* sparse_region_node = _state->sparse_graph["SparseRegionDispatch"];
+    std::vector<VkWriteDescriptorSet> bindings = {};
+    std::vector<VkDescriptorImageInfo> nodes_info{};
+    for (vktk::Texture const& node : _state->region_package.masks)
+    {
+        VkDescriptorImageInfo region_image_info{};
+        region_image_info.sampler = _state->sampler;
+        region_image_info.imageView = node.view;
+        region_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        nodes_info.push_back(region_image_info);
+    }
+
+    bindings.push_back(
+        _state->sparse_runtime.BindShaderResource(
+            vkrg::layout::BindingPoint{
+                .node = sparse_region_node,
+                .stage_index = 0,
+                .type = vkrg::layout::BindingType_Shader,
+                .shader = { 1, 0 }
+            },
+            0,
+            vkrg::bind::ShaderResource{
+                .descriptor_count = (uint32_t)nodes_info.size(),
+                .images = nodes_info.data()
+            })
+        );
+
+    std::vector<VkDescriptorImageInfo> offsets_info{};
+    for (vktk::Texture const& offsets : _state->region_package.offsets)
+    {
+        VkDescriptorImageInfo offsets_image_info{};
+        offsets_image_info.sampler = _state->sampler;
+        offsets_image_info.imageView = offsets.view;
+        offsets_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        offsets_info.push_back(offsets_image_info);
+    }
+
+    bindings.push_back(
+        _state->sparse_runtime.BindShaderResource(
+            vkrg::layout::BindingPoint{
+                .node = sparse_region_node,
+                .stage_index = 0,
+                .type = vkrg::layout::BindingType_Shader,
+                .shader = { 2, 0 }
+            },
+            0,
+            vkrg::bind::ShaderResource{
+                .descriptor_count = (uint32_t)offsets_info.size(),
+                .images = offsets_info.data()
+            })
+        );
+
+    VkDescriptorBufferInfo matrix_buffer_info = {};
+    matrix_buffer_info.buffer = _state->matrix_buffer;
+    matrix_buffer_info.offset = 0;
+    matrix_buffer_info.range = sizeof(MatrixBlock);
+    bindings.push_back(
+        _state->sparse_runtime.BindShaderResource(
+            vkrg::layout::BindingPoint{
+                .node = sparse_region_node,
+                .stage_index = 0,
+                .type = vkrg::layout::BindingType_Shader,
+                .shader = { 0, 0 }
+            },
+            0,
+            vkrg::bind::ShaderResource{
+                .descriptor_count = 1,
+                .buffers = &matrix_buffer_info
+            })
+        );
+
+    vkUpdateDescriptorSets(_vulkan->device, bindings.size(), bindings.data(), 0u, nullptr);
 }
 
 void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 {
     voxel_state_t* _state = (voxel_state_t*)_pstate;
+    _state->gui_context = guitk::CreateContext();
 
 #if 0
     {
@@ -1384,7 +1103,8 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         });
 
         _state->forward_runtime.GenerateStaticRuntime();
-        _state->forward_runtime.UpdateDynamicRuntime(pNext_map);
+        _state->forward_runtime.ClearDynamicRuntime();
+        _state->forward_runtime.ResetDynamicRuntime(pNext_map);
     }
 
     {
@@ -1404,7 +1124,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         });
 
         _state->pixel_cycling_runtime.GenerateStaticRuntime();
-        _state->pixel_cycling_runtime.UpdateDynamicRuntime(pNext_map);
+        _state->pixel_cycling_runtime.ResetDynamicRuntime(pNext_map);
     }
 
     _state->staging_buffer = _vulkan->CreateBuffer(
@@ -1418,11 +1138,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         VK_BUFFER_USAGE_TRANSFER_DST_BIT
         | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
 
-    _state->staging_area = nullptr;
-    CHECKCALL(vkMapMemory,
-              _vulkan->device, _state->staging_buffer.alloc.memory,
-              _state->staging_buffer.alloc.offset, _state->staging_buffer.alloc.size,
-              0, &_state->staging_area);
+    _state->staging_area = _state->staging_buffer.alloc.map;
 
     MatrixBlock* matrices = (MatrixBlock*)_state->staging_area;
     for (uint32_t index = 0; index < 64; ++index)
@@ -1521,9 +1237,11 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                         .images = section_images_info.data()
                     });
 
-            desc_writes.push_back(region_binding);
+            if (region_image_info.imageView)
+                desc_writes.push_back(region_binding);
             desc_writes.push_back(matrix_binding);
-            desc_writes.push_back(section_bindings);
+            if (!section_images_info.empty())
+                desc_writes.push_back(section_bindings);
 
             vkUpdateDescriptorSets(_vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
         }
@@ -1597,9 +1315,11 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                         .images = section_images_info.data()
                     });
 
-            desc_writes.push_back(region_binding);
+            if (region_image_info.imageView)
+                desc_writes.push_back(region_binding);
             desc_writes.push_back(matrix_binding);
-            desc_writes.push_back(section_bindings);
+            if (!section_images_info.empty())
+                desc_writes.push_back(section_bindings);
 
             vkUpdateDescriptorSets(_vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
         }
@@ -1775,6 +1495,186 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 {
     voxel_state_t* _state = (voxel_state_t*)_pstate;
 
+    {
+        guitk::BeginRecord(_state->gui_context);
+#if 0
+        for (uint32_t i = 0; i < 20; ++i)
+        {
+            guitk::BeginFrame(_state->gui_context);
+            guitk::EndFrame(_state->gui_context);
+        }
+#endif
+        guitk::WidgetStates const* gui_record = guitk::EndRecord(_state->gui_context);
+        _state->current_gui_record = gui_record;
+
+        if (gui_record->frames.size())
+        {
+            _state->gui_frame_indices = _vulkan->CreateBuffer(
+                sizeof(uint32_t) * 6 * 9,
+                VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                [](void* buffer) {
+                    static std::vector<uint32_t> const indices = {
+                        0, 1, 2,  2, 1, 3,
+                        4, 5, 6,  6, 5, 7,
+                        8, 9, 10,  10, 9, 11,
+                        12, 13, 14,  14, 13, 15,
+
+                        3, 1, 7,  7, 1, 6,
+                        7, 5, 11,  11, 5, 10,
+                        11, 9, 15,  15, 9, 14,
+                        15, 13, 3,  3, 13, 2,
+
+                        7, 11, 3,  3, 11, 15
+                    };
+
+                    uint32_t* index_data = (uint32_t*)buffer;
+                    std::copy(indices.begin(), indices.end(), index_data);
+                },
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+            _state->gui_frames_vertices = _vulkan->CreateBuffer(
+                sizeof(numtk::vec2f) * 16 * gui_record->frames.size(),
+                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                [gui_record](void* buffer){
+                    static float const kBorderSize = 10.f;
+                    static numtk::vec2f const kBorderOffsets[] = {
+                        { kBorderSize, 0 },
+                        { 0, kBorderSize },
+                        { kBorderSize, kBorderSize },
+                        { -kBorderSize, kBorderSize }
+                    };
+
+                    numtk::vec2f* vertices = (numtk::vec2f*)buffer;
+                    for (uint32_t frame_index = 0u; frame_index < gui_record->frames.size(); ++frame_index)
+                    {
+                        guitk::Frame const& frame = gui_record->frames[frame_index];
+                        numtk::vec2f* base = &vertices[frame_index*16];
+                        base[0] = frame.bounds.min.cast<float>();
+                        base[1] = base[0] + kBorderOffsets[0];
+                        base[2] = base[0] + kBorderOffsets[1];
+                        base[3] = base[0] + kBorderOffsets[2];
+
+                        base[4] = numtk::vec2f{
+                            (float)(frame.bounds.min.x()+frame.bounds.extent.x()),
+                            (float)frame.bounds.min.y() };
+                        base[5] = base[4] + kBorderOffsets[1];
+                        base[6] = base[4] - kBorderOffsets[0];
+                        base[7] = base[4] + kBorderOffsets[3];
+
+                        base[8] = frame.bounds.max().cast<float>();
+                        base[9] = base[8] - kBorderOffsets[0];
+                        base[10] = base[8] - kBorderOffsets[1];
+                        base[11] = base[8] - kBorderOffsets[2];
+
+                        base[12] = numtk::vec2f{
+                            (float)frame.bounds.min.x(),
+                            (float)(frame.bounds.min.y()+frame.bounds.extent.y()) };
+                        base[13] = base[12] - kBorderOffsets[1];
+                        base[14] = base[12] + kBorderOffsets[0];
+                        base[15] = base[12] - kBorderOffsets[3];
+                    }
+                },
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+            _state->gui_frame_uv = _vulkan->CreateBuffer(
+                sizeof(numtk::vec2f) * 16,
+                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                [](void* buffer){
+                    static numtk::vec2f const kBorderOffsets[] = {
+                        { 0.5f, 0.f },
+                        { 0.f, 0.5f },
+                        { 0.5f, 0.5f },
+                        { -0.5f, 0.5f }
+                    };
+
+                    numtk::vec2f* vertices = (numtk::vec2f*)buffer;
+                    vertices[0] = numtk::vec2f{ 0.f, 0.f };
+                    vertices[1] = vertices[0] + kBorderOffsets[0];
+                    vertices[2] = vertices[0] + kBorderOffsets[1];
+                    vertices[3] = vertices[0] + kBorderOffsets[2];
+
+                    vertices[4] = numtk::vec2f{ 1.f, 0.f };
+                    vertices[5] = vertices[4] + kBorderOffsets[1];
+                    vertices[6] = vertices[4] - kBorderOffsets[0];
+                    vertices[7] = vertices[4] + kBorderOffsets[3];
+
+                    vertices[8] = numtk::vec2f{ 1.f, 1.f };
+                    vertices[9] = vertices[8] - kBorderOffsets[0];
+                    vertices[10] = vertices[8] - kBorderOffsets[1];
+                    vertices[11] = vertices[8] - kBorderOffsets[2];
+
+                    vertices[12] = numtk::vec2f{ 0.f, 1.f };
+                    vertices[13] = vertices[12] - kBorderOffsets[1];
+                    vertices[14] = vertices[12] + kBorderOffsets[0];
+                    vertices[15] = vertices[12] - kBorderOffsets[3];
+                },
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+            vkrg::layout::DispatchNode const& sparse_region_node =
+                *std::find_if(_state->sparse_graph.nodes.begin(), _state->sparse_graph.nodes.end(),
+                              [](vkrg::layout::DispatchNode const& node) {
+                                  return node.name == "SparseRegionDispatch";
+                              });
+
+            _state->sparse_runtime.UpdateDynamicInvocationCount(&sparse_region_node, 1, gui_record->frames.size());
+            _state->sparse_runtime.ClearStageBarriers(&sparse_region_node, 1);
+
+            for (uint32_t index = 0u; index < (uint32_t)gui_record->frames.size(); ++index)
+            {
+                _state->sparse_runtime.BindGraphicsCommand(
+                    &sparse_region_node, 1, index, {
+                        vkrg::bind::DispatchCommand_Draw, 6*9, 1
+                    });
+
+                {
+                    _state->sparse_runtime.BindVertexInput(
+                        { .node = &sparse_region_node,
+                          .stage_index = 1,
+                          .type = vkrg::layout::BindingType_VertexInput,
+                          .vertex_input = vkrg::layout::VertexInputLocation{ 0 } },
+                        index,
+                        { _state->gui_frames_vertices, index * sizeof(numtk::vec2f) * 16 }
+                        );
+
+                    _state->sparse_runtime.BindVertexInput(
+                        { .node = &sparse_region_node,
+                          .stage_index = 1,
+                          .type = vkrg::layout::BindingType_VertexInput,
+                          .vertex_input = vkrg::layout::VertexInputLocation{ 1 } },
+                        index,
+                        { _state->gui_frame_uv, 0 }
+                        );
+
+                    _state->sparse_runtime.BindIndexInput(
+                        &sparse_region_node, 1, index,
+                        { _state->gui_frame_indices, 0 }
+                        );
+                }
+            }
+
+            _state->sparse_runtime.BindBarrier(&sparse_region_node, 1, {
+                .type = vkrg::bind::BufferResource,
+                .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
+                .access = VK_ACCESS_TRANSFER_WRITE_BIT,
+                .buffer = _state->gui_frames_vertices
+            });
+
+            _state->sparse_runtime.BindBarrier(&sparse_region_node, 1, {
+                .type = vkrg::bind::BufferResource,
+                .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
+                .access = VK_ACCESS_TRANSFER_WRITE_BIT,
+                .buffer = _state->gui_frame_indices
+            });
+
+            _state->sparse_runtime.BindBarrier(&sparse_region_node, 1, {
+                .type = vkrg::bind::BufferResource,
+                .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
+                .access = VK_ACCESS_TRANSFER_WRITE_BIT,
+                .buffer = _state->gui_frame_uv
+            });
+        }
+    }
+
     std::cout << _input->time_delta << std::endl;
     _state->time += _input->time_delta;
 
@@ -1843,14 +1743,12 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                                               numtk::vec3i::Constant(16));
 
         {
-            //voxtk::Region<uint8_t> src{ numtk::vec3u{ 16, 16, 16 }, uint8_t(0) };
             voxtk::BinaryRegion src{ numtk::vec3u{ 16, 16, 16 } };
             for (uint32_t z = 0; z < 16; ++z)
                 for (uint32_t y = 0; y < 16; ++y)
                     for (uint32_t x = 0; x < 16; ++x)
                         src.Set(numtk::vec3u{ x, y, z }, !!(((x&1) + (y&1) + (z&1)) & 1));
 
-            //voxtk::Region<uint8_t> mask{ numtk::vec3u{ 3, 3, 3 }, uint8_t(0) };
             voxtk::BinaryRegion mask{ numtk::vec3u{ 3, 3, 3 } };
             //mask.Set({ 0, 0, 0 }, { 3, 3, 3 }, uint8_t(0));
             mask.Set(numtk::bounds3u{{ 0, 0, 0 }, { 3, 3, 3 }}, true);
@@ -2121,6 +2019,22 @@ void Draw(void* _pstate,
         push_constants->node_size = (float)_state->region_package.node_size;
         push_constants->stack_depth = std::max(_state->region_package.display_depth-1, 0);
 
+        for (uint32_t index = 0u; index < (uint32_t)_state->current_gui_record->frames.size(); ++index)
+        {
+            numtk::vec2f* gui_push_constants =
+                (numtk::vec2f*)_state->sparse_runtime.BindPushConstants(
+                    vkrg::layout::BindingPoint{
+                        .node = &sparse_region_node,
+                        .stage_index = 1,
+                        .type = vkrg::layout::BindingType_PushConstantRange,
+                        .push_constants = { 0 }
+                    },
+                    index);
+            gui_push_constants[0] = { (float)_swapchain.size.width, (float)_swapchain.size.height };
+            gui_push_constants[1] = _state->current_gui_record->frames[index].bounds.min.cast<float>();
+            gui_push_constants[2] = _state->current_gui_record->frames[index].bounds.extent.cast<float>();
+        }
+
         _state->sparse_runtime.BindFramebufferArea(
             &sparse_region_node,
             vkrg::bind::FramebufferArea{
@@ -2144,12 +2058,20 @@ void Draw(void* _pstate,
 
     command_buffer.End();
 
-    if (_state->last_submit != VK_NULL_HANDLE)
-        _vulkan->ScheduleFenceDestroy(_state->last_submit);
-
     VkPipelineStageFlags wait_dst_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     command_buffer.Submit(nullptr, &_acquire_semaphore, &wait_dst_stage, 1u,
                           &_state->last_submit);
+
+    _vulkan->ScheduleRoutine(_state->last_submit, [index_buffer = _state->gui_frame_indices
+                                                   , vertex_buffer = _state->gui_frames_vertices
+                                                   , uv_buffer = _state->gui_frame_uv](vktk::Context& _vulkan) {
+        _vulkan.DestroyBuffer(index_buffer);
+        _vulkan.DestroyBuffer(vertex_buffer);
+        _vulkan.DestroyBuffer(uv_buffer);
+    });
+
+    _vulkan->ScheduleFenceDestroy(_state->last_submit);
+
 #if 0
     std::cout << "[VoxelsDraw] submitted on fence "
               << std::hex << _state->last_submit << std::dec << std::endl;
@@ -2192,19 +2114,13 @@ void Shutdown(void* _pstate,
     _vulkan->DestroyTexture(_state->region_texture);
     _state->region_texture = vktk::Texture{};
 
-    vkUnmapMemory(_vulkan->device, _state->staging_buffer.alloc.memory);
-
     _vulkan->DestroyBuffer(_state->matrix_buffer);
     _vulkan->DestroyBuffer(_state->staging_buffer);
 
     for (uint32_t index = 0; index < _state->section_textures.size(); ++index)
         _vulkan->DestroyTexture(_state->section_textures[index]);
 
-    if (_state->last_submit != VK_NULL_HANDLE)
-    {
-        _vulkan->ScheduleFenceDestroy(_state->last_submit);
-        _state->last_submit = VK_NULL_HANDLE;
-    }
+     guitk::DeleteContext(_state->gui_context);
 }
 
 void TurntableCamera::Update(iotk::input_t const* _input,
@@ -2389,6 +2305,405 @@ void Interface::ReloadPointers()
     Update = ::Update;
     Draw = ::Draw;
     Shutdown = ::Shutdown;
+}
+
+}
+
+namespace {
+
+vkrg::layout::DispatchStage RegionPassDispatchStageInfo()
+{
+    vkrg::layout::DispatchStage output{};
+    output.name = "render_region";
+
+    output.shaders = std::vector<vkrg::layout::ShaderStage>{
+        { VK_SHADER_STAGE_VERTEX_BIT,
+          { "#version 450",
+            "#define CW_CUBE",
+            #include "shaders/cube_vertices.vert.h"
+            ,
+            #include "shaders/draw_cube.vert.h"
+          }
+        },
+        { VK_SHADER_STAGE_FRAGMENT_BIT,
+          { "#version 450",
+            #include "shaders/voxel_traversal.h"
+            ,
+            #include "shaders/render_region.frag.h"
+          }
+        }
+    };
+
+    output.invocation_count = 64;
+    output.binding_groups.push_back(vkrg::layout::StageBindingGroup{
+        {
+            { VK_SHADER_STAGE_ALL, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+              0, 1 },
+            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              0, 1 },
+            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT, 32*32*32 },
+        }
+    });
+
+    output.push_constants = std::vector<vkrg::layout::PushConstantRange>{
+        { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(numtk::vec3f) }
+    };
+
+    output.graphics.state_overrides = std::vector<vktk::Context::StateOverride>{};
+    output.graphics.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    output.graphics.input_layout = std::vector<vktk::Context::VertexInput>{};
+
+    return output;
+}
+
+vkrg::layout::DispatchStage SparseRegionDispatchStageInfo()
+{
+    vkrg::layout::DispatchStage output = {};
+    output.name = "sparse_region";
+
+    output.shaders = std::vector<vkrg::layout::ShaderStage>{
+        { VK_SHADER_STAGE_VERTEX_BIT,
+          { "#version 450",
+            "#define CW_CUBE",
+            #include "shaders/cube_vertices.vert.h"
+            ,
+            #include "shaders/draw_cube.vert.h"
+          }
+        },
+        { VK_SHADER_STAGE_FRAGMENT_BIT,
+          { "#version 450",
+            #include "shaders/voxel_traversal.h"
+            ,
+            #include "shaders/sparse_region.frag.h"
+          }
+        }
+    };
+
+    output.invocation_count = 1;
+
+    output.binding_groups.push_back(vkrg::layout::StageBindingGroup{
+        {
+            { VK_SHADER_STAGE_ALL, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+              0, 1 },
+        }
+    });
+
+    output.binding_groups.push_back(vkrg::layout::StageBindingGroup{
+        {
+            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT, 512*512 },
+        }
+    });
+
+    output.binding_groups.push_back(vkrg::layout::StageBindingGroup{
+        {
+            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT, 512*512 },
+        }
+    });
+
+    output.push_constants = std::vector<vkrg::layout::PushConstantRange>{
+        { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SparseRegionPushConstants) }
+    };
+
+    output.graphics.state_overrides = std::vector<vktk::Context::StateOverride>{};
+    output.graphics.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    output.graphics.input_layout = std::vector<vktk::Context::VertexInput>{};
+
+    return output;
+}
+
+vkrg::layout::DispatchStage SkyboxDispatchStageInfo()
+{
+    vkrg::layout::DispatchStage output = {};
+    output.name = "skybox";
+
+    output.shaders = std::vector<vkrg::layout::ShaderStage>{
+        { VK_SHADER_STAGE_VERTEX_BIT,
+          { "#version 450",
+            #include "shaders/full_screen.vert.h"
+          }
+        },
+        { VK_SHADER_STAGE_FRAGMENT_BIT,
+          { "#version 450",
+            #include "shaders/skybox.frag.h"
+          }
+        }
+    };
+
+    output.invocation_count = 1;
+    output.binding_groups = std::vector<vkrg::layout::StageBindingGroup>{};
+    output.push_constants = std::vector<vkrg::layout::PushConstantRange>{
+        { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SkyboxPushConstants) }
+    };
+
+    output.graphics.state_overrides = std::vector<vktk::Context::StateOverride>{};
+    output.graphics.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    output.graphics.input_layout = std::vector<vktk::Context::VertexInput>{};
+
+    return output;
+}
+
+vkrg::layout::DispatchStage ResolveDispatchStageInfo()
+{
+    vkrg::layout::DispatchStage output = {};
+    output.name = "resolve";
+
+    output.shaders = std::vector<vkrg::layout::ShaderStage>{
+        { VK_SHADER_STAGE_VERTEX_BIT,
+          { "#version 450",
+            #include "shaders/full_screen.vert.h"
+          }
+        },
+        { VK_SHADER_STAGE_FRAGMENT_BIT,
+          { "#version 450",
+            #include "shaders/resolve.frag.h"
+          }
+        }
+    };
+
+    output.invocation_count = 1;
+    output.binding_groups.push_back(vkrg::layout::StageBindingGroup{
+        {
+            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              0, 1 }
+        }
+    });
+
+    output.push_constants = std::vector<vkrg::layout::PushConstantRange>{
+        { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(numtk::vec2i) }
+    };
+
+    output.graphics.state_overrides = std::vector<vktk::Context::StateOverride>{};
+    output.graphics.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    output.graphics.input_layout = std::vector<vktk::Context::VertexInput>{};
+
+    return output;
+}
+
+vkrg::layout::DispatchStage GUIDispatchStageInfo()
+{
+    vkrg::layout::DispatchStage output = {};
+    output.name = "gui";
+
+    output.shaders = std::vector<vkrg::layout::ShaderStage>{
+        { VK_SHADER_STAGE_VERTEX_BIT,
+          { "#version 450",
+            "layout(location = 0) in vec2 iVS_point;"
+            "layout(location = 1) in vec2 iVS_uv;"
+            "layout(location = 0) out vec2 iFS_point;"
+            "layout(push_constant, std430) uniform PushConstants { vec2 viewport_size; vec2 frame_offset; vec2 frame_size; };"
+            "void main() {"
+            "gl_Position = vec4((iVS_point / viewport_size) * vec2(2.0, -2.0) - vec2(1.0, -1.0), 0.0, 1.0);"
+            "iFS_point = iVS_uv;"
+            "}"
+          }
+        },
+
+        { VK_SHADER_STAGE_FRAGMENT_BIT,
+          { "#version 450",
+            "layout(location = 0) in vec2 iFS_point;"
+            "layout(location = 0) out vec4 color;"
+            "layout(push_constant, std430) uniform PushConstants { vec2 viewport_size; vec2 frame_offset; vec2 frame_size; };"
+
+            "void main() {"
+            "vec2 frame_coords = iFS_point - vec2(0.5);"
+            "float border_distance = length(frame_coords);"
+            "float border_color = min(smoothstep(0.0, 0.25, border_distance), smoothstep(0.5, 0.25, border_distance));"
+            "color = vec4(border_color.xxx, 1.0);"
+            "}"
+          }
+        }
+    };
+
+    output.invocation_count = 0;
+
+    output.push_constants = std::vector<vkrg::layout::PushConstantRange>{
+        { VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(numtk::vec2f) * 3 }
+    };
+
+    output.graphics.state_overrides = std::vector<vktk::Context::StateOverride>{
+        { vktk::StateOverrideTag::DepthTestEnable, VK_FALSE },
+        { vktk::StateOverrideTag::DepthWriteEnable, VK_FALSE }
+    };
+    output.graphics.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    output.graphics.input_layout = std::vector<vktk::Context::VertexInput>{
+        { 0, 0, VK_VERTEX_INPUT_RATE_VERTEX, VK_FORMAT_R32G32_SFLOAT,
+          0, sizeof(numtk::vec2f) },
+        { 1, 1, VK_VERTEX_INPUT_RATE_VERTEX, VK_FORMAT_R32G32_SFLOAT,
+          0, sizeof(numtk::vec2f) }
+    };
+
+    return output;
+}
+
+vkrg::layout::DispatchNode MainWorldDispatchInfo()
+{
+    vkrg::layout::DispatchNode output{};
+    output.name = "MainWorldDispatch";
+    output.mode = vkrg::layout::DispatchMode_Graphics;
+    output.sequence = std::vector<vkrg::layout::DispatchStage>{
+        RegionPassDispatchStageInfo(),
+        SkyboxDispatchStageInfo()
+    };
+
+    output.graphics.attachments = std::vector<vkrg::layout::RenderAttachment>{
+        {
+            VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
+            numtk::vec4f{ 0.f, 1.f, 1.f, 0.f }
+        },
+        {
+            VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
+            vkrg::layout::ClearValue{ 1.f, 0u }
+        }
+    };
+
+    return output;
+}
+
+vkrg::layout::DispatchNode ResolveDispatchInfo()
+{
+    vkrg::layout::DispatchNode output{};
+    output.name = "ResolveDispatch";
+    output.mode = vkrg::layout::DispatchMode_Graphics;
+    output.sequence = std::vector<vkrg::layout::DispatchStage>{
+        ResolveDispatchStageInfo()
+    };
+
+    output.graphics.attachments = std::vector<vkrg::layout::RenderAttachment>{
+        {
+            VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
+            numtk::vec4f{ 0.f, 1.f, 1.f, 0.f }
+        },
+        {
+            VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
+            vkrg::layout::ClearValue{ 1.f, 0u }
+        }
+    };
+
+    return output;
+}
+
+vkrg::layout::DispatchGraph SparseRegionRenderGraph()
+{
+    vkrg::layout::DispatchNode node{};
+    node.name = "SparseRegionDispatch";
+    node.mode = vkrg::layout::DispatchMode_Graphics;
+    node.sequence = std::vector<vkrg::layout::DispatchStage>{
+        SparseRegionDispatchStageInfo(),
+        GUIDispatchStageInfo()
+    };
+
+    node.graphics.attachments = std::vector<vkrg::layout::RenderAttachment>{
+        {
+            VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
+            numtk::vec4f{ 0.f, 1.f, 1.f, 0.f }
+        },
+        {
+            VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
+            vkrg::layout::ClearValue{ 1.f, 0u }
+        }
+    };
+
+    vkrg::layout::DispatchGraph output = {};
+    output.nodes.push_back(node);
+
+    output.InsertEdge(vkrg::layout::GraphEdge{
+        vkrg::layout::EdgeType_Image,
+        vkrg::layout::BindingPoint{
+            .node = &output.nodes[0],
+            .stage_index = (uint32_t)-1,
+            .type = vkrg::layout::BindingType_Framebuffer,
+            .framebuffer = { 0 }
+        },
+        vkrg::layout::BindingPoint{
+            .node = nullptr,
+            .stage_index = (uint32_t)-1,
+            .type = vkrg::layout::BindingType_Present
+        }
+    });
+
+    return output;
+}
+
+vkrg::layout::DispatchGraph FullFrameRenderGraph()
+{
+    vkrg::layout::DispatchGraph output = {};
+    output.nodes.push_back(MainWorldDispatchInfo());
+
+    output.InsertEdge(vkrg::layout::GraphEdge{
+        vkrg::layout::EdgeType_Image,
+        vkrg::layout::BindingPoint{
+            .node = &output.nodes[0],
+            .stage_index = (uint32_t)-1,
+            .type = vkrg::layout::BindingType_Framebuffer,
+            .framebuffer = { 0 }
+        },
+        vkrg::layout::BindingPoint{
+            .node = nullptr,
+            .stage_index = (uint32_t)-1,
+            .type = vkrg::layout::BindingType_Present
+        }
+    });
+
+    return output;
+}
+
+vkrg::layout::DispatchGraph PixelCyclingRenderGraph()
+{
+    vkrg::layout::DispatchGraph output = {};
+    output.nodes.push_back(MainWorldDispatchInfo());
+    output.nodes.push_back(ResolveDispatchInfo());
+
+    output.InsertEdge(vkrg::layout::GraphEdge{
+        vkrg::layout::EdgeType_Image,
+        vkrg::layout::BindingPoint{
+            .node = &output.nodes[0],
+            .stage_index = (uint32_t)-1,
+            .type = vkrg::layout::BindingType_Framebuffer,
+            .framebuffer = { 0 }
+        },
+        vkrg::layout::BindingPoint{
+            .node = &output.nodes[1],
+            .stage_index = 0,
+            .type = vkrg::layout::BindingType_Shader,
+            .shader = { 0, 0 }
+        }
+    });
+
+    output.InsertEdge(vkrg::layout::GraphEdge{
+        vkrg::layout::EdgeType_Image,
+        vkrg::layout::BindingPoint{
+            .node = &output.nodes[1],
+            .stage_index = 0,
+            .type = vkrg::layout::BindingType_Shader,
+            .shader = { 0, 0 }
+        },
+        vkrg::layout::BindingPoint{
+            .node = &output.nodes[0],
+            .stage_index = (uint32_t)-1,
+            .type = vkrg::layout::BindingType_Framebuffer,
+            .framebuffer = { 0 }
+        }
+    });
+
+    output.InsertEdge(vkrg::layout::GraphEdge{
+        vkrg::layout::EdgeType_Image,
+        vkrg::layout::BindingPoint{
+            .node = &output.nodes[1],
+            .stage_index = (uint32_t)-1,
+            .type = vkrg::layout::BindingType_Framebuffer,
+            .framebuffer = { 0 }
+        },
+        vkrg::layout::BindingPoint{
+            .node = nullptr,
+            .stage_index = (uint32_t)-1,
+            .type = vkrg::layout::BindingType_Present
+        }
+    });
+
+    return output;
 }
 
 }

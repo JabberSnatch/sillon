@@ -17,6 +17,7 @@
 
 #include <shaderc/shaderc.hpp>
 
+#include <cassert>
 #include <cstring>
 #include <iostream>
 #include <numeric>
@@ -349,6 +350,7 @@ void Queue::Submit(VkCommandBuffer const* _command_buffers,
         fence_info.pNext = nullptr;
         fence_info.flags = 0;
         CHECKCALL(vkCreateFence, context->device, &fence_info, nullptr, _signal_fence);
+        ++context->fence_count;
     }
 
     VkSubmitInfo submit_info{};
@@ -455,15 +457,8 @@ void CommandBuffer::UpdateTexture(Texture _texture, VkOffset3D _offset, VkExtent
         * _extent.depth;
     Buffer staging = queue.context->CreateBuffer(staging_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
 
-    void* mapped_data = nullptr;
-    CHECKCALL(vkMapMemory,
-              queue.context->device,
-              staging.alloc.memory,
-              staging.alloc.offset,
-              staging.alloc.size,
-              0u, &mapped_data);
+    void* mapped_data = staging.alloc.map;
     _upload_callback(mapped_data);
-    vkUnmapMemory(queue.context->device, staging.alloc.memory);
 
     BufferTransitions(VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
                       {
@@ -634,7 +629,7 @@ void CommandBuffer::End()
     vkEndCommandBuffer(handle);
 }
 
-Allocation Allocator::Alloc(VkMemoryPropertyFlags _memory_flags,
+Allocation Allocator::Allocate(VkMemoryPropertyFlags _memory_flags,
                             uint32_t _size)
 {
     uint32_t memory_type = SelectMemoryType(_memory_flags, _size);
@@ -679,10 +674,14 @@ Allocation Allocator::Alloc(VkMemoryPropertyFlags _memory_flags,
     if (range.first == range.second)
         storage.free_list.erase(storage.free_list.begin() + range_index);
 
-    return Allocation{ memory_type, chunk, offset, _size };
+    void* map = nullptr;
+    if (!storage.maps.empty())
+        map = ((uint8_t*)storage.maps[chunk_index]) + offset;
+
+    return Allocation{ memory_type, chunk, offset, _size, map };
 }
 
-Allocation Allocator::Alloc(VkMemoryPropertyFlags _memory_flags,
+Allocation Allocator::Allocate(VkMemoryPropertyFlags _memory_flags,
                             uint32_t _size,
                             VkDeviceSize _alignment)
 {
@@ -690,11 +689,45 @@ Allocation Allocator::Alloc(VkMemoryPropertyFlags _memory_flags,
     if (_alignment > kBlockSize)
         padding = _alignment-1;
     else
-        return Alloc(_memory_flags, _size);
+        return Allocate(_memory_flags, _size);
 
-    Allocation alloc = Alloc(_memory_flags, (_size + padding));
+    Allocation alloc = Allocate(_memory_flags, (_size + padding));
     alloc.offset += _alignment - (alloc.offset & padding);
     return alloc;
+}
+
+void Allocator::Free(Allocation const& _alloc)
+{
+    auto heap_iterator = std::lower_bound(heaps.begin(), heaps.end(), _alloc.memory_type,
+                                          [](ChunkStorage const& _lhs, uint32_t _rhs) {
+                                              return _lhs.memory_type < _rhs;
+                                          });
+    assert(heap_iterator != heaps.end());
+
+    ChunkStorage& storage = *heap_iterator;
+    uint64_t alloc_begin = _alloc.offset / kBlockSize;
+    uint64_t alloc_end = alloc_begin + (_alloc.size / kBlockSize) + ((_alloc.size % kBlockSize != 0) ? 1 : 0);
+
+    auto range_iterator = std::lower_bound(storage.free_list.begin(), storage.free_list.end(), alloc_begin,
+                                           [](BlockRange const& _lhs, uint64_t _rhs) {
+                                               return _lhs.first < _rhs;
+                                           });
+    assert(range_iterator != storage.free_list.end());
+
+    if (range_iterator != storage.free_list.begin()
+        && std::prev(range_iterator)->second == alloc_begin)
+    {
+        range_iterator = std::prev(range_iterator);
+        range_iterator->second = alloc_end;
+    }
+    else
+        range_iterator = storage.free_list.insert(range_iterator, { alloc_begin, alloc_end });
+
+    if (range_iterator->second == std::next(range_iterator)->first)
+    {
+        range_iterator->second = std::next(range_iterator)->second;
+        storage.free_list.erase(std::next(range_iterator));
+    }
 }
 
 uint32_t Allocator::SelectMemoryType(VkMemoryPropertyFlags _flags, uint32_t _required_size)
@@ -722,18 +755,31 @@ void Allocator::AllocateChunk(ChunkStorage& _storage)
     VkDeviceMemory device_memory = {};
     CHECKCALL(vkAllocateMemory, device, &allocate_info, nullptr, &device_memory);
 
+    allocated_memory += kChunkSize;
+
     _storage.free_list.push_back({
         _storage.chunks.size() * kChunkBlockCount,
         (_storage.chunks.size()+1) * kChunkBlockCount
     });
     _storage.chunks.push_back(device_memory);
+
+    if (memory_properties.memoryTypes[_storage.memory_type].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
+    {
+        void* map = nullptr;
+        CHECKCALL(vkMapMemory, device, device_memory, 0, VK_WHOLE_SIZE, 0u, &map);
+        _storage.maps.push_back(map);
+    }
 }
 
 void Allocator::Release()
 {
     for (ChunkStorage& heap : heaps)
         for (VkDeviceMemory chunk : heap.chunks)
+        {
+            if (!heap.maps.empty())
+                vkUnmapMemory(device, chunk);
             vkFreeMemory(device, chunk, nullptr);
+        }
 
     heaps.clear();
 }
@@ -1352,14 +1398,14 @@ DescriptorPool Context::CreateDescriptorPool(
     flags_info.bindingCount = (uint32_t)flags.size();
     flags_info.pBindingFlags = flags.data();
 
-    VkDescriptorSetLayoutCreateInfo descset_create{};
-    descset_create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    descset_create.pNext = &flags_info;
-    descset_create.flags = 0u;
-    descset_create.bindingCount = (uint32_t)bindings.size();
-    descset_create.pBindings = bindings.data();
+    VkDescriptorSetLayoutCreateInfo layout_create{};
+    layout_create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layout_create.pNext = &flags_info;
+    layout_create.flags = 0u;
+    layout_create.bindingCount = (uint32_t)bindings.size();
+    layout_create.pBindings = bindings.data();
     CHECKCALL(vkCreateDescriptorSetLayout, device,
-              &descset_create, nullptr, &output.layout);
+              &layout_create, nullptr, &output.layout);
 
     return output;
 }
@@ -1368,6 +1414,121 @@ void Context::DestroyDescriptorPool(DescriptorPool const& _pool) const
 {
     vkDestroyDescriptorPool(device, _pool.pool, nullptr);
     vkDestroyDescriptorSetLayout(device, _pool.layout, nullptr);
+}
+
+DynamicDescriptorPool Context::CreateDynamicDescriptorPool(
+    std::vector<DescriptorSetBindingPoint> const& _bindings)
+{
+    DynamicDescriptorPool output = {};
+    output.context = this;
+
+    std::unordered_map<VkDescriptorType, uint32_t> counts = {};
+    std::vector<VkDescriptorSetLayoutBinding> bindings = {};
+    std::vector<VkDescriptorBindingFlags> flags = {};
+
+    for (DescriptorSetBindingPoint const& binding : _bindings)
+    {
+        if (counts.count(binding.type) == 0)
+            counts.emplace(binding.type, 0u);
+        counts[binding.type] += binding.count;
+
+        VkDescriptorSetLayoutBinding layout_binding = {};
+        layout_binding.binding = bindings.size();
+        layout_binding.descriptorType = binding.type;
+        layout_binding.descriptorCount = binding.count;
+        layout_binding.stageFlags = binding.shader_stages;
+        layout_binding.pImmutableSamplers = nullptr;
+        bindings.emplace_back(layout_binding);
+        flags.emplace_back(binding.flags);
+    }
+
+    output.sizes.clear();
+    for (auto const& count : counts)
+        output.sizes.push_back(VkDescriptorPoolSize{ count.first, count.second * DynamicDescriptorPool::kPoolSize });
+
+    VkDescriptorSetLayoutBindingFlagsCreateInfo flags_info{};
+    flags_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+    flags_info.pNext = nullptr;
+    flags_info.bindingCount = (uint32_t)flags.size();
+    flags_info.pBindingFlags = flags.data();
+
+    VkDescriptorSetLayoutCreateInfo layout_create{};
+    layout_create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layout_create.pNext = &flags_info;
+    layout_create.flags = 0u;
+    layout_create.bindingCount = (uint32_t)bindings.size();
+    layout_create.pBindings = bindings.data();
+    CHECKCALL(vkCreateDescriptorSetLayout, device,
+              &layout_create, nullptr, &output.layout);
+
+    return output;
+}
+
+void Context::DestroyDynamicDescriptorPool(DynamicDescriptorPool const& _pool) const
+{
+    for (VkDescriptorPool pool : _pool.pools)
+        vkDestroyDescriptorPool(device, pool, nullptr);
+    vkDestroyDescriptorSetLayout(device, _pool.layout, nullptr);
+}
+
+VkDescriptorSet DynamicDescriptorPool::AllocateDescriptorSet(void const* _pNext)
+{
+    if (total_set_count >= pools.size() * kPoolSize)
+    {
+        VkDescriptorPool pool = {};
+
+        VkDescriptorPoolCreateInfo descpool_create = {};
+        descpool_create.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        descpool_create.pNext = nullptr;
+        descpool_create.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+        descpool_create.maxSets = kPoolSize;
+        descpool_create.poolSizeCount = (uint32_t)sizes.size();
+        descpool_create.pPoolSizes = sizes.data();
+        CHECKCALL(vkCreateDescriptorPool, context->device,
+                  &descpool_create, nullptr, &pool);
+
+        first_free_pool = (uint32_t)pools.size();
+        pools.push_back(pool);
+        sets.resize(pools.size());
+        set_counts.push_back(0);
+    }
+
+    VkDescriptorSet output = {};
+    VkDescriptorSetAllocateInfo descset_allocate{};
+    descset_allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    descset_allocate.pNext = _pNext;
+    descset_allocate.descriptorPool = pools[first_free_pool];
+    descset_allocate.descriptorSetCount = 1u;
+    descset_allocate.pSetLayouts = &layout;
+    CHECKCALL(vkAllocateDescriptorSets, context->device,
+              &descset_allocate, &output);
+
+    sets[first_free_pool].emplace(output);
+
+    ++total_set_count;
+    ++set_counts[first_free_pool];
+    while (first_free_pool < (uint32_t)set_counts.size()
+           && set_counts[first_free_pool] == kPoolSize)
+        ++first_free_pool;
+
+    return output;
+}
+
+void DynamicDescriptorPool::FreeDescriptorSet(VkDescriptorSet _set)
+{
+    for (uint32_t index = 0u; index < (uint32_t)sets.size(); ++index)
+    {
+        if (sets[index].count(_set))
+        {
+            sets[index].erase(_set);
+            --set_counts[index];
+            --total_set_count;
+            first_free_pool = index;
+            break;
+        }
+    }
+
+    vkFreeDescriptorSets(context->device, pools[first_free_pool], 1, &_set);
 }
 
 Buffer Context::CreateBuffer(uint32_t _size,
@@ -1390,15 +1551,67 @@ Buffer Context::CreateBuffer(uint32_t _size,
     VkMemoryRequirements reqs = {};
     vkGetBufferMemoryRequirements(device, buffer.buffer, &reqs);
 
-    buffer.alloc = allocator.Alloc(_memory_flags, _size, reqs.alignment);
+    buffer.alloc = allocator.Allocate(_memory_flags, _size, reqs.alignment);
     CHECKCALL(vkBindBufferMemory, device, buffer.buffer, buffer.alloc.memory, buffer.alloc.offset);
 
     return buffer;
 }
 
-void Context::DestroyBuffer(Buffer const& _buffer) const
+Buffer Context::CreateBuffer(uint32_t _size,
+                             VkBufferUsageFlags _usage,
+                             std::function<void(void*)> const& _upload_callback,
+                             VkMemoryPropertyFlags _memory_flags)
 {
+    Buffer result = CreateBuffer(_size, _usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, _memory_flags);
+
+    Buffer staging = CreateBuffer(_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+    void* mapped_data = staging.alloc.map;
+    _upload_callback(mapped_data);
+
+    vktk::CommandBuffer command_buffer = CreateCommandBuffer(present_queue);
+    command_buffer.Begin();
+
+    command_buffer.BufferTransitions(
+        VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        {
+            { result, VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT },
+            { staging, VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT }
+        });
+
+    VkBufferCopy copy_region{ 0, 0, _size };
+    vkCmdCopyBuffer(command_buffer, staging, result, 1, &copy_region);
+
+    VkFence staging_fence = {};
+    VkFenceCreateInfo fence_info = {};
+    fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fence_info.pNext = nullptr;
+    fence_info.flags = 0;
+    CHECKCALL(vkCreateFence,
+              device, &fence_info, nullptr, &staging_fence);
+
+    command_buffer.End();
+
+    CommandBuffer::SubmitInfo submit_info = {};
+    submit_info.signal_fence = &staging_fence;
+    command_buffer.Submit(submit_info);
+
+    ScheduleRoutine(staging_fence, [staging](Context& _context) {
+        std::cout << "[ScheduledRoutine] staging buffer destroyed "
+                  << std::hex << staging.buffer << std::dec << std::endl;
+        _context.DestroyBuffer(staging);
+    });
+    ScheduleFenceDestroy(staging_fence);
+
+    return result;
+}
+
+void Context::DestroyBuffer(Buffer const& _buffer)
+{
+    if (!_buffer.buffer)
+        return;
+
     vkDestroyBuffer(device, _buffer, nullptr);
+    allocator.Free(_buffer.alloc);
 }
 
 Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
@@ -1436,7 +1649,7 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
     VkMemoryRequirements requirements{};
     vkGetImageMemoryRequirements(device, texture.image, &requirements);
 
-    texture.alloc = allocator.Alloc(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, requirements.size, requirements.alignment);
+    texture.alloc = allocator.Allocate(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, requirements.size, requirements.alignment);
     CHECKCALL(vkBindImageMemory, device, texture.image, texture.alloc.memory, texture.alloc.offset);
 
     texture.view = CreateImageView(texture);
@@ -1453,15 +1666,8 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
     uint64_t staging_size = _width * _height * _depth * VkFormatBytesPerUnit(_format);
     Buffer staging = CreateBuffer(staging_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
 
-    void* mapped_data = nullptr;
-    CHECKCALL(vkMapMemory,
-              device,
-              staging.alloc.memory,
-              staging.alloc.offset,
-              staging.alloc.size,
-              0u, &mapped_data);
+    void* mapped_data = staging.alloc.map;
     _upload_callback(mapped_data);
-    vkUnmapMemory(device, staging.alloc.memory);
 
     vktk::CommandBuffer command_buffer = CreateCommandBuffer(present_queue);
     command_buffer.Begin();
@@ -1541,6 +1747,7 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
     fence_info.flags = 0;
     CHECKCALL(vkCreateFence,
               device, &fence_info, nullptr, &staging_fence);
+    ++fence_count;
 
     VkSubmitInfo submit_info{};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -1569,7 +1776,7 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
     return result;
 }
 
-void Context::DestroyTexture(Texture const& _texture) const
+void Context::DestroyTexture(Texture const& _texture)
 {
     vkDestroyImageView(device, _texture.view, nullptr);
     vkDestroyImage(device, _texture.image, nullptr);
@@ -1707,6 +1914,7 @@ void Context::TryScheduledRoutines()
             continue;
 
         vkDestroyFence(device, fence, nullptr);
+        --fence_count;
 #if 0
         std::cout << "[PollFences] destroying fence " << std::hex
                   << fence << std::dec << std::endl;
@@ -1739,6 +1947,7 @@ void Context::WaitScheduledRoutines()
     {
         CHECKCALL(vkWaitForFences, device, 1, &fence, VK_TRUE, ~0ull);
         vkDestroyFence(device, fence, nullptr);
+        --fence_count;
         std::cout << "[WaitFences] destroying fence " << std::hex
                   << fence << std::dec << std::endl;
     }
@@ -2142,9 +2351,11 @@ DispatchContext::ClearStaticRuntime()
 
             for (StageBindingGroupStatic& group : stage_runtime.binding_groups)
             {
-                vulkan->DestroyDescriptorPool(group.pool);
-                group.pool.pool = VK_NULL_HANDLE;
-                group.pool.layout = VK_NULL_HANDLE;
+                //vulkan->DestroyDescriptorPool(group.pool);
+                //group.pool.pool = VK_NULL_HANDLE;
+                //group.pool.layout = VK_NULL_HANDLE;
+                vulkan->DestroyDynamicDescriptorPool(group.pool);
+                group.pool = vktk::DynamicDescriptorPool{};
             }
         }
     }
@@ -2178,22 +2389,27 @@ DispatchContext::ClearDynamicRuntime()
     for (size_t node_index = 0; node_index < nodes_dynamic.size(); ++node_index)
     {
         DispatchNodeDynamic& node = nodes_dynamic[node_index];
-        DispatchNodeStatic const& node_static = nodes_static[node_index];
+        DispatchNodeStatic& node_static = nodes_static[node_index];
 
         for (size_t stage_index = 0; stage_index < node.stages.size(); ++stage_index)
         {
             DispatchStageDynamic& stage = node.stages[stage_index];
-            DispatchStageStatic const& stage_static = node_static.stages[stage_index];
+            DispatchStageStatic& stage_static = node_static.stages[stage_index];
 
             for (size_t group_index = 0; group_index < stage.binding_groups.size(); ++group_index)
             {
                 StageBindingGroupDynamic& group = stage.binding_groups[group_index];
-                StageBindingGroupStatic const& group_static = stage_static.binding_groups[group_index];
+                StageBindingGroupStatic& group_static = stage_static.binding_groups[group_index];
 
+                for (VkDescriptorSet set : group.sets)
+                    group_static.pool.FreeDescriptorSet(set);
+
+#if 0
                 vkFreeDescriptorSets(vulkan->device,
                                      group_static.pool.pool,
                                      group.sets.size(),
                                      group.sets.data());
+#endif
                 group.sets.clear();
             }
 
@@ -2236,7 +2452,8 @@ DispatchContext::GenerateStaticRuntime()
                     });
                 }
 
-                descriptor.pool = vulkan->CreateDescriptorPool(stage.group_instance_count, bindings);
+                //descriptor.pool = vulkan->CreateDescriptorPool(stage.invocation_count, bindings);
+                descriptor.pool = vulkan->CreateDynamicDescriptorPool(bindings);
 
                 stage_static.binding_groups.push_back(descriptor);
 
@@ -2329,23 +2546,24 @@ DispatchContext::GenerateFramebufferRuntime(VkFormat const* _swapchain_format)
 }
 
 void
-DispatchContext::UpdateDynamicRuntime(bind::PNextMap const& _pNext_map)
+DispatchContext::ResetDynamicRuntime(bind::PNextMap const& _pNext_map)
 {
     ClearDynamicRuntime();
 
     for (size_t node_index = 0; node_index < graph->nodes.size(); ++node_index)
     {
         layout::DispatchNode const& node = graph->nodes[node_index];
-        DispatchNodeStatic const& node_static = nodes_static[node_index];
+        DispatchNodeStatic& node_static = nodes_static[node_index];
 
         DispatchNodeDynamic dynamic_runtime = {};
 
         for (size_t stage_index = 0; stage_index < node.sequence.size(); ++stage_index)
         {
             layout::DispatchStage const& stage = node.sequence[stage_index];
-            DispatchStageStatic const& stage_static = node_static.stages[stage_index];
+            DispatchStageStatic& stage_static = node_static.stages[stage_index];
 
             DispatchStageDynamic stage_dynamic = {};
+            stage_dynamic.invocation_count = stage.invocation_count;
 
             std::vector<bind::PNextEntry> stage_pnexts = {};
             if (_pNext_map.count(stage.name))
@@ -2353,10 +2571,10 @@ DispatchContext::UpdateDynamicRuntime(bind::PNextMap const& _pNext_map)
 
             for (uint32_t group_index = 0u; group_index < (uint32_t)stage.binding_groups.size(); ++group_index)
             {
-                StageBindingGroupStatic const& binding_group_static = stage_static.binding_groups[group_index];
+                StageBindingGroupStatic& binding_group_static = stage_static.binding_groups[group_index];
 
                 StageBindingGroupDynamic binding_group_dynamic = {};
-                binding_group_dynamic.sets.resize(stage.group_instance_count);
+                binding_group_dynamic.sets.resize(stage_dynamic.invocation_count);
 
                 void* pnext_begin = nullptr;
 
@@ -2381,15 +2599,20 @@ DispatchContext::UpdateDynamicRuntime(bind::PNextMap const& _pNext_map)
                     }
                 }
 
+                for (uint32_t index = 0; index < stage_dynamic.invocation_count; ++index)
+                    binding_group_dynamic.sets[index] = binding_group_static.pool.AllocateDescriptorSet(pnext_begin);
+
+#if 0
                 VkDescriptorSetAllocateInfo descset_allocate{};
                 descset_allocate.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
                 descset_allocate.pNext = pnext_begin;
                 descset_allocate.descriptorPool = binding_group_static.pool.pool;
                 descset_allocate.descriptorSetCount = 1u;
                 descset_allocate.pSetLayouts = &binding_group_static.pool.layout;
-                for (uint32_t index = 0; index < stage.group_instance_count; ++index)
+                for (uint32_t index = 0; index < stage.invocation_count; ++index)
                     CHECKCALL(vkAllocateDescriptorSets, vulkan->device,
                               &descset_allocate, &binding_group_dynamic.sets[index]);
+#endif
 
                 stage_dynamic.binding_groups.push_back(binding_group_dynamic);
             }
@@ -2446,6 +2669,24 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
         vkCmdSetViewport(_command_buffer, 0, 1, &viewport);
         vkCmdSetScissor(_command_buffer, 0, 1, &scissor);
 
+        for (uint32_t stage_index = 0u;
+             stage_index < (uint32_t)node_info.sequence.size();
+             ++stage_index)
+        {
+            if (stage_index >= bindings.stages.size())
+                break;
+
+            for (auto&& barrier : bindings.stages[stage_index].buffer_barriers)
+                if (barrier.second.first.stage)
+                {
+                    _command_buffer.BufferTransitions(barrier.second.first.stage,
+                                                      barrier.second.second.stage,
+                                                      {{ barrier.first,
+                                                           barrier.second.first.access,
+                                                           barrier.second.second.access }});
+                }
+        }
+
         VkRenderPassBeginInfo rp_begin_info{};
         rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         rp_begin_info.pNext = nullptr;
@@ -2465,16 +2706,18 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                               VK_PIPELINE_BIND_POINT_GRAPHICS,
                               framebuffer.stages[stage_index]);
 
-            for (uint32_t dispatch_index = 0u;
-                 dispatch_index < node_info.sequence[stage_index].group_instance_count;
-                 ++dispatch_index)
+            for (uint32_t invoc_index = 0u;
+                 invoc_index < dynamic.stages[stage_index].invocation_count;
+                 ++invoc_index)
             {
+                bind::DispatchInvocation const& invocation = bindings.stages[stage_index].invocations[invoc_index];
+
                 for (uint32_t group_index = 0u;
                      group_index < (uint32_t)node_info.sequence[stage_index].binding_groups.size();
                      ++group_index)
                 {
                     VkDescriptorSet descset =
-                        dynamic.stages[stage_index].binding_groups[group_index].sets[dispatch_index];
+                        dynamic.stages[stage_index].binding_groups[group_index].sets[invoc_index];
                     vkCmdBindDescriptorSets(_command_buffer,
                                             VK_PIPELINE_BIND_POINT_GRAPHICS,
                                             runtime.stages[stage_index].pipeline_layout,
@@ -2491,7 +2734,7 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                         node_info.sequence[stage_index].push_constants[range_index];
                     void* memory = bindings
                         .stages[stage_index]
-                        .instances[dispatch_index]
+                        .invocations[invoc_index]
                         .push_constants[range_index].get();
                     vkCmdPushConstants(_command_buffer,
                                        runtime.stages[stage_index].pipeline_layout,
@@ -2501,17 +2744,41 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                                        memory);
                 }
 
-                bind::GraphicsCommand const& graphics_command =
-                    bindings.stages[stage_index].instances[dispatch_index].graphics;
+                for (uint32_t vertex_input_index = 0;
+                     vertex_input_index < (uint32_t)invocation.vertex_inputs.size();
+                     ++vertex_input_index)
+                {
+                    bind::VertexInput const& binding = invocation.vertex_inputs[vertex_input_index];
+                    if (binding.buffer == VK_NULL_HANDLE)
+                        continue;
+
+                    vkCmdBindVertexBuffers(_command_buffer, vertex_input_index, 1,
+                                           &binding.buffer, &binding.offset);
+                }
+
+                bool indexed_draw = (invocation.index_input.buffer != VK_NULL_HANDLE);
+                if (indexed_draw)
+                    vkCmdBindIndexBuffer(_command_buffer,
+                                         invocation.index_input.buffer,
+                                         invocation.index_input.offset,
+                                         VK_INDEX_TYPE_UINT32);
+
+                bind::GraphicsCommand const& graphics_command = invocation.graphics;
 
                 switch(graphics_command.command)
                 {
                 case bind::DispatchCommand_Draw:
                 {
-                    vkCmdDraw(_command_buffer,
-                              graphics_command.vertex_count,
-                              graphics_command.instance_count,
-                              0, 0);
+                    if (!indexed_draw)
+                        vkCmdDraw(_command_buffer,
+                                  graphics_command.vertex_count,
+                                  graphics_command.instance_count,
+                                  0, 0);
+                    else
+                        vkCmdDrawIndexed(_command_buffer,
+                                         graphics_command.vertex_count,
+                                         graphics_command.instance_count,
+                                         0, 0, 0);
                 } break;
                 default: break;
                 }
@@ -2521,6 +2788,139 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
         vkCmdEndRenderPass(_command_buffer);
     }
 }
+
+
+void
+DispatchContext::UpdateDynamicInvocationCount(layout::DispatchNode const* _node,
+                                              uint32_t _stage_index,
+                                              uint32_t _invocation_count)
+{
+    uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
+    DispatchNodeDynamic& node_runtime = nodes_dynamic[node_index];
+    DispatchStageDynamic& stage_runtime = node_runtime.stages[_stage_index];
+    DispatchNodeStatic& node_static = nodes_static[node_index];
+    DispatchStageStatic& stage_static = node_static.stages[_stage_index];
+    layout::DispatchStage const& stage_layout = _node->sequence[_stage_index];
+    std::string const& stage_name = stage_layout.name;
+
+    uint32_t requested_count = stage_layout.invocation_count + _invocation_count;
+    if (requested_count == stage_runtime.invocation_count)
+        return;
+
+    for (uint32_t group_index = 0u; group_index < (uint32_t)stage_layout.binding_groups.size(); ++group_index)
+    {
+        StageBindingGroupDynamic& group_runtime = stage_runtime.binding_groups[group_index];
+        StageBindingGroupStatic& group_static = stage_static.binding_groups[group_index];
+
+        if (requested_count > stage_runtime.invocation_count)
+        {
+            group_runtime.sets.reserve(requested_count);
+            for (uint32_t index = stage_runtime.invocation_count-1; index < requested_count; ++index)
+                group_runtime.sets.push_back(group_static.pool.AllocateDescriptorSet());
+        }
+        else
+        {
+            for (uint32_t index = requested_count-1; index < stage_runtime.invocation_count; ++index)
+                group_static.pool.FreeDescriptorSet(group_runtime.sets[index]);
+        }
+    }
+
+    stage_runtime.invocation_count = requested_count;
+}
+
+void
+DispatchContext::ReserveInvocations(layout::DispatchNode const* _node,
+                                    uint32_t _stage_index,
+                                    uint32_t _invocation_count,
+                                    bind::PNextMap const& _pNext_map)
+{
+    uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
+    DispatchNodeDynamic& node_runtime = nodes_dynamic[node_index];
+    DispatchStageDynamic& stage_runtime = node_runtime.stages[_stage_index];
+    DispatchNodeStatic& node_static = nodes_static[node_index];
+    DispatchStageStatic& stage_static = node_static.stages[_stage_index];
+    layout::DispatchStage const& stage_layout = _node->sequence[_stage_index];
+    std::string const& stage_name = stage_layout.name;
+
+    std::vector<bind::PNextEntry> stage_pnexts = {};
+    if (_pNext_map.count(stage_name))
+        stage_pnexts = _pNext_map.at(stage_name);
+
+    stage_runtime.invocation_count += _invocation_count;
+    for (uint32_t group_index = 0u; group_index < (uint32_t)stage_layout.binding_groups.size(); ++group_index)
+    {
+        StageBindingGroupDynamic& group_runtime = stage_runtime.binding_groups[group_index];
+        StageBindingGroupStatic& group_static = stage_static.binding_groups[group_index];
+
+        void *pnext_begin = nullptr;
+
+        VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc;
+        {
+            auto group_pnext_it = std::find_if(
+                stage_pnexts.begin(), stage_pnexts.end(),
+                [group_index](bind::PNextEntry const& entry) {
+                    return entry.binding_group_index == group_index;
+                });
+
+            if (group_pnext_it != stage_pnexts.end())
+            {
+                void* desc_count_alloc_ptr = vktk::PNextLookup(
+                    (VkBaseOutStructure*)group_pnext_it->pnext,
+                    VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO);
+                desc_count_alloc = desc_count_alloc_ptr
+                    ? *(VkDescriptorSetVariableDescriptorCountAllocateInfo const*)desc_count_alloc_ptr
+                    : VkDescriptorSetVariableDescriptorCountAllocateInfo{};
+                desc_count_alloc.pNext = nullptr;
+                pnext_begin = desc_count_alloc_ptr ? &desc_count_alloc : nullptr;
+            }
+        }
+
+        group_runtime.sets.reserve(group_runtime.sets.size() + _invocation_count);
+        for (uint32_t index = 0; index < _invocation_count; ++index)
+            group_runtime.sets.push_back(group_static.pool.AllocateDescriptorSet(pnext_begin));
+    }
+}
+
+void
+DispatchContext::BindBarrier(layout::DispatchNode const* _node,
+                             uint32_t _stage_index,
+                             bind::ResourceBarrier const& _barrier)
+{
+    uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
+    if (nodes_bindings.size() < node_index+1)
+        nodes_bindings.resize(node_index+1);
+
+    bind::DispatchNode& node_bindings = nodes_bindings[node_index];
+    if (node_bindings.stages.size() < _stage_index+1)
+        node_bindings.stages.resize(_stage_index+1);
+
+    bind::DispatchStage& stage_bindings = node_bindings.stages[_stage_index];
+    stage_bindings.barriers.push_back(_barrier);
+
+    if (_barrier.type == bind::BufferResource)
+        stage_bindings.buffer_barriers[_barrier.buffer].first = bind::AccessInfo{
+            _barrier.stage,
+            _barrier.access
+        };
+}
+
+void
+DispatchContext::ClearStageBarriers(layout::DispatchNode const* _node,
+                                    uint32_t _stage_index)
+{
+    uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
+    if (nodes_bindings.size() < node_index+1)
+        nodes_bindings.resize(node_index+1);
+
+    bind::DispatchNode& node_bindings = nodes_bindings[node_index];
+    if (node_bindings.stages.size() < _stage_index+1)
+        node_bindings.stages.resize(_stage_index+1);
+
+    bind::DispatchStage& stage_bindings = node_bindings.stages[_stage_index];
+    stage_bindings.barriers.clear();
+    stage_bindings.buffer_barriers.clear();
+}
+
 
 void
 DispatchContext::BindSwapchain(layout::DispatchNode const* _node,
@@ -2575,7 +2975,7 @@ DispatchContext::BindFramebufferArea(layout::DispatchNode const* _node,
 void
 DispatchContext::BindGraphicsCommand(layout::DispatchNode const* _node,
                                      uint32_t _stage_index,
-                                     uint32_t _instance_index,
+                                     uint32_t _invoc_index,
                                      bind::GraphicsCommand const& _command)
 {
     uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
@@ -2585,16 +2985,75 @@ DispatchContext::BindGraphicsCommand(layout::DispatchNode const* _node,
     bind::DispatchNode& node_bindings = nodes_bindings[node_index];
     if (node_bindings.stages.size() < _stage_index+1)
         node_bindings.stages.resize(_stage_index+1);
-    if (node_bindings.stages[_stage_index].instances.size() < _instance_index+1)
-        node_bindings.stages[_stage_index].instances.resize(_instance_index+1);
+    if (node_bindings.stages[_stage_index].invocations.size() < _invoc_index+1)
+        node_bindings.stages[_stage_index].invocations.resize(_invoc_index+1);
 
-    bind::GraphicsCommand& graphics = node_bindings.stages[_stage_index].instances[_instance_index].graphics;
+    bind::GraphicsCommand& graphics = node_bindings.stages[_stage_index].invocations[_invoc_index].graphics;
     graphics = _command;
+}
+
+void
+DispatchContext::BindVertexInput(layout::BindingPoint const& _location,
+                                 uint32_t _invoc_index,
+                                 bind::VertexInput const& _vertex_input)
+{
+    layout::DispatchStage const& stage = _location.node->sequence[_location.stage_index];
+
+    uint32_t node_index = (uint32_t)(_location.node - graph->nodes.data());
+    if (nodes_bindings.size() < node_index+1)
+        nodes_bindings.resize(node_index+1);
+
+    bind::DispatchNode& node_bindings = nodes_bindings[node_index];
+    if (node_bindings.stages.size() < _location.stage_index+1)
+        node_bindings.stages.resize(_location.stage_index+1);
+    if (node_bindings.stages[_location.stage_index].invocations.size() < _invoc_index+1)
+        node_bindings.stages[_location.stage_index].invocations.resize(_invoc_index+1);
+
+    bind::DispatchStage& stage_bindings = node_bindings.stages[_location.stage_index];
+    bind::DispatchInvocation& invocation = stage_bindings.invocations[_invoc_index];
+
+    if (invocation.vertex_inputs.size() < _location.vertex_input.binding_index+1)
+        invocation.vertex_inputs.resize(_location.vertex_input.binding_index+1);
+    invocation.vertex_inputs[_location.vertex_input.binding_index] = _vertex_input;
+
+    stage_bindings.buffer_barriers[_vertex_input.buffer].second = bind::AccessInfo{
+        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+        VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT
+    };
+}
+
+void
+DispatchContext::BindIndexInput(layout::DispatchNode const* _node,
+                                uint32_t _stage_index,
+                                uint32_t _invoc_index,
+                                bind::IndexInput const& _index_input)
+{
+    layout::DispatchStage const& stage = _node->sequence[_stage_index];
+
+    uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
+    if (nodes_bindings.size() < node_index+1)
+        nodes_bindings.resize(node_index+1);
+
+    bind::DispatchNode& node_bindings = nodes_bindings[node_index];
+    if (node_bindings.stages.size() < _stage_index+1)
+        node_bindings.stages.resize(_stage_index+1);
+    if (node_bindings.stages[_stage_index].invocations.size() < _invoc_index+1)
+        node_bindings.stages[_stage_index].invocations.resize(_invoc_index+1);
+
+    bind::DispatchStage& stage_bindings = node_bindings.stages[_stage_index];
+    bind::DispatchInvocation& invocation = stage_bindings.invocations[_invoc_index];
+
+    invocation.index_input = _index_input;
+
+    stage_bindings.buffer_barriers[_index_input.buffer].second = bind::AccessInfo{
+        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+        VK_ACCESS_INDEX_READ_BIT
+    };
 }
 
 void*
 DispatchContext::BindPushConstants(layout::BindingPoint const& _location,
-                                   uint32_t _instance_index)
+                                   uint32_t _invoc_index)
 {
     layout::DispatchStage const& stage = _location.node->sequence[_location.stage_index];
     layout::PushConstantRange const& range = stage.push_constants[_location.push_constants.range_index];
@@ -2606,22 +3065,22 @@ DispatchContext::BindPushConstants(layout::BindingPoint const& _location,
     bind::DispatchNode& node_bindings = nodes_bindings[node_index];
     if (node_bindings.stages.size() < _location.stage_index+1)
         node_bindings.stages.resize(_location.stage_index+1);
-    if (node_bindings.stages[_location.stage_index].instances.size() < _instance_index+1)
-        node_bindings.stages[_location.stage_index].instances.resize(_instance_index+1);
+    if (node_bindings.stages[_location.stage_index].invocations.size() < _invoc_index+1)
+        node_bindings.stages[_location.stage_index].invocations.resize(_invoc_index+1);
 
     bind::DispatchStage& stage_bindings = node_bindings.stages[_location.stage_index];
-    bind::DispatchInstance& instance = stage_bindings.instances[_instance_index];
+    bind::DispatchInvocation& invocation = stage_bindings.invocations[_invoc_index];
 
-    if (instance.push_constants.size() < _location.push_constants.range_index+1)
-        instance.push_constants.resize(_location.push_constants.range_index+1);
-    instance.push_constants[_location.push_constants.range_index].reset(new uint8_t[range.size]);
+    if (invocation.push_constants.size() < _location.push_constants.range_index+1)
+        invocation.push_constants.resize(_location.push_constants.range_index+1);
+    invocation.push_constants[_location.push_constants.range_index].reset(new uint8_t[range.size]);
 
-    return instance.push_constants[_location.push_constants.range_index].get();
+    return invocation.push_constants[_location.push_constants.range_index].get();
 }
 
 VkWriteDescriptorSet
 DispatchContext::BindShaderResource(layout::BindingPoint const& _location,
-                                    uint32_t _instance_index,
+                                    uint32_t _invoc_index,
                                     bind::ShaderResource const& _resources)
 {
     uint32_t node_index = (uint32_t)(_location.node - graph->nodes.data());
@@ -2633,10 +3092,21 @@ DispatchContext::BindShaderResource(layout::BindingPoint const& _location,
     layout::StageBindingGroup const& binding_group = stage.binding_groups[_location.shader.group_index];
     layout::StageBinding const& binding = binding_group.bindings[_location.shader.binding_index];
 
+    if (nodes_bindings.size() < node_index+1)
+        nodes_bindings.resize(node_index+1);
+
+    bind::DispatchNode& node_bindings = nodes_bindings[node_index];
+    if (node_bindings.stages.size() < _location.stage_index+1)
+        node_bindings.stages.resize(_location.stage_index+1);
+    if (node_bindings.stages[_location.stage_index].invocations.size() < _invoc_index+1)
+        node_bindings.stages[_location.stage_index].invocations.resize(_invoc_index+1);
+
+    bind::DispatchStage& stage_bindings = node_bindings.stages[_location.stage_index];
+
     VkWriteDescriptorSet desc_write = {};
     desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     desc_write.pNext = nullptr;
-    desc_write.dstSet = group_runtime.sets[_instance_index];
+    desc_write.dstSet = group_runtime.sets[_invoc_index];
     desc_write.dstBinding = _location.shader.binding_index;
     desc_write.dstArrayElement = 0u;
     desc_write.descriptorCount = _resources.descriptor_count;
@@ -2644,6 +3114,29 @@ DispatchContext::BindShaderResource(layout::BindingPoint const& _location,
     desc_write.pImageInfo = _resources.images;
     desc_write.pBufferInfo = _resources.buffers;
     desc_write.pTexelBufferView = nullptr;
+
+    switch (binding.type)
+    {
+    case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+    case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+        for (uint32_t desc_index = 0u; desc_index < _resources.descriptor_count; ++desc_index)
+            stage_bindings.buffer_barriers[_resources.buffers[desc_index].buffer].second = bind::AccessInfo{
+                binding.stages,
+                VK_ACCESS_UNIFORM_READ_BIT
+            };
+        break;
+
+    case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+    case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+        for (uint32_t desc_index = 0u; desc_index < _resources.descriptor_count; ++desc_index)
+            stage_bindings.buffer_barriers[_resources.buffers[desc_index].buffer].second = bind::AccessInfo{
+                binding.stages,
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT
+            };
+        break;
+    default:
+        break;
+    }
 
     return desc_write;
 }

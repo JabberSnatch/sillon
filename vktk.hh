@@ -1,8 +1,10 @@
 #pragma once
 
+#include <cassert>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <tuple>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -12,12 +14,28 @@
 
 #include "toolkits/numtk.hh"
 
+#ifdef NDEBUG
+
 #define CHECKCALL(func, ...)                                            \
     {                                                                   \
         VkResult const vkr = func(__VA_ARGS__);                         \
         if (vkr != VK_SUCCESS)                                          \
             std::cout << #func " " << vktk::VkResultToStr(vkr) << std::endl; \
     }
+
+#else
+
+#define CHECKCALL(func, ...)                                            \
+    {                                                                   \
+        VkResult const vkr = func(__VA_ARGS__);                         \
+        if (vkr != VK_SUCCESS)                                          \
+        {                                                               \
+            std::cout << #func " " << vktk::VkResultToStr(vkr) << std::endl; \
+            assert(false);                                              \
+        }                                                               \
+    }
+
+#endif
 
 #define GetInstanceProcAddress(proc, inst, table)                       \
     table.proc = (PFN_vk##proc)vkGetInstanceProcAddr(inst, "vk" #proc);
@@ -65,6 +83,7 @@ struct Allocation
     VkDeviceMemory memory;
     VkDeviceSize offset;
     VkDeviceSize size;
+    void* map;
 };
 
 struct Allocator
@@ -80,16 +99,20 @@ struct Allocator
         uint32_t memory_type;
         std::vector<VkDeviceMemory> chunks; // 128 MB
         std::vector<BlockRange> free_list;
+        std::vector<void*> maps;
     };
     VkDevice device;
     VkPhysicalDeviceMemoryProperties memory_properties;
     std::vector<ChunkStorage> heaps = {};
+    uint64_t allocated_memory = 0ull;
 
-    Allocation Alloc(VkMemoryPropertyFlags _memory_flags,
-                     uint32_t _size);
-    Allocation Alloc(VkMemoryPropertyFlags _memory_flags,
-                     uint32_t _size,
-                     VkDeviceSize _alignment);
+    Allocation Allocate(VkMemoryPropertyFlags _memory_flags,
+                        uint32_t _size);
+    Allocation Allocate(VkMemoryPropertyFlags _memory_flags,
+                        uint32_t _size,
+                        VkDeviceSize _alignment);
+
+    void Free(Allocation const& _alloc);
 
     uint32_t SelectMemoryType(VkMemoryPropertyFlags _flags, uint32_t _required_size);
     void AllocateChunk(ChunkStorage& _storage);
@@ -115,7 +138,7 @@ struct Texture {
 
 struct Swapchain {
     VkExtent2D size = { 0, 0 };
-    Context const* vulkan;
+    Context* vulkan;
 
     VkFormat format;
     VkRenderPass render_pass;
@@ -134,6 +157,23 @@ struct Swapchain {
 struct DescriptorPool {
     VkDescriptorPool pool;
     VkDescriptorSetLayout layout;
+};
+
+struct DynamicDescriptorPool {
+    static constexpr uint32_t kPoolSize = 128;
+
+    struct vktk::Context* context;
+    VkDescriptorSetLayout layout;
+    std::vector<VkDescriptorPool> pools;
+    std::vector<std::unordered_set<VkDescriptorSet>> sets;
+    std::vector<uint32_t> set_counts;
+    uint32_t first_free_pool = ~0u;
+    uint32_t total_set_count = 0;
+
+    std::vector<VkDescriptorPoolSize> sizes;
+
+    VkDescriptorSet AllocateDescriptorSet(void const* _pNext = nullptr);
+    void FreeDescriptorSet(VkDescriptorSet _set);
 };
 
 struct BufferTransition {
@@ -173,11 +213,26 @@ struct CommandBuffer {
     std::vector<Buffer> pending_destroys = {};
     operator VkCommandBuffer() { return handle; }
 
+    struct SubmitInfo {
+        VkSemaphore* signal_semaphore = nullptr;
+        VkSemaphore const* wait_semaphores = nullptr;
+        VkPipelineStageFlags const* wait_stages = nullptr;
+        uint32_t wait_count = 0u;
+        VkFence* signal_fence;
+    };
+
     void Submit(VkSemaphore* _signal_semaphore = nullptr,
                 VkSemaphore const* _wait_semaphores = nullptr,
                 VkPipelineStageFlags const* _wait_stages = nullptr,
                 uint32_t _wait_count = 0u,
                 VkFence* _signal_fence = nullptr);
+    void Submit(SubmitInfo const& _submit_info) {
+        Submit(_submit_info.signal_semaphore,
+               _submit_info.wait_semaphores,
+               _submit_info.wait_stages,
+               _submit_info.wait_count,
+               _submit_info.signal_fence);
+    }
 
     void Begin();
 
@@ -314,6 +369,9 @@ struct Context
         std::vector<DescriptorSetBindingPoint> const& _bindings);
     void DestroyDescriptorPool(DescriptorPool const& _pool) const;
 
+    DynamicDescriptorPool CreateDynamicDescriptorPool(std::vector<DescriptorSetBindingPoint> const& _bindings);
+    void DestroyDynamicDescriptorPool(DynamicDescriptorPool const& _pool) const;
+
     Buffer CreateBuffer(uint32_t _size,
                         VkBufferUsageFlags _usage,
                         VkMemoryPropertyFlags _memory_flags =
@@ -323,9 +381,8 @@ struct Context
                         VkBufferUsageFlags _usage,
                         std::function<void(void*)> const& _upload_callback,
                         VkMemoryPropertyFlags _memory_flags =
-                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
-                        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    void DestroyBuffer(Buffer const& _buffer) const;
+                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    void DestroyBuffer(Buffer const& _buffer);
 
     Texture CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
                           VkImageType _type, VkFormat _format, VkImageUsageFlags _usage);
@@ -337,7 +394,7 @@ struct Context
     Texture CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
                           VkImageType _type, VkFormat _format, VkImageUsageFlags _usage,
                           std::function<void(void*)> const& _upload_callback);
-    void DestroyTexture(Texture const& _texture) const;
+    void DestroyTexture(Texture const& _texture);
 
     VkImageView CreateImageView(Texture const& _texture) const;
 
@@ -356,6 +413,8 @@ struct Context
     Queue copy_queue = {};
 
     Allocator allocator = {};
+
+    uint32_t fence_count = 0;
 
     using SynchronisedRoutine = std::function<void(Context&)>;
     void ScheduleRoutine(VkFence _fence, SynchronisedRoutine _routine);
@@ -407,7 +466,7 @@ struct GraphicsStage {
 struct DispatchStage {
     std::string name;
     std::vector<ShaderStage> shaders;
-    uint32_t group_instance_count;
+    uint32_t invocation_count;
     std::vector<StageBindingGroup> binding_groups;
     std::vector<PushConstantRange> push_constants;
     GraphicsStage graphics;
@@ -456,6 +515,10 @@ struct PushConstantsLocation {
     uint32_t range_index;
 };
 
+struct VertexInputLocation {
+    uint32_t binding_index;
+};
+
 enum BindingType {
     BindingType_Shader,
     BindingType_Framebuffer,
@@ -472,6 +535,7 @@ struct BindingPoint {
         ShaderLocation shader;
         FramebufferLocation framebuffer;
         PushConstantsLocation push_constants;
+        VertexInputLocation vertex_input;
     };
 };
 
@@ -522,6 +586,36 @@ struct ShaderResource {
     };
 };
 
+struct VertexInput {
+    VkBuffer buffer;
+    VkDeviceSize offset;
+};
+
+struct IndexInput {
+    VkBuffer buffer;
+    VkDeviceSize offset;
+};
+
+enum ResourceType {
+    BufferResource,
+    ImageResource
+};
+
+struct ResourceBarrier {
+    ResourceType type;
+    VkPipelineStageFlags stage;
+    VkAccessFlags access;
+    union {
+        VkBuffer buffer;
+        VkImage image;
+    };
+};
+
+struct AccessInfo {
+    VkPipelineStageFlags stage;
+    VkAccessFlags access;
+};
+
 enum DispatchCommand {
     DispatchCommand_Draw,
     DispatchCommand_DrawIndexed,
@@ -539,13 +633,23 @@ struct FramebufferArea {
     numtk::bounds2f viewport;
 };
 
-struct DispatchInstance {
+struct DispatchInvocation {
     GraphicsCommand graphics;
     std::vector<std::unique_ptr<uint8_t[]>> push_constants;
+    std::vector<VertexInput> vertex_inputs;
+    IndexInput index_input;
+
+    DispatchInvocation() = default;
+    DispatchInvocation(DispatchInvocation&&) = default;
 };
 
 struct DispatchStage {
-    std::vector<DispatchInstance> instances;
+    std::vector<DispatchInvocation> invocations;
+    std::vector<ResourceBarrier> barriers;
+    std::unordered_map<VkBuffer, std::pair<AccessInfo, AccessInfo>> buffer_barriers;
+
+    DispatchStage() = default;
+    DispatchStage(DispatchStage&&) = default;
 };
 
 struct DispatchNode {
@@ -567,7 +671,8 @@ namespace runtime
 {
 
 struct StageBindingGroupStatic {
-    vktk::DescriptorPool pool;
+    //vktk::DescriptorPool pool;
+    vktk::DynamicDescriptorPool pool;
 };
 
 struct DispatchStageStatic {
@@ -593,6 +698,7 @@ struct StageBindingGroupDynamic {
 };
 
 struct DispatchStageDynamic {
+    uint32_t invocation_count;
     std::vector<StageBindingGroupDynamic> binding_groups;
 };
 
@@ -603,6 +709,7 @@ struct DispatchNodeDynamic {
 struct DispatchContext {
     vktk::Context* vulkan;
     layout::DispatchGraph const* graph;
+
     std::vector<DispatchNodeStatic> nodes_static;
     std::vector<DispatchNodeFramebuffer> nodes_framebuffer;
     std::vector<DispatchNodeDynamic> nodes_dynamic;
@@ -614,8 +721,23 @@ struct DispatchContext {
 
     void GenerateStaticRuntime();
     void GenerateFramebufferRuntime(VkFormat const* _swapchain_format = nullptr);
-    void UpdateDynamicRuntime(bind::PNextMap const& _pNext_map = {});
+    void ResetDynamicRuntime(bind::PNextMap const& _pNext_map = {});
     void Dispatch(vktk::CommandBuffer& _command_buffer) const;
+
+    void UpdateDynamicInvocationCount(layout::DispatchNode const* _node,
+                                      uint32_t _stage_index,
+                                      uint32_t _invocation_count);
+
+    void ReserveInvocations(layout::DispatchNode const* _node,
+                            uint32_t _stage_index,
+                            uint32_t _invocation_count,
+                            bind::PNextMap const& _pNext_map = {});
+
+    void BindBarrier(layout::DispatchNode const* _node,
+                     uint32_t _stage_index,
+                     bind::ResourceBarrier const& _barrier);
+    void ClearStageBarriers(layout::DispatchNode const* _node,
+                            uint32_t _stage_index);
 
     void BindSwapchain(layout::DispatchNode const* _node,
                        vktk::Swapchain const& _swapchain);
@@ -626,13 +748,20 @@ struct DispatchContext {
                              bind::FramebufferArea const& _area);
     void BindGraphicsCommand(layout::DispatchNode const* _node,
                              uint32_t _stage_index,
-                             uint32_t _instance_index,
+                             uint32_t _invoc_index,
                              bind::GraphicsCommand const& _command);
 
+    void BindVertexInput(layout::BindingPoint const& _location,
+                         uint32_t _invoc_index,
+                         bind::VertexInput const& _vertex_input);
+    void BindIndexInput(layout::DispatchNode const* _node,
+                        uint32_t _stage_index,
+                        uint32_t _invoc_index,
+                        bind::IndexInput const& _index_input);
     void* BindPushConstants(layout::BindingPoint const& _location,
-                            uint32_t _instance_index);
+                            uint32_t _invoc_index);
     VkWriteDescriptorSet BindShaderResource(layout::BindingPoint const& _location,
-                                            uint32_t _instance_index,
+                                            uint32_t _invoc_index,
                                             bind::ShaderResource const& _resources);
 };
 
