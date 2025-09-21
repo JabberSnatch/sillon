@@ -2783,6 +2783,45 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
     }
 }
 
+
+void
+DispatchContext::UpdateDynamicInvocationCount(layout::DispatchNode const* _node,
+                                              uint32_t _stage_index,
+                                              uint32_t _invocation_count)
+{
+    uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
+    DispatchNodeDynamic& node_runtime = nodes_dynamic[node_index];
+    DispatchStageDynamic& stage_runtime = node_runtime.stages[_stage_index];
+    DispatchNodeStatic& node_static = nodes_static[node_index];
+    DispatchStageStatic& stage_static = node_static.stages[_stage_index];
+    layout::DispatchStage const& stage_layout = _node->sequence[_stage_index];
+    std::string const& stage_name = stage_layout.name;
+
+    uint32_t requested_count = stage_layout.invocation_count + _invocation_count;
+    if (requested_count == stage_runtime.invocation_count)
+        return;
+
+    for (uint32_t group_index = 0u; group_index < (uint32_t)stage_layout.binding_groups.size(); ++group_index)
+    {
+        StageBindingGroupDynamic& group_runtime = stage_runtime.binding_groups[group_index];
+        StageBindingGroupStatic& group_static = stage_static.binding_groups[group_index];
+
+        if (requested_count > stage_runtime.invocation_count)
+        {
+            group_runtime.sets.reserve(requested_count);
+            for (uint32_t index = stage_runtime.invocation_count-1; index < requested_count; ++index)
+                group_runtime.sets.push_back(group_static.pool.AllocateDescriptorSet());
+        }
+        else
+        {
+            for (uint32_t index = requested_count-1; index < stage_runtime.invocation_count; ++index)
+                group_static.pool.FreeDescriptorSet(group_runtime.sets[index]);
+        }
+    }
+
+    stage_runtime.invocation_count = requested_count;
+}
+
 void
 DispatchContext::ReserveInvocations(layout::DispatchNode const* _node,
                                     uint32_t _stage_index,
@@ -2858,6 +2897,24 @@ DispatchContext::BindBarrier(layout::DispatchNode const* _node,
             _barrier.access
         };
 }
+
+void
+DispatchContext::ClearStageBarriers(layout::DispatchNode const* _node,
+                                    uint32_t _stage_index)
+{
+    uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
+    if (nodes_bindings.size() < node_index+1)
+        nodes_bindings.resize(node_index+1);
+
+    bind::DispatchNode& node_bindings = nodes_bindings[node_index];
+    if (node_bindings.stages.size() < _stage_index+1)
+        node_bindings.stages.resize(_stage_index+1);
+
+    bind::DispatchStage& stage_bindings = node_bindings.stages[_stage_index];
+    stage_bindings.barriers.clear();
+    stage_bindings.buffer_barriers.clear();
+}
+
 
 void
 DispatchContext::BindSwapchain(layout::DispatchNode const* _node,

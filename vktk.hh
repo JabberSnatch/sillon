@@ -724,6 +724,10 @@ struct DispatchContext {
     void ResetDynamicRuntime(bind::PNextMap const& _pNext_map = {});
     void Dispatch(vktk::CommandBuffer& _command_buffer) const;
 
+    void UpdateDynamicInvocationCount(layout::DispatchNode const* _node,
+                                      uint32_t _stage_index,
+                                      uint32_t _invocation_count);
+
     void ReserveInvocations(layout::DispatchNode const* _node,
                             uint32_t _stage_index,
                             uint32_t _invocation_count,
@@ -732,6 +736,8 @@ struct DispatchContext {
     void BindBarrier(layout::DispatchNode const* _node,
                      uint32_t _stage_index,
                      bind::ResourceBarrier const& _barrier);
+    void ClearStageBarriers(layout::DispatchNode const* _node,
+                            uint32_t _stage_index);
 
     void BindSwapchain(layout::DispatchNode const* _node,
                        vktk::Swapchain const& _swapchain);

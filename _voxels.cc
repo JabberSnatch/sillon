@@ -91,8 +91,6 @@ void SparseRegionUpdateBindings(struct voxel_state_t* _state, vktk::Context* _vu
 struct voxel_state_t
 {
     guitk::Context gui_context;
-    vktk::Buffer gui_geometry;
-    vktk::Buffer gui_geometry_;
     vktk::Buffer gui_frame_indices;
     vktk::Buffer gui_frames_vertices;
     vktk::Buffer gui_frame_uv;
@@ -802,7 +800,19 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
         vktk::Texture texture = vulkan->CreateTexture(
             node_size, node_size, node_size,
             VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
-            VK_IMAGE_USAGE_SAMPLED_BIT);
+            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+
+        upload_commands.ImageTransitions(
+            VK_PIPELINE_STAGE_HOST_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            {
+                {
+                    texture.image,
+                    VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT,
+                    VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                }
+            });
 
         upload_commands.UpdateTexture(
             texture,
@@ -829,6 +839,18 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                 }
             }
         );
+
+        upload_commands.ImageTransitions(
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            {
+                {
+                    texture.image,
+                    VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    VK_IMAGE_ASPECT_COLOR_BIT
+                }
+            });
 
         package.masks.push_back(texture);
 
@@ -1584,92 +1606,21 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
             },
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-#if 0
-        std::vector<numtk::vec2f> vertices = {};
-        vertices.resize(gui_record->frames.size()*16);
-        for (uint32_t frame_index = 0u; frame_index < gui_record->frames.size(); ++frame_index)
-        {
-            guitk::Frame const& frame = gui_record->frames[frame_index];
-            numtk::vec2f* base = &vertices[frame_index*16];
-            base[0] = frame.bounds.min.cast<float>();
-            base[1] = base[0] + kBorderOffsets[0];
-            base[2] = base[0] + kBorderOffsets[1];
-            base[3] = base[0] + kBorderOffsets[2];
-
-            base[4] = numtk::vec2f{
-                (float)(frame.bounds.min.x()+frame.bounds.extent.x()),
-                (float)frame.bounds.min.y() };
-            base[5] = base[4] + kBorderOffsets[1];
-            base[6] = base[4] - kBorderOffsets[0];
-            base[7] = base[4] + kBorderOffsets[3];
-
-            base[8] = numtk::vec2f{
-                (float)frame.bounds.min.x(),
-                (float)(frame.bounds.min.y()+frame.bounds.extent.y()) };
-            base[9] = base[8] - kBorderOffsets[1];
-            base[10] = base[8] + kBorderOffsets[0];
-            base[11] = base[8] - kBorderOffsets[3];
-
-            base[12] = frame.bounds.max().cast<float>();
-            base[13] = base[12] - kBorderOffsets[0];
-            base[14] = base[12] - kBorderOffsets[1];
-            base[15] = base[12] - kBorderOffsets[2];
-        }
-#endif
-
-#if 0
-        _state->gui_geometry = _vulkan->CreateBuffer(
-            sizeof(numtk::vec2f) * 6 * gui_record->frames.size(),
-            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-            [gui_record](void* buffer){
-                numtk::vec2f* vertex_data = (numtk::vec2f*)buffer;
-                for (guitk::Frame const& frame : gui_record->frames)
-                {
-                    vertex_data[0] = frame.bounds.min.cast<float>();
-                    vertex_data[1] = numtk::vec2f{ (float)frame.bounds.min.x(), (float)(frame.bounds.min.y()+frame.bounds.extent.y()) };
-                    vertex_data[2] = frame.bounds.max().cast<float>();
-                    vertex_data[3] = numtk::vec2f{ (float)(frame.bounds.min.x()+frame.bounds.extent.x()), (float)frame.bounds.min.y() };
-                    vertex_data[4] = frame.bounds.min.cast<float>();
-                    vertex_data[5] = frame.bounds.max().cast<float>();
-                }
-            },
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-#endif
-
-        _state->gui_geometry_ = _vulkan->CreateBuffer(
-            sizeof(numtk::vec2f) * 2 * gui_record->frames.size(),
-            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-            [gui_record](void* buffer){
-                numtk::vec2f* uniform_data = (numtk::vec2f*)buffer;
-                for (uint32_t frame_index = 0u; frame_index < gui_record->frames.size(); ++frame_index)
-                {
-                    guitk::Frame const& frame = gui_record->frames[frame_index];
-                    uniform_data[0 + frame_index*2] = frame.bounds.min.cast<float>();
-                    uniform_data[1 + frame_index*2] = frame.bounds.extent.cast<float>();
-                }
-            },
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
         vkrg::layout::DispatchNode const& sparse_region_node =
             *std::find_if(_state->sparse_graph.nodes.begin(), _state->sparse_graph.nodes.end(),
                           [](vkrg::layout::DispatchNode const& node) {
                               return node.name == "SparseRegionDispatch";
                           });
 
-        static bool static_flag = false;
+        _state->sparse_runtime.UpdateDynamicInvocationCount(&sparse_region_node, 1, gui_record->frames.size());
+        _state->sparse_runtime.ClearStageBarriers(&sparse_region_node, 1);
+
         for (uint32_t index = 0u; index < (uint32_t)gui_record->frames.size(); ++index)
         {
-            if (!static_flag)
-            {
-                _state->sparse_runtime.ReserveInvocations(&sparse_region_node, 1, 1);
-
-                _state->sparse_runtime.BindGraphicsCommand(
-                    &sparse_region_node, 1, index, {
-                        vkrg::bind::DispatchCommand_Draw,
-                        6*9,//(uint32_t)gui_record->frames.size() * 6,
-                        1//(uint32_t)gui_record->frames.size()
-                    });
-            }
+            _state->sparse_runtime.BindGraphicsCommand(
+                &sparse_region_node, 1, index, {
+                    vkrg::bind::DispatchCommand_Draw, 6*9, 1
+                });
 
             {
                 _state->sparse_runtime.BindVertexInput(
@@ -1696,58 +1647,6 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                     );
             }
         }
-        static_flag = true;
-
-#if 0
-#if 0
-        _state->sparse_runtime.BindVertexInput(
-            { .node = &sparse_region_node,
-              .stage_index = 1,
-              .type = vkrg::layout::BindingType_VertexInput,
-              .vertex_input = vkrg::layout::VertexInputLocation{ 0 } },
-            0,
-            { _state->gui_geometry, 0 }
-            );
-
-        _state->sparse_runtime.BindBarrier(&sparse_region_node, 1, {
-            .type = vkrg::bind::BufferResource,
-            .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
-            .access = VK_ACCESS_TRANSFER_WRITE_BIT,
-            .buffer = _state->gui_geometry
-        });
-
-#else
-
-        {
-            VkDescriptorBufferInfo buffer_info = {};
-            buffer_info.buffer = _state->gui_geometry_;
-            buffer_info.offset = 0;
-            buffer_info.range = VK_WHOLE_SIZE;
-
-            VkWriteDescriptorSet binding =
-                _state->sparse_runtime.BindShaderResource(
-                    { .node = &sparse_region_node,
-                      .stage_index = 1,
-                      .type = vkrg::layout::BindingType_Shader,
-                      .shader = { 0, 0 }
-                    },
-                    0,
-                    vkrg::bind::ShaderResource{
-                        .descriptor_count = 1,
-                        .buffers = &buffer_info
-                    });
-
-            vkUpdateDescriptorSets(_vulkan->device, 1, &binding, 0u, nullptr);
-        }
-
-        _state->sparse_runtime.BindBarrier(&sparse_region_node, 1, {
-            .type = vkrg::bind::BufferResource,
-            .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
-            .access = VK_ACCESS_TRANSFER_WRITE_BIT,
-            .buffer = _state->gui_geometry_
-        });
-#endif
-#else
 
         _state->sparse_runtime.BindBarrier(&sparse_region_node, 1, {
             .type = vkrg::bind::BufferResource,
@@ -1769,8 +1668,6 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
             .access = VK_ACCESS_TRANSFER_WRITE_BIT,
             .buffer = _state->gui_frame_uv
         });
-#endif
-
     }
 
     std::cout << _input->time_delta << std::endl;
@@ -2156,17 +2053,20 @@ void Draw(void* _pstate,
 
     command_buffer.End();
 
-    if (_state->last_submit != VK_NULL_HANDLE)
-    {
-        _vulkan->ScheduleRoutine(_state->last_submit, [buffer = _state->gui_geometry](vktk::Context& _vulkan){
-            //_vulkan.DestroyBuffer(buffer);
-        });
-        _vulkan->ScheduleFenceDestroy(_state->last_submit);
-    }
-
     VkPipelineStageFlags wait_dst_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     command_buffer.Submit(nullptr, &_acquire_semaphore, &wait_dst_stage, 1u,
                           &_state->last_submit);
+
+    _vulkan->ScheduleRoutine(_state->last_submit, [index_buffer = _state->gui_frame_indices
+                                                   , vertex_buffer = _state->gui_frames_vertices
+                                                   , uv_buffer = _state->gui_frame_uv](vktk::Context& _vulkan) {
+        _vulkan.DestroyBuffer(index_buffer);
+        _vulkan.DestroyBuffer(vertex_buffer);
+        _vulkan.DestroyBuffer(uv_buffer);
+    });
+
+    _vulkan->ScheduleFenceDestroy(_state->last_submit);
+
 #if 0
     std::cout << "[VoxelsDraw] submitted on fence "
               << std::hex << _state->last_submit << std::dec << std::endl;
@@ -2214,12 +2114,6 @@ void Shutdown(void* _pstate,
 
     for (uint32_t index = 0; index < _state->section_textures.size(); ++index)
         _vulkan->DestroyTexture(_state->section_textures[index]);
-
-    if (_state->last_submit != VK_NULL_HANDLE)
-    {
-        _vulkan->ScheduleFenceDestroy(_state->last_submit);
-        _state->last_submit = VK_NULL_HANDLE;
-    }
 
      guitk::DeleteContext(_state->gui_context);
 }
@@ -2594,28 +2488,8 @@ vkrg::layout::DispatchStage GUIDispatchStageInfo()
             "layout(location = 0) in vec2 iVS_point;"
             "layout(location = 1) in vec2 iVS_uv;"
             "layout(location = 0) out vec2 iFS_point;"
-
             "layout(push_constant, std430) uniform PushConstants { vec2 viewport_size; vec2 frame_offset; vec2 frame_size; };"
-
-#if 0
-            "layout(std140, set = 0, binding = 0) readonly buffer Frames { vec4 frame[]; } frame_descs;"
-            "const vec2 kFactors[] = vec2[6]("
-            "vec2(0.0, 0.0),"
-            "vec2(0.0, 1.0),"
-            "vec2(1.0, 1.0),"
-            "vec2(1.0, 0.0),"
-            "vec2(0.0, 0.0),"
-            "vec2(1.0, 1.0));"
-#endif
-
             "void main() {"
-#if 0
-            "vec2 _frame_offset = frame_descs.frame[gl_InstanceIndex].xy;"
-            "vec2 _frame_size = frame_descs.frame[gl_InstanceIndex].zw;"
-            "vec2 frame_point = vec2(_frame_offset + kFactors[gl_VertexIndex]*_frame_size);"
-            "gl_Position = vec4((frame_point / viewport_size) * 2.0 - vec2(1.0), 0.0, 1.0);"
-            "iFS_point = vec3(frame_point - _frame_offset - _frame_size/2.0, float(gl_InstanceIndex));"
-#endif
             "gl_Position = vec4((iVS_point / viewport_size) * vec2(2.0, -2.0) - vec2(1.0, -1.0), 0.0, 1.0);"
             "iFS_point = iVS_uv;"
             "}"
@@ -2628,21 +2502,7 @@ vkrg::layout::DispatchStage GUIDispatchStageInfo()
             "layout(location = 0) out vec4 color;"
             "layout(push_constant, std430) uniform PushConstants { vec2 viewport_size; vec2 frame_offset; vec2 frame_size; };"
 
-#if 0
-            "layout(std140, set = 0, binding = 0) readonly buffer Frames { vec4 frame[]; } frame_descs;"
-#endif
-
             "void main() {"
-#if 0
-            "\n#define BORDER_SIZE 10.0\n"
-            "vec2 _frame_offset = frame_descs.frame[uint(iFS_point.z)].xy;"
-            "vec2 _frame_size = frame_descs.frame[uint(iFS_point.z)].zw;"
-            "vec2 frame_coords = abs(iFS_point.xy) - (_frame_size/2.0-vec2(BORDER_SIZE));"
-            "float border_distance = length(max(vec2(0.0), frame_coords));"
-            "float border_color = min(smoothstep(0.0, BORDER_SIZE/2.0, border_distance), smoothstep(BORDER_SIZE, BORDER_SIZE/2.0, border_distance));"
-            "color = vec4(border_color.xxx, 1.0);"
-#endif
-
             "vec2 frame_coords = iFS_point - vec2(0.5);"
             "float border_distance = length(frame_coords);"
             "float border_color = min(smoothstep(0.0, 0.25, border_distance), smoothstep(0.5, 0.25, border_distance));"
@@ -2653,15 +2513,6 @@ vkrg::layout::DispatchStage GUIDispatchStageInfo()
     };
 
     output.invocation_count = 0;
-
-#if 0
-    output.binding_groups.push_back(vkrg::layout::StageBindingGroup{
-        {
-            { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-              0, 1 },
-        }
-    });
-#endif
 
     output.push_constants = std::vector<vkrg::layout::PushConstantRange>{
         { VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(numtk::vec2f) * 3 }
