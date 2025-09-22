@@ -1496,11 +1496,12 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
     voxel_state_t* _state = (voxel_state_t*)_pstate;
 
     {
-        guitk::BeginRecord(_state->gui_context);
-#if 0
+        guitk::BeginRecord(_state->gui_context, _input, _past_input);
+#if 1
+        static std::vector<guitk::Frame> frames(20);
         for (uint32_t i = 0; i < 20; ++i)
         {
-            guitk::BeginFrame(_state->gui_context);
+            guitk::BeginFrame(_state->gui_context, frames[i]);
             guitk::EndFrame(_state->gui_context);
         }
 #endif
@@ -1547,7 +1548,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                     numtk::vec2f* vertices = (numtk::vec2f*)buffer;
                     for (uint32_t frame_index = 0u; frame_index < gui_record->frames.size(); ++frame_index)
                     {
-                        guitk::Frame const& frame = gui_record->frames[frame_index];
+                        guitk::FrameInfo const& frame = gui_record->frames[frame_index];
                         numtk::vec2f* base = &vertices[frame_index*16];
                         base[0] = frame.bounds.min.cast<float>();
                         base[1] = base[0] + kBorderOffsets[0];
