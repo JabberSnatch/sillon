@@ -1515,17 +1515,17 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                 VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
                 [](void* buffer) {
                     static std::vector<uint32_t> const indices = {
-                        0, 1, 2,  2, 1, 3,
-                        4, 5, 6,  6, 5, 7,
-                        8, 9, 10,  10, 9, 11,
-                        12, 13, 14,  14, 13, 15,
+                        0, 2, 1,  1, 2, 3,
+                        4, 6, 5,  5, 6, 7,
+                        8, 10, 9,  9, 10, 11,
+                        12, 14, 13,  13, 14, 15,
 
-                        3, 1, 7,  7, 1, 6,
-                        7, 5, 11,  11, 5, 10,
-                        11, 9, 15,  15, 9, 14,
-                        15, 13, 3,  3, 13, 2,
+                        3, 7, 1,  1, 7, 6,
+                        7, 11, 5,  5, 11, 10,
+                        11, 15, 9,  9, 15, 14,
+                        15, 3, 13,  13, 3, 2,
 
-                        7, 11, 3,  3, 11, 15
+                        7, 3, 11,  11, 3, 15
                     };
 
                     uint32_t* index_data = (uint32_t*)buffer;
@@ -1682,7 +1682,8 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
     if (_input->key_down[iotk::eKey::kEscape])
         return false;
 
-    if (_input->button_down & iotk::fMouseButton::kRightBtn)
+    if (!_state->current_gui_record->mouse_over &&
+        _input->button_down & iotk::fMouseButton::kRightBtn)
     {
         numtk::vec2<int32_t> last_position{ _past_input->cursor[0], _past_input->cursor[1] };
         numtk::vec2<int32_t> position{ _input->cursor[0], _input->cursor[1] };
@@ -1767,7 +1768,8 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 #endif
     }
 
-    _state->camera.Update(_input, _past_input);
+    if (!_state->current_gui_record->mouse_over)
+        _state->camera.Update(_input, _past_input);
 
     return true;
 }
@@ -2496,7 +2498,7 @@ vkrg::layout::DispatchStage GUIDispatchStageInfo()
             "layout(location = 0) out vec2 iFS_point;"
             "layout(push_constant, std430) uniform PushConstants { vec2 viewport_size; vec2 frame_offset; vec2 frame_size; };"
             "void main() {"
-            "gl_Position = vec4((iVS_point / viewport_size) * vec2(2.0, -2.0) - vec2(1.0, -1.0), 0.0, 1.0);"
+            "gl_Position = vec4((iVS_point / viewport_size) * vec2(2.0) - vec2(1.0), 0.0, 1.0);"
             "iFS_point = iVS_uv;"
             "}"
           }

@@ -27,6 +27,7 @@ struct WidgetStates
     numtk::vec2u canvas_size;
     Frame current_frame;
     std::vector<FrameInfo> frames;
+    bool mouse_over;
 };
 
 Context CreateContext();
@@ -55,6 +56,7 @@ struct Context_t
     iotk::input_t const* past_input = nullptr;
 
     dstk::OrderedVector<Frame, FrameInfo> registered_frames = {};
+    std::vector<Frame> frame_order = {};
 
     Handle_t next_id = 1u;
 };
@@ -72,6 +74,14 @@ void BeginRecord(Context context_, iotk::input_t const* input_, iotk::input_t co
 
 WidgetStates const* EndRecord(Context context_)
 {
+    WidgetStates& states = context_->current_record;
+    states.frames.reserve(context_->frame_order.size());
+    for (uint32_t index = 0; index < (uint32_t)context_->frame_order.size(); ++index)
+    {
+        Frame frame = context_->frame_order[index];
+        states.frames.push_back(context_->registered_frames[frame]);
+    }
+
     context_->record_open = false;
     context_->last_record = std::move(context_->current_record);
     return &context_->last_record;
@@ -95,12 +105,28 @@ void BeginFrame(Context context_, Frame& frame_) {
         frame_ = context_->next_id++;
         context_->registered_frames.insert(frame_,
                                            FrameInfo{
-                                               FrameInfo::kOffsetIncrement * (states.frames.size() + 1),
+                                               FrameInfo::kOffsetIncrement * (context_->frame_order.size() + 1),
                                                FrameInfo::kEmptySize
                                            });
+        context_->frame_order.push_back(frame_);
     }
 
-    states.frames.push_back(context_->registered_frames[frame_]);
+    FrameInfo const& frame_info = context_->registered_frames[frame_];
+    if (frame_info.bounds.Contains(*(numtk::vec2u*)context_->input->cursor))
+    {
+        states.mouse_over = true;
+
+        auto frame_it = std::find(context_->frame_order.begin(), context_->frame_order.end(), frame_);
+        if (frame_it != context_->frame_order.end() &&
+            std::none_of(std::next(frame_it), context_->frame_order.end(), [context_](Frame frame){
+                return context_->registered_frames[frame].bounds.Contains(*(numtk::vec2u*)context_->input->cursor);
+            }))
+        {
+            context_->frame_order.erase(frame_it);
+            context_->frame_order.push_back(frame_);
+        }
+    }
+
     states.current_frame = frame_;
 }
 
