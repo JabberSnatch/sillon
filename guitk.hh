@@ -111,20 +111,27 @@ void BeginFrame(Context context_, Frame& frame_) {
         context_->frame_order.push_back(frame_);
     }
 
-    FrameInfo const& frame_info = context_->registered_frames[frame_];
+    FrameInfo& frame_info = context_->registered_frames[frame_];
     if (frame_info.bounds.Contains(*(numtk::vec2u*)context_->input->cursor))
     {
         states.mouse_over = true;
 
-        auto frame_it = std::find(context_->frame_order.begin(), context_->frame_order.end(), frame_);
-        if (frame_it != context_->frame_order.end() &&
-            std::none_of(std::next(frame_it), context_->frame_order.end(), [context_](Frame frame){
-                return context_->registered_frames[frame].bounds.Contains(*(numtk::vec2u*)context_->input->cursor);
-            }))
+        if (iotk::MousePress(iotk::kLeftBtn, *context_->input, *context_->past_input))
         {
-            context_->frame_order.erase(frame_it);
-            context_->frame_order.push_back(frame_);
+            auto frame_it = std::find(context_->frame_order.begin(), context_->frame_order.end(), frame_);
+            if (frame_it != context_->frame_order.end() &&
+                std::none_of(std::next(frame_it), context_->frame_order.end(), [context_](Frame frame){
+                    return context_->registered_frames[frame].bounds.Contains(*(numtk::vec2u*)context_->input->cursor);
+                }))
+            {
+                context_->frame_order.erase(frame_it);
+                context_->frame_order.push_back(frame_);
+            }
         }
+
+        if (iotk::MouseHold(iotk::kLeftBtn, *context_->input, *context_->past_input)
+            && (context_->frame_order.back() == frame_))
+            frame_info.bounds.min += iotk::MouseDelta(*context_->input, *context_->past_input).cast<uint32_t>();
     }
 
     states.current_frame = frame_;

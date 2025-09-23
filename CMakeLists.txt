@@ -7,6 +7,7 @@ find_package(Vulkan COMPONENTS shaderc_combined)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/loader/cmake")
 include(loader)
 add_subdirectory(loader)
+target_include_directories(loader_interface INTERFACE toolkits)
 
 add_library(vktk STATIC vktk.cc)
 target_link_libraries(vktk PUBLIC Vulkan::Vulkan PRIVATE Vulkan::shaderc_combined)
