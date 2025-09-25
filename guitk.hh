@@ -57,6 +57,7 @@ struct Context_t
 
     dstk::OrderedVector<Frame, FrameInfo> registered_frames = {};
     std::vector<Frame> frame_order = {};
+    Frame grabbed_frame = {};
 
     Handle_t next_id = 1u;
 };
@@ -126,13 +127,20 @@ void BeginFrame(Context context_, Frame& frame_) {
             {
                 context_->frame_order.erase(frame_it);
                 context_->frame_order.push_back(frame_);
+                context_->grabbed_frame = frame_;
             }
         }
-
-        if (iotk::MouseHold(iotk::kLeftBtn, *context_->input, *context_->past_input)
-            && (context_->frame_order.back() == frame_))
-            frame_info.bounds.min += iotk::MouseDelta(*context_->input, *context_->past_input).cast<uint32_t>();
     }
+
+    if (iotk::MouseHold(iotk::kLeftBtn, *context_->input, *context_->past_input)
+        && frame_ == context_->grabbed_frame)
+    {
+        frame_info.bounds.min += iotk::MouseDelta(*context_->input, *context_->past_input).cast<uint32_t>();
+        states.mouse_over = true;
+    }
+
+    if (iotk::MouseRelease(iotk::kLeftBtn, *context_->input, *context_->past_input))
+        context_->grabbed_frame = 0;
 
     states.current_frame = frame_;
 }
