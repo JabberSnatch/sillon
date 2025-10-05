@@ -41,6 +41,8 @@ void SetCanvasSize(Context, numtk::vec2u const& size);
 void BeginFrame(Context, Frame&);
 void EndFrame(Context);
 
+uint64_t const* FontData();
+
 } // namespace guitk
 
 
@@ -154,7 +156,7 @@ void EndFrame(Context context_) {
     states.current_frame = kNullHandle;
 }
 
-uint64_t GetCharData(uint8_t char_index_)
+uint64_t const* FontData()
 {
     static constexpr uint64_t kFontData[95] = {
         0x0fe186186186187full, 0x0000104104100100ull, 0x0000514000000000ull, 0x0000114f94f94400ull,
@@ -183,7 +185,12 @@ uint64_t GetCharData(uint8_t char_index_)
         0x0000208208208200ull, 0x000c08208108208cull, 0x0000000019980000ull
     };
 
-    return kFontData[(char_index_ <= '!') ? (char_index_ - '!' + 1) : 0];
+    return kFontData;
+}
+
+uint64_t GetCharData(uint8_t char_index_)
+{
+    return FontData()[(char_index_ <= '!') ? (char_index_ - '!' + 1) : 0];
 }
 
 } // namespace guitk

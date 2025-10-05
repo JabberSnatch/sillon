@@ -95,6 +95,7 @@ struct voxel_state_t
     vktk::Buffer gui_frames_vertices;
     vktk::Buffer gui_frame_uv;
     guitk::WidgetStates const* current_gui_record;
+    vktk::Texture gui_font_texture;
 
     float time = 0.f;
 
@@ -1510,6 +1511,37 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
         if (gui_record->frames.size())
         {
+            _state->gui_font_texture = _vulkan->CreateTexture(
+                96, 60, 1,
+                VK_IMAGE_TYPE_2D,
+                VK_FORMAT_R8_UINT,
+                VK_IMAGE_USAGE_SAMPLED_BIT,
+                [](void* buffer) {
+                    uint64_t const* font_data = guitk::FontData();
+                    uint8_t* texture_buffer = (uint8_t*)buffer;
+                    for (uint32_t index = 0; index < 95; ++index)
+                    {
+                        uint32_t glyph_x = index % 16;
+                        uint32_t glyph_y = index / 16;
+                        uint64_t glyph = font_data[index];
+                        for (uint32_t dot_y = 0; dot_y < 10; ++dot_y)
+                        {
+                            for (uint32_t dot_x = 0; dot_x < 6; ++dot_x)
+                            {
+                                uint32_t dot_index = (5 - dot_x) + dot_y * 6;
+                                bool dot_value = ((glyph >> dot_index) & 1) != 0;
+
+                                uint32_t texel_x = glyph_x * 6 + dot_x;
+                                uint32_t texel_y = glyph_y * 10 + dot_y;
+                                texture_buffer[texel_x + texel_y*96] = dot_value
+                                    ? '\255'
+                                    : '\0';
+                            }
+                        }
+                    }
+                }
+            );
+
             _state->gui_frame_indices = _vulkan->CreateBuffer(
                 sizeof(uint32_t) * 6 * 9,
                 VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
