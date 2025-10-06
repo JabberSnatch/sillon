@@ -438,7 +438,8 @@ void main()
         float avg_t = 0.0;
         if (display_mode != 0.0)
         {
-            for (uint sample_index = 0; sample_index < 16; ++sample_index)
+#define SAMPLE_COUNT 16
+            for (uint sample_index = 0; sample_index < SAMPLE_COUNT; ++sample_index)
             {
 
 #if 0
@@ -448,7 +449,7 @@ void main()
                 float phi = 3.14159265 * 2.0 * (float(ph_index) / 4.0);
 #else
 
-                vec2 owen_sample = OwenPlastic(pixelID * 16 + sample_index, 0);
+                vec2 owen_sample = OwenPlastic(pixelID * SAMPLE_COUNT + sample_index, 0);
                 float theta = owen_sample.x * 3.14159265 * 0.5;
                 float phi = owen_sample.y * 3.14159265 * 2.0;
 #endif
@@ -472,7 +473,7 @@ void main()
                 mat3 tb_mat = genTB(trav.xyz);
                 vec3 second_ray = tb_mat * ts_sample;
 
-                avg_dir += second_ray / 16.0;
+                avg_dir += second_ray / float(SAMPLE_COUNT);
                 if (dot(second_ray, trav.xyz) <= 0.0)
                     continue;
 
@@ -487,8 +488,9 @@ void main()
                 {
                     float sample_t = RegionTraversal4(second_hitp + light_dir*0.0001, light_dir).w;
                     float sample_v = sample_t >= 0.0 ? 0.0 : 1.0;
-                    avg_dir += second_ray / 16.0;
-                    indirect += (sample_v * max(0.0, dot(-second_ray, light_dir))) / 16.0;
+                    avg_dir += second_ray / float(SAMPLE_COUNT);
+                    indirect += (sample_v * max(0.0, dot(-second_ray, light_dir))) / float(SAMPLE_COUNT)
+;
                     avg_t += sample_v;
                 }
             }
