@@ -343,13 +343,9 @@ void Queue::Submit(VkCommandBuffer const* _command_buffers,
         CHECKCALL(vkCreateSemaphore, context->device, &semaphore_info, nullptr, _signal_semaphore);
     }
 
-    if (_signal_fence)
+    if (_signal_fence && *_signal_fence == VK_NULL_HANDLE)
     {
-        VkFenceCreateInfo fence_info = {};
-        fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        fence_info.pNext = nullptr;
-        fence_info.flags = 0;
-        CHECKCALL(vkCreateFence, context->device, &fence_info, nullptr, _signal_fence);
+        *_signal_fence = context->fence_pool.AllocateFence(*context);
         ++context->fence_count;
     }
 
@@ -366,13 +362,41 @@ void Queue::Submit(VkCommandBuffer const* _command_buffers,
     vkQueueSubmit(queue, 1, &submit_info, _signal_fence ? *_signal_fence : VK_NULL_HANDLE);
 }
 
+VkFence FencePool::AllocateFence(Context& context_)
+{
+    Handle result = free_list.Reserve();
+
+    if (free_list.RequiredSize() > fences.size())
+    {
+        fences.resize(free_list.RequiredSize());
+        VkFenceCreateInfo fence_info = {};
+        fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fence_info.pNext = nullptr;
+        fence_info.flags = 0;
+        CHECKCALL(vkCreateFence, context_.device, &fence_info, nullptr, &fences[result]);
+    }
+
+    return fences[result];
+}
+
+void FencePool::ResetFence(Context const& context_, VkFence fence_)
+{
+    auto fence_it = std::find(fences.begin(), fences.end(), fence_);
+    if (fence_it == fences.end())
+        return;
+    uint64_t index = std::distance(fences.begin(), fence_it);
+
+    CHECKCALL(vkResetFences, context_.device, 1, &fence_);
+    free_list.Release(index);
+}
+
 void CommandBuffer::Submit(VkSemaphore* _signal_semaphore,
                            VkSemaphore const* _wait_semaphores,
                            VkPipelineStageFlags const* _wait_stages,
                            uint32_t _wait_count,
                            VkFence* _signal_fence)
 {
-    VkFence fallback_fence;
+    VkFence fallback_fence = VK_NULL_HANDLE;
     if (!_signal_fence)
         _signal_fence = &fallback_fence;
 
@@ -622,7 +646,6 @@ void CommandBuffer::BeginRenderPass(numtk::bounds2i const& _viewport,
     rp_begin_info.pClearValues = _clear_values.data();
     vkCmdBeginRenderPass(handle, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 }
-
 
 void CommandBuffer::End()
 {
@@ -1580,17 +1603,9 @@ Buffer Context::CreateBuffer(uint32_t _size,
 
     VkBufferCopy copy_region{ 0, 0, _size };
     vkCmdCopyBuffer(command_buffer, staging, result, 1, &copy_region);
-
-    VkFence staging_fence = {};
-    VkFenceCreateInfo fence_info = {};
-    fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fence_info.pNext = nullptr;
-    fence_info.flags = 0;
-    CHECKCALL(vkCreateFence,
-              device, &fence_info, nullptr, &staging_fence);
-
     command_buffer.End();
 
+    VkFence staging_fence = VK_NULL_HANDLE;
     CommandBuffer::SubmitInfo submit_info = {};
     submit_info.signal_fence = &staging_fence;
     command_buffer.Submit(submit_info);
@@ -1739,27 +1754,10 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
 
     command_buffer.End();
 
-    VkFence staging_fence = {};
-
-    VkFenceCreateInfo fence_info = {};
-    fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fence_info.pNext = nullptr;
-    fence_info.flags = 0;
-    CHECKCALL(vkCreateFence,
-              device, &fence_info, nullptr, &staging_fence);
-    ++fence_count;
-
-    VkSubmitInfo submit_info{};
-    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit_info.pNext = nullptr;
-    submit_info.waitSemaphoreCount = 0u;
-    submit_info.pWaitSemaphores = nullptr;
-    submit_info.pWaitDstStageMask = nullptr;
-    submit_info.commandBufferCount = 1u;
-    submit_info.pCommandBuffers = &command_buffer.handle;
-    submit_info.signalSemaphoreCount = 0u;
-    submit_info.pSignalSemaphores = nullptr;
-    vkQueueSubmit(present_queue, 1, &submit_info, staging_fence);
+    VkFence staging_fence = VK_NULL_HANDLE;
+    CommandBuffer::SubmitInfo submit_info = {};
+    submit_info.signal_fence = &staging_fence;
+    command_buffer.Submit(submit_info);
 
 #if 0
     std::cout << "[CreateTexture] scheduled staging buffer destruction "
@@ -1913,7 +1911,7 @@ void Context::TryScheduledRoutines()
         if (vkGetFenceStatus(device, fence) != VK_SUCCESS)
             continue;
 
-        vkDestroyFence(device, fence, nullptr);
+        fence_pool.ResetFence(*this, fence);
         --fence_count;
 #if 0
         std::cout << "[PollFences] destroying fence " << std::hex
@@ -1934,19 +1932,13 @@ void Context::WaitScheduledRoutines()
 
         for (SynchronisedRoutine const& routine : bind_point.second)
             routine(*this);
-
-#if 0
-        vkDestroyFence(device, bind_point.first, nullptr);
-        std::cout << "[WaitFences] destroying fence " << std::hex
-                  << bind_point.first << std::dec << std::endl;
-#endif
     }
     pending_routines.clear();
 
     for (VkFence fence : pending_fences)
     {
         CHECKCALL(vkWaitForFences, device, 1, &fence, VK_TRUE, ~0ull);
-        vkDestroyFence(device, fence, nullptr);
+        fence_pool.ResetFence(*this, fence);
         --fence_count;
         std::cout << "[WaitFences] destroying fence " << std::hex
                   << fence << std::dec << std::endl;

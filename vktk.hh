@@ -13,6 +13,7 @@
 #include <vulkan/vulkan.h>
 
 #include "toolkits/numtk.hh"
+#include "toolkits/dstk.hh"
 
 #ifdef NDEBUG
 
@@ -205,6 +206,14 @@ struct Queue {
                 VkPipelineStageFlags const* _wait_stages = nullptr,
                 uint32_t _wait_count = 0u,
                 VkFence* _signal_fence = nullptr) const;
+};
+
+struct FencePool {
+    using Handle = dstk::FreeList::Index;
+    VkFence AllocateFence(Context& context_);
+    void ResetFence(Context const& context_, VkFence fence_);
+    std::vector<VkFence> fences;
+    dstk::FreeList free_list;
 };
 
 struct CommandBuffer {
@@ -414,6 +423,7 @@ struct Context
 
     Allocator allocator = {};
 
+    FencePool fence_pool = {};
     uint32_t fence_count = 0;
 
     using SynchronisedRoutine = std::function<void(Context&)>;
