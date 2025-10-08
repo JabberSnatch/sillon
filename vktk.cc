@@ -2807,12 +2807,12 @@ DispatchContext::UpdateDynamicInvocationCount(layout::DispatchNode const* _node,
         if (requested_count > stage_runtime.invocation_count)
         {
             group_runtime.sets.reserve(requested_count);
-            for (uint32_t index = stage_runtime.invocation_count-1; index < requested_count; ++index)
+            for (uint32_t index = stage_runtime.invocation_count; index < requested_count; ++index)
                 group_runtime.sets.push_back(group_static.pool.AllocateDescriptorSet());
         }
         else
         {
-            for (uint32_t index = requested_count-1; index < stage_runtime.invocation_count; ++index)
+            for (uint32_t index = requested_count; index < stage_runtime.invocation_count; ++index)
                 group_static.pool.FreeDescriptorSet(group_runtime.sets[index]);
         }
     }

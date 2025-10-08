@@ -15,18 +15,17 @@ static constexpr Handle_t kNullHandle = 0u;
 using Context = Context_t*;
 using Frame = Handle_t;
 
-struct FrameInfo
+struct GlyphInfo
 {
-    static inline numtk::vec2u const kEmptySize{ 50, 50 };
-    static inline numtk::vec2u const kOffsetIncrement{ 20, 20 };
     numtk::bounds2u bounds;
+    uint32_t index;
 };
 
 struct WidgetStates
 {
-    numtk::vec2u canvas_size;
     Frame current_frame;
-    std::vector<FrameInfo> frames;
+    std::vector<numtk::bounds2u> frames;
+    std::vector<GlyphInfo> glyphs;
     bool mouse_over;
 };
 
@@ -36,10 +35,10 @@ void DeleteContext(Context);
 void BeginRecord(Context, iotk::input_t const*, iotk::input_t const*);
 WidgetStates const* EndRecord(Context);
 
-void SetCanvasSize(Context, numtk::vec2u const& size);
-
 void BeginFrame(Context, Frame&);
 void EndFrame(Context);
+
+void Label(Context, std::string const& label_);
 
 uint64_t const* FontData();
 
@@ -47,6 +46,14 @@ uint64_t const* FontData();
 
 
 namespace guitk {
+
+struct FrameInfo
+{
+    static inline numtk::vec2u const kEmptySize{ 50, 50 };
+    static inline numtk::vec2u const kOffsetIncrement{ 20, 20 };
+    numtk::bounds2u bounds;
+    std::vector<GlyphInfo> glyphs;
+};
 
 struct Context_t
 {
@@ -82,19 +89,16 @@ WidgetStates const* EndRecord(Context context_)
     for (uint32_t index = 0; index < (uint32_t)context_->frame_order.size(); ++index)
     {
         Frame frame = context_->frame_order[index];
-        states.frames.push_back(context_->registered_frames[frame]);
+        FrameInfo const& frame_info = context_->registered_frames[frame];
+        states.frames.push_back(frame_info.bounds);
+
+        for (GlyphInfo const& glyph : frame_info.glyphs)
+            states.glyphs.push_back(glyph);
     }
 
     context_->record_open = false;
     context_->last_record = std::move(context_->current_record);
     return &context_->last_record;
-}
-
-void SetCanvasSize(Context context_, numtk::vec2u const& size_)
-{
-    if (!context_->record_open)
-        return;
-    context_->current_record.canvas_size = size_;
 }
 
 void BeginFrame(Context context_, Frame& frame_) {
@@ -156,6 +160,32 @@ void EndFrame(Context context_) {
     states.current_frame = kNullHandle;
 }
 
+static inline uint32_t GetGlyphIndex(char character_)
+{
+    return (character_ >= '!') ? (character_ - '!' + 1) : 0;
+}
+
+void Label(Context context_, std::string const& label_)
+{
+    WidgetStates& states = context_->current_record;
+
+    if (states.current_frame == kNullHandle)
+        return;
+
+    FrameInfo& frame_info = context_->registered_frames[states.current_frame];
+    for (uint32_t char_index = 0u; char_index < (uint32_t)label_.size(); ++char_index)
+    {
+        char character = label_[char_index];
+        uint32_t glyph_index = GetGlyphIndex(character);
+        numtk::bounds2u glyph_bounds{
+            frame_info.bounds.min + numtk::vec2u{ 15, 15 } + numtk::vec2u{ char_index * 14, 0 },
+            { 12, 20 }
+        };
+
+        frame_info.glyphs.push_back(GlyphInfo{ glyph_bounds, glyph_index });
+    }
+}
+
 uint64_t const* FontData()
 {
     static constexpr uint64_t kFontData[95] = {
@@ -186,11 +216,6 @@ uint64_t const* FontData()
     };
 
     return kFontData;
-}
-
-uint64_t GetCharData(uint8_t char_index_)
-{
-    return FontData()[(char_index_ <= '!') ? (char_index_ - '!' + 1) : 0];
 }
 
 } // namespace guitk

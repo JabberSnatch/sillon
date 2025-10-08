@@ -96,6 +96,9 @@ struct voxel_state_t
     vktk::Buffer gui_frame_uv;
     guitk::WidgetStates const* current_gui_record;
     vktk::Texture gui_font_texture;
+    vktk::Buffer gui_glyph_indices;
+    vktk::Buffer gui_glyph_vertices;
+    VkSampler gui_glyph_sampler;
 
     float time = 0.f;
 
@@ -171,7 +174,8 @@ vkrg::layout::DispatchStage RegionPassDispatchStageInfo();
 vkrg::layout::DispatchStage SparseRegionDispatchStageInfo();
 vkrg::layout::DispatchStage SkyboxDispatchStageInfo();
 vkrg::layout::DispatchStage ResolveDispatchStageInfo();
-vkrg::layout::DispatchStage GUIDispatchStageInfo();
+vkrg::layout::DispatchStage GUIFramesDispatchStageInfo();
+vkrg::layout::DispatchStage GUIGlyphsDispatchStageInfo();
 
 vkrg::layout::DispatchNode MainWorldDispatchInfo();
 vkrg::layout::DispatchNode ResolveDispatchInfo();
@@ -1150,20 +1154,22 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         matrices[index].screen_size = numtk::vec2<int32_t>::Constant(1);
     }
 
-    VkSamplerCreateInfo sampler_create{};
-    sampler_create.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    sampler_create.pNext = nullptr;
-    sampler_create.flags = 0u;
-    sampler_create.magFilter = VK_FILTER_NEAREST;
-    sampler_create.minFilter = VK_FILTER_NEAREST;
-    sampler_create.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    sampler_create.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    sampler_create.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    sampler_create.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    sampler_create.minLod = 0.0;
-    sampler_create.maxLod = 4.0;
-    CHECKCALL(vkCreateSampler, _vulkan->device,
-              &sampler_create, nullptr, &_state->sampler);
+    {
+        VkSamplerCreateInfo sampler_create{};
+        sampler_create.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        sampler_create.pNext = nullptr;
+        sampler_create.flags = 0u;
+        sampler_create.magFilter = VK_FILTER_NEAREST;
+        sampler_create.minFilter = VK_FILTER_NEAREST;
+        sampler_create.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        sampler_create.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sampler_create.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sampler_create.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sampler_create.minLod = 0.0;
+        sampler_create.maxLod = 4.0;
+        CHECKCALL(vkCreateSampler, _vulkan->device,
+                  &sampler_create, nullptr, &_state->sampler);
+    }
 
     VkDescriptorImageInfo region_image_info{};
     region_image_info.sampler = _state->sampler;
@@ -1327,6 +1333,54 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     }
 
     SparseRegionUpdateBindings(_state, _vulkan);
+
+    {
+        VkSamplerCreateInfo sampler_create{};
+        sampler_create.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        sampler_create.pNext = nullptr;
+        sampler_create.flags = 0u;
+        sampler_create.magFilter = VK_FILTER_NEAREST;
+        sampler_create.minFilter = VK_FILTER_NEAREST;
+        sampler_create.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        sampler_create.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sampler_create.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sampler_create.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sampler_create.minLod = 0.0;
+        sampler_create.maxLod = 0.0;
+        CHECKCALL(vkCreateSampler, _vulkan->device,
+                  &sampler_create, nullptr, &_state->gui_glyph_sampler);
+
+        _state->gui_font_texture = _vulkan->CreateTexture(
+            96, 60, 1,
+            VK_IMAGE_TYPE_2D,
+            VK_FORMAT_R8_UINT,
+            VK_IMAGE_USAGE_SAMPLED_BIT,
+            [](void* buffer) {
+                uint64_t const* font_data = guitk::FontData();
+                uint8_t* texture_buffer = (uint8_t*)buffer;
+                for (uint32_t index = 0; index < 95; ++index)
+                {
+                    uint32_t glyph_x = index % 16;
+                    uint32_t glyph_y = index / 16;
+                    uint64_t glyph = font_data[index];
+                    for (uint32_t dot_y = 0; dot_y < 10; ++dot_y)
+                    {
+                        for (uint32_t dot_x = 0; dot_x < 6; ++dot_x)
+                        {
+                            uint32_t dot_index = (5 - dot_x) + dot_y * 6;
+                            bool dot_value = ((glyph >> dot_index) & 1) != 0;
+
+                            uint32_t texel_x = glyph_x * 6 + dot_x;
+                            uint32_t texel_y = glyph_y * 10 + dot_y;
+                            texture_buffer[texel_x + texel_y*96] = dot_value
+                                ? '\255'
+                                : '\0';
+                        }
+                    }
+                }
+            }
+        );
+    }
 
     vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
     command_buffer.Begin();
@@ -1503,6 +1557,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         for (uint32_t i = 0; i < 20; ++i)
         {
             guitk::BeginFrame(_state->gui_context, frames[i]);
+            guitk::Label(_state->gui_context, "Hello World!");
             guitk::EndFrame(_state->gui_context);
         }
 #endif
@@ -1511,36 +1566,48 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
         if (gui_record->frames.size())
         {
-            _state->gui_font_texture = _vulkan->CreateTexture(
-                96, 60, 1,
-                VK_IMAGE_TYPE_2D,
-                VK_FORMAT_R8_UINT,
-                VK_IMAGE_USAGE_SAMPLED_BIT,
+            _state->gui_glyph_indices = _vulkan->CreateBuffer(
+                sizeof(uint32_t) * 6,
+                VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
                 [](void* buffer) {
-                    uint64_t const* font_data = guitk::FontData();
-                    uint8_t* texture_buffer = (uint8_t*)buffer;
-                    for (uint32_t index = 0; index < 95; ++index)
-                    {
-                        uint32_t glyph_x = index % 16;
-                        uint32_t glyph_y = index / 16;
-                        uint64_t glyph = font_data[index];
-                        for (uint32_t dot_y = 0; dot_y < 10; ++dot_y)
-                        {
-                            for (uint32_t dot_x = 0; dot_x < 6; ++dot_x)
-                            {
-                                uint32_t dot_index = (5 - dot_x) + dot_y * 6;
-                                bool dot_value = ((glyph >> dot_index) & 1) != 0;
+                    *(std::array<uint32_t, 6>*)buffer = std::array<uint32_t, 6>{
+                        0, 2, 1,  0, 3, 2
+                    };
+                },
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-                                uint32_t texel_x = glyph_x * 6 + dot_x;
-                                uint32_t texel_y = glyph_y * 10 + dot_y;
-                                texture_buffer[texel_x + texel_y*96] = dot_value
-                                    ? '\255'
-                                    : '\0';
-                            }
-                        }
+            _state->gui_glyph_vertices = _vulkan->CreateBuffer(
+                sizeof(numtk::vec2f) * 2 * 4 * gui_record->glyphs.size(),
+                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                [gui_record](void* buffer){
+                    numtk::vec2f* vertices = (numtk::vec2f*)buffer;
+                    numtk::vec2f* uvs = vertices + 4 * gui_record->glyphs.size();
+
+                    for (uint32_t glyph_index = 0u; glyph_index < (uint32_t)gui_record->glyphs.size(); ++glyph_index)
+                    {
+                        guitk::GlyphInfo const& glyph = gui_record->glyphs[glyph_index];
+                        vertices[glyph_index * 4 + 0] = glyph.bounds.min.cast<float>();
+                        vertices[glyph_index * 4 + 1] = numtk::vec2f{
+                            (float)(glyph.bounds.min.x()+glyph.bounds.extent.x()),
+                            (float)glyph.bounds.min.y()
+                        };
+                        vertices[glyph_index * 4 + 2] = glyph.bounds.max().cast<float>();
+                        vertices[glyph_index * 4 + 3] = numtk::vec2f{
+                            (float)glyph.bounds.min.x(),
+                            (float)(glyph.bounds.min.y()+glyph.bounds.extent.y())
+                        };
+
+                        float glyph_x = (float)(glyph.index % 16);
+                        float glyph_y = (float)(glyph.index / 16);
+                        numtk::vec2f min = numtk::vec2f{ glyph_x * 6.f, glyph_y * 10.f } / numtk::vec2f{ 96.f, 60.f };
+                        numtk::vec2f max = numtk::vec2f{ (glyph_x + 1.f) * 6.f, (glyph_y + 1.f) * 10.f } / numtk::vec2f{ 96.f, 60.f };
+                        uvs[glyph_index * 4 + 0] = min;
+                        uvs[glyph_index * 4 + 1] = numtk::vec2f{ max.x(), min.y() };
+                        uvs[glyph_index * 4 + 2] = max;
+                        uvs[glyph_index * 4 + 3] = numtk::vec2f{ min.x(), max.y() };
                     }
-                }
-            );
+                },
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
             _state->gui_frame_indices = _vulkan->CreateBuffer(
                 sizeof(uint32_t) * 6 * 9,
@@ -1580,28 +1647,28 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                     numtk::vec2f* vertices = (numtk::vec2f*)buffer;
                     for (uint32_t frame_index = 0u; frame_index < gui_record->frames.size(); ++frame_index)
                     {
-                        guitk::FrameInfo const& frame = gui_record->frames[frame_index];
+                        numtk::bounds2u const& frame = gui_record->frames[frame_index];
                         numtk::vec2f* base = &vertices[frame_index*16];
-                        base[0] = frame.bounds.min.cast<float>();
+                        base[0] = frame.min.cast<float>();
                         base[1] = base[0] + kBorderOffsets[0];
                         base[2] = base[0] + kBorderOffsets[1];
                         base[3] = base[0] + kBorderOffsets[2];
 
                         base[4] = numtk::vec2f{
-                            (float)(frame.bounds.min.x()+frame.bounds.extent.x()),
-                            (float)frame.bounds.min.y() };
+                            (float)(frame.min.x()+frame.extent.x()),
+                            (float)frame.min.y() };
                         base[5] = base[4] + kBorderOffsets[1];
                         base[6] = base[4] - kBorderOffsets[0];
                         base[7] = base[4] + kBorderOffsets[3];
 
-                        base[8] = frame.bounds.max().cast<float>();
+                        base[8] = frame.max().cast<float>();
                         base[9] = base[8] - kBorderOffsets[0];
                         base[10] = base[8] - kBorderOffsets[1];
                         base[11] = base[8] - kBorderOffsets[2];
 
                         base[12] = numtk::vec2f{
-                            (float)frame.bounds.min.x(),
-                            (float)(frame.bounds.min.y()+frame.bounds.extent.y()) };
+                            (float)frame.min.x(),
+                            (float)(frame.min.y()+frame.extent.y()) };
                         base[13] = base[12] - kBorderOffsets[1];
                         base[14] = base[12] + kBorderOffsets[0];
                         base[15] = base[12] - kBorderOffsets[3];
@@ -1652,6 +1719,9 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
             _state->sparse_runtime.UpdateDynamicInvocationCount(&sparse_region_node, 1, gui_record->frames.size());
             _state->sparse_runtime.ClearStageBarriers(&sparse_region_node, 1);
 
+            _state->sparse_runtime.UpdateDynamicInvocationCount(&sparse_region_node, 2, gui_record->glyphs.size());
+            _state->sparse_runtime.ClearStageBarriers(&sparse_region_node, 2);
+
             for (uint32_t index = 0u; index < (uint32_t)gui_record->frames.size(); ++index)
             {
                 _state->sparse_runtime.BindGraphicsCommand(
@@ -1685,6 +1755,63 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                 }
             }
 
+            std::vector<VkWriteDescriptorSet> bindings{};
+            std::vector<VkDescriptorImageInfo> image_info(gui_record->glyphs.size());
+            for (uint32_t index = 0u; index < (uint32_t)gui_record->glyphs.size(); ++index)
+            {
+                _state->sparse_runtime.BindGraphicsCommand(
+                    &sparse_region_node, 2, index, {
+                        vkrg::bind::DispatchCommand_Draw, 6, 1
+                    });
+
+                {
+                    _state->sparse_runtime.BindVertexInput(
+                        { .node = &sparse_region_node,
+                          .stage_index = 2,
+                          .type = vkrg::layout::BindingType_VertexInput,
+                          .vertex_input = vkrg::layout::VertexInputLocation(0) },
+                        index,
+                        { _state->gui_glyph_vertices, index * sizeof(numtk::vec2f) * 4 }
+                        );
+
+                    _state->sparse_runtime.BindVertexInput(
+                        { .node = &sparse_region_node,
+                          .stage_index = 2,
+                          .type = vkrg::layout::BindingType_VertexInput,
+                          .vertex_input = vkrg::layout::VertexInputLocation(1) },
+                        index,
+                        { _state->gui_glyph_vertices, (index + (uint32_t)gui_record->glyphs.size()) * sizeof(numtk::vec2f) * 4 }
+                        );
+
+                    _state->sparse_runtime.BindIndexInput(
+                        &sparse_region_node, 2, index,
+                        { _state->gui_glyph_indices, 0 }
+                        );
+                }
+
+                image_info[index] = VkDescriptorImageInfo{
+                    _state->gui_glyph_sampler,
+                    _state->gui_font_texture.view,
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                };
+
+                bindings.push_back(
+                    _state->sparse_runtime.BindShaderResource(
+                        vkrg::layout::BindingPoint{
+                            .node = &sparse_region_node,
+                            .stage_index = 2,
+                            .type = vkrg::layout::BindingType_Shader,
+                            .shader = { 0, 0 }
+                        },
+                        index,
+                        vkrg::bind::ShaderResource{
+                            .descriptor_count = 1,
+                            .images = &image_info[index]
+                        })
+                    );
+            }
+            vkUpdateDescriptorSets(_vulkan->device, bindings.size(), bindings.data(), 0u, nullptr);
+
             _state->sparse_runtime.BindBarrier(&sparse_region_node, 1, {
                 .type = vkrg::bind::BufferResource,
                 .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -1704,6 +1831,20 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                 .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
                 .access = VK_ACCESS_TRANSFER_WRITE_BIT,
                 .buffer = _state->gui_frame_uv
+            });
+
+            _state->sparse_runtime.BindBarrier(&sparse_region_node, 2, {
+                .type = vkrg::bind::BufferResource,
+                .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
+                .access = VK_ACCESS_TRANSFER_WRITE_BIT,
+                .buffer = _state->gui_glyph_vertices
+            });
+
+            _state->sparse_runtime.BindBarrier(&sparse_region_node, 2, {
+                .type = vkrg::bind::BufferResource,
+                .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
+                .access = VK_ACCESS_TRANSFER_WRITE_BIT,
+                .buffer = _state->gui_glyph_indices
             });
         }
     }
@@ -2066,8 +2207,24 @@ void Draw(void* _pstate,
                     },
                     index);
             gui_push_constants[0] = { (float)_swapchain.size.width, (float)_swapchain.size.height };
-            gui_push_constants[1] = _state->current_gui_record->frames[index].bounds.min.cast<float>();
-            gui_push_constants[2] = _state->current_gui_record->frames[index].bounds.extent.cast<float>();
+            gui_push_constants[1] = _state->current_gui_record->frames[index].min.cast<float>();
+            gui_push_constants[2] = _state->current_gui_record->frames[index].extent.cast<float>();
+        }
+
+        for (uint32_t index = 0u; index < (uint32_t)_state->current_gui_record->glyphs.size(); ++index)
+        {
+            numtk::vec2f* gui_push_constants =
+                (numtk::vec2f*)_state->sparse_runtime.BindPushConstants(
+                    vkrg::layout::BindingPoint{
+                        .node = &sparse_region_node,
+                        .stage_index = 2,
+                        .type = vkrg::layout::BindingType_PushConstantRange,
+                        .push_constants = { 0 }
+                    },
+                    index);
+            gui_push_constants[0] = { (float)_swapchain.size.width, (float)_swapchain.size.height };
+            gui_push_constants[1] = numtk::vec2f{};
+            gui_push_constants[2] = numtk::vec2f{};
         }
 
         _state->sparse_runtime.BindFramebufferArea(
@@ -2099,10 +2256,14 @@ void Draw(void* _pstate,
 
     _vulkan->ScheduleRoutine(_state->last_submit, [index_buffer = _state->gui_frame_indices
                                                    , vertex_buffer = _state->gui_frames_vertices
-                                                   , uv_buffer = _state->gui_frame_uv](vktk::Context& _vulkan) {
+                                                   , uv_buffer = _state->gui_frame_uv
+                                                   , glyph_indices = _state->gui_glyph_indices
+                                                   , glyph_vertices = _state->gui_glyph_vertices](vktk::Context& _vulkan) {
         _vulkan.DestroyBuffer(index_buffer);
         _vulkan.DestroyBuffer(vertex_buffer);
         _vulkan.DestroyBuffer(uv_buffer);
+        _vulkan.DestroyBuffer(glyph_indices);
+        _vulkan.DestroyBuffer(glyph_vertices);
     });
 
     _vulkan->ScheduleFenceDestroy(_state->last_submit);
@@ -2155,7 +2316,8 @@ void Shutdown(void* _pstate,
     for (uint32_t index = 0; index < _state->section_textures.size(); ++index)
         _vulkan->DestroyTexture(_state->section_textures[index]);
 
-     guitk::DeleteContext(_state->gui_context);
+    vkDestroySampler(_vulkan->device, _state->gui_glyph_sampler, nullptr);
+    guitk::DeleteContext(_state->gui_context);
 }
 
 void TurntableCamera::Update(iotk::input_t const* _input,
@@ -2517,10 +2679,10 @@ vkrg::layout::DispatchStage ResolveDispatchStageInfo()
     return output;
 }
 
-vkrg::layout::DispatchStage GUIDispatchStageInfo()
+vkrg::layout::DispatchStage GUIFramesDispatchStageInfo()
 {
     vkrg::layout::DispatchStage output = {};
-    output.name = "gui";
+    output.name = "guiframes";
 
     output.shaders = std::vector<vkrg::layout::ShaderStage>{
         { VK_SHADER_STAGE_VERTEX_BIT,
@@ -2562,6 +2724,63 @@ vkrg::layout::DispatchStage GUIDispatchStageInfo()
         { vktk::StateOverrideTag::DepthTestEnable, VK_FALSE },
         { vktk::StateOverrideTag::DepthWriteEnable, VK_FALSE }
     };
+    output.graphics.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    output.graphics.input_layout = std::vector<vktk::Context::VertexInput>{
+        { 0, 0, VK_VERTEX_INPUT_RATE_VERTEX, VK_FORMAT_R32G32_SFLOAT,
+          0, sizeof(numtk::vec2f) },
+        { 1, 1, VK_VERTEX_INPUT_RATE_VERTEX, VK_FORMAT_R32G32_SFLOAT,
+          0, sizeof(numtk::vec2f) }
+    };
+
+    return output;
+}
+
+vkrg::layout::DispatchStage GUIGlyphsDispatchStageInfo()
+{
+    vkrg::layout::DispatchStage output = {};
+    output.name = "guiglyphs";
+
+    output.shaders = std::vector<vkrg::layout::ShaderStage>{
+        { VK_SHADER_STAGE_VERTEX_BIT,
+          { "#version 450",
+            "layout(location = 0) in vec2 iVS_point;"
+            "layout(location = 1) in vec2 iVS_uv;"
+            "layout(location = 0) out vec2 iFS_uv;"
+            "layout(push_constant, std430) uniform PushConstants { vec2 viewport_size; vec2 frame_offset; vec2 frame_size; };"
+            "void main() {"
+            "gl_Position = vec4((iVS_point / viewport_size) * vec2(2.0) - vec2(1.0), 0.0, 1.0);"
+            "iFS_uv = iVS_uv;"
+            "}"
+          }
+        },
+
+        { VK_SHADER_STAGE_FRAGMENT_BIT,
+          { "#version 450",
+            "layout(location = 0) in vec2 iFS_uv;"
+            "layout(location = 0) out vec4 color;"
+            "layout(set = 0, binding = 0) uniform sampler2D font_atlas;"
+            "void main() {"
+            "color = vec4(1.0, 0.0, 1.0, 1.0);"
+            //"float glyph_pixel = texture(font_atlas, iFS_uv).x;"
+            //"if (glyph_pixel == 0.0) discard;"
+            //"color = vec4(glyph_pixel.xxx, 1.0);"
+            "}"
+          }
+        }
+    };
+
+    output.invocation_count = 0;
+    output.push_constants = std::vector<vkrg::layout::PushConstantRange>{
+        { VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(numtk::vec2f) * 3 }
+    };
+    output.binding_groups.push_back(vkrg::layout::StageBindingGroup{
+        {
+            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              0, 1 }
+        }
+    });
+
+    output.graphics.state_overrides = std::vector<vktk::Context::StateOverride>{};
     output.graphics.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     output.graphics.input_layout = std::vector<vktk::Context::VertexInput>{
         { 0, 0, VK_VERTEX_INPUT_RATE_VERTEX, VK_FORMAT_R32G32_SFLOAT,
@@ -2627,7 +2846,8 @@ vkrg::layout::DispatchGraph SparseRegionRenderGraph()
     node.mode = vkrg::layout::DispatchMode_Graphics;
     node.sequence = std::vector<vkrg::layout::DispatchStage>{
         SparseRegionDispatchStageInfo(),
-        GUIDispatchStageInfo()
+        GUIFramesDispatchStageInfo(),
+        GUIGlyphsDispatchStageInfo()
     };
 
     node.graphics.attachments = std::vector<vkrg::layout::RenderAttachment>{
