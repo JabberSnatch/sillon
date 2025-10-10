@@ -52,7 +52,9 @@ struct FrameInfo
     static inline numtk::vec2u const kEmptySize{ 50, 50 };
     static inline numtk::vec2u const kOffsetIncrement{ 20, 20 };
     numtk::bounds2u bounds;
+
     std::vector<GlyphInfo> glyphs;
+    numtk::vec2u next_row;
 };
 
 struct Context_t
@@ -112,8 +114,12 @@ void BeginFrame(Context context_, Frame& frame_) {
         frame_ = context_->next_id++;
         context_->registered_frames.insert(frame_,
                                            FrameInfo{
-                                               FrameInfo::kOffsetIncrement * (context_->frame_order.size() + 1),
-                                               FrameInfo::kEmptySize
+                                               {
+                                                   FrameInfo::kOffsetIncrement * (context_->frame_order.size() + 1),
+                                                   FrameInfo::kEmptySize
+                                               },
+                                               {},
+                                               { 15, 15 }
                                            });
         context_->frame_order.push_back(frame_);
     }
@@ -149,6 +155,7 @@ void BeginFrame(Context context_, Frame& frame_) {
         context_->grabbed_frame = 0;
 
     frame_info.glyphs.clear();
+    frame_info.next_row = numtk::vec2u{ 15, 15 };
 
     states.current_frame = frame_;
 }
@@ -183,7 +190,7 @@ void Label(Context context_, std::string const& label_)
             continue;
         uint32_t glyph_index = GetGlyphIndex(character);
         numtk::bounds2u glyph_bounds{
-            frame_info.bounds.min + numtk::vec2u{ 15, 15 } + numtk::vec2u{ char_index * 14, 0 },
+            frame_info.bounds.min + frame_info.next_row + numtk::vec2u{ char_index * 14, 0 },
             { 12, 20 }
         };
 
@@ -193,6 +200,7 @@ void Label(Context context_, std::string const& label_)
     }
 
     frame_info.bounds = frame_info.bounds.Expand(glyph_max + numtk::vec2u{ 15, 15 });
+    frame_info.next_row += numtk::vec2u{ 0, 22 };
 }
 
 uint64_t const* FontData()

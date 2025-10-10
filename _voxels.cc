@@ -1553,11 +1553,14 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
     {
         guitk::BeginRecord(_state->gui_context, _input, _past_input);
 #if 1
-        static std::vector<guitk::Frame> frames(20);
-        for (uint32_t i = 0; i < 20; ++i)
+        static std::vector<guitk::Frame> frames(4);
+        for (uint32_t i = 0; i < 4; ++i)
         {
             guitk::BeginFrame(_state->gui_context, frames[i]);
-            guitk::Label(_state->gui_context, "Hello World!");
+            guitk::Label(_state->gui_context, "the quick brown fox jumps over the lazy dog");
+            guitk::Label(_state->gui_context, "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG");
+            guitk::Label(_state->gui_context, "{} [] :; \\| \"' `~ =+ -_ <> ,. ?/");
+            guitk::Label(_state->gui_context, "12345 67890  !@#$% ^&*()");
             guitk::EndFrame(_state->gui_context);
         }
 #endif
