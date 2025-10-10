@@ -1601,10 +1601,10 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                         float glyph_y = (float)(glyph.index / 16);
                         numtk::vec2f min = numtk::vec2f{ glyph_x * 6.f, glyph_y * 10.f } / numtk::vec2f{ 96.f, 60.f };
                         numtk::vec2f max = numtk::vec2f{ (glyph_x + 1.f) * 6.f, (glyph_y + 1.f) * 10.f } / numtk::vec2f{ 96.f, 60.f };
-                        uvs[glyph_index * 4 + 0] = min;
-                        uvs[glyph_index * 4 + 1] = numtk::vec2f{ max.x(), min.y() };
-                        uvs[glyph_index * 4 + 2] = max;
-                        uvs[glyph_index * 4 + 3] = numtk::vec2f{ min.x(), max.y() };
+                        uvs[glyph_index * 4 + 0] = numtk::vec2f{ min.x(), max.y() };
+                        uvs[glyph_index * 4 + 1] = max;
+                        uvs[glyph_index * 4 + 2] = numtk::vec2f{ max.x(), min.y() };
+                        uvs[glyph_index * 4 + 3] = min;
                     }
                 },
                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
@@ -2758,12 +2758,11 @@ vkrg::layout::DispatchStage GUIGlyphsDispatchStageInfo()
           { "#version 450",
             "layout(location = 0) in vec2 iFS_uv;"
             "layout(location = 0) out vec4 color;"
-            "layout(set = 0, binding = 0) uniform sampler2D font_atlas;"
+            "layout(set = 0, binding = 0) uniform usampler2D font_atlas;"
             "void main() {"
-            "color = vec4(1.0, 0.0, 1.0, 1.0);"
-            //"float glyph_pixel = texture(font_atlas, iFS_uv).x;"
-            //"if (glyph_pixel == 0.0) discard;"
-            //"color = vec4(glyph_pixel.xxx, 1.0);"
+            "uint glyph_pixel = texture(font_atlas, iFS_uv).x;"
+            "if (glyph_pixel == 0) discard;"
+            "color = vec4(1.0);"
             "}"
           }
         }

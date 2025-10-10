@@ -174,10 +174,13 @@ void Label(Context context_, std::string const& label_)
     if (states.current_frame == kNullHandle)
         return;
 
+    numtk::vec2u glyph_max = numtk::vec2u{ 0, 0 };
     FrameInfo& frame_info = context_->registered_frames[states.current_frame];
     for (uint32_t char_index = 0u; char_index < (uint32_t)label_.size(); ++char_index)
     {
         char character = label_[char_index];
+        if (character == ' ')
+            continue;
         uint32_t glyph_index = GetGlyphIndex(character);
         numtk::bounds2u glyph_bounds{
             frame_info.bounds.min + numtk::vec2u{ 15, 15 } + numtk::vec2u{ char_index * 14, 0 },
@@ -185,7 +188,11 @@ void Label(Context context_, std::string const& label_)
         };
 
         frame_info.glyphs.push_back(GlyphInfo{ glyph_bounds, glyph_index });
+
+        glyph_max = numtk::max(glyph_max, glyph_bounds.max());
     }
+
+    frame_info.bounds = frame_info.bounds.Expand(glyph_max + numtk::vec2u{ 15, 15 });
 }
 
 uint64_t const* FontData()
