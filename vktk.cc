@@ -1885,6 +1885,7 @@ void Context::ScheduleRoutine(VkFence _fence, SynchronisedRoutine _routine)
 
 void Context::ScheduleFenceDestroy(VkFence _fence)
 {
+    assert(std::find(pending_fences.begin(), pending_fences.end(), _fence) == pending_fences.end());
     pending_fences.emplace(_fence);
 }
 

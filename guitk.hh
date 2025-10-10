@@ -148,6 +148,8 @@ void BeginFrame(Context context_, Frame& frame_) {
     if (iotk::MouseRelease(iotk::kLeftBtn, *context_->input, *context_->past_input))
         context_->grabbed_frame = 0;
 
+    frame_info.glyphs.clear();
+
     states.current_frame = frame_;
 }
 
