@@ -2843,6 +2843,33 @@ vkrg::layout::DispatchNode ResolveDispatchInfo()
 
 vkrg::layout::DispatchGraph SparseRegionRenderGraph()
 {
+    {
+        vkrg::layout::DispatchNode desc{};
+        desc.name = "SparseRegionDispatch";
+        desc.mode = vkrg::layout::DispatchMode_Graphics;
+        desc.sequence = std::vector<vkrg::layout::DispatchStage>{
+            SparseRegionDispatchStageInfo(),
+            GUIFramesDispatchStageInfo(),
+            GUIGlyphsDispatchStageInfo()
+        };
+
+        desc.graphics.attachments = std::vector<vkrg::layout::RenderAttachment>{
+            {
+                VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
+                numtk::vec4f{ 0.f, 1.f, 1.f, 0.f }
+            },
+            {
+                VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
+                vkrg::layout::ClearValue{ 1.f, 0u }
+            }
+        };
+
+        vkrg::layout::_DispatchGraph graph{};
+        vkrg::layout::_DispatchGraph::Node node = graph.MakeNode();
+        graph.BindComponent(node, desc);
+        vkrg::layout::DispatchNode roundtrip = *graph.ComponentLookup<vkrg::layout::DispatchNode>(node);
+    }
+
     vkrg::layout::DispatchNode node{};
     node.name = "SparseRegionDispatch";
     node.mode = vkrg::layout::DispatchMode_Graphics;

@@ -443,6 +443,98 @@ namespace vkrg
 namespace layout
 {
 
+struct _DispatchGraph
+{
+    using Node = dstk::FreeList::Index;
+    using ComponentID = uint64_t;
+    using ComponentTag = uint64_t;
+
+    struct ComponentBinding {
+        ComponentID type;
+        ComponentTag tag;
+    };
+
+    struct ComponentStorage {
+        dstk::FreeList indices;
+        dstk::BlockVector data;
+        dstk::BlockVector bindings;
+    };
+
+    Node MakeNode() {
+        return handle_pool.Reserve();
+    }
+
+    template <typename CType> void BindComponent(Node n, CType const& c) {
+        ComponentID const component_id = Component<CType>();
+
+        if (components.count(component_id) == 0)
+            components.emplace(component_id, ComponentStorage{
+                {}, dstk::BlockVector{ sizeof(CType), 256 }, dstk::BlockVector{ sizeof(uint64_t), 2046 }
+            });
+
+        ComponentStorage& storage = components.at(component_id);
+        ComponentTag component_tag = storage.indices.Reserve();
+        storage.data.Expand(storage.indices.RequiredSize());
+        storage.bindings.Expand(storage.indices.RequiredSize());
+
+        std::memcpy(storage.data[component_tag], &c, storage.data.object_size);
+        //*(CType*)storage.data[component_tag] = c;
+        *(uint64_t*)storage.bindings[component_tag] = n;
+
+        nodes[n].push_back({ component_id, component_tag });
+    }
+
+    template <typename CType> CType* ComponentLookup(Node n) {
+        ComponentID const component_id = Component<CType>();
+
+        std::vector<ComponentBinding> const& bindings = nodes[n];
+        auto binding_it = std::find_if(bindings.begin(), bindings.end(), [](ComponentBinding const& binding){
+            return binding.type == Component<CType>();
+        });
+        if (binding_it == bindings.end())
+            return nullptr;
+
+        ComponentStorage& storage = components.at(component_id);
+        return (CType*)storage.data[binding_it->tag];
+    }
+
+    template <typename CType> CType const* ComponentLookup(Node n) const {
+        ComponentID const component_id = Component<CType>();
+
+        std::vector<ComponentBinding> const& bindings = nodes[n];
+        auto binding_it = std::find_if(bindings.begin(), bindings.end(), [](ComponentBinding const& binding){
+            return binding.type == Component<CType>();
+        });
+        if (binding_it == bindings.end())
+            return nullptr;
+
+        ComponentStorage& storage = components.at(component_id);
+        return (CType const*)storage.data[binding_it->tag];
+    }
+
+    std::unordered_map<Node, std::vector<ComponentBinding>> nodes;
+    std::unordered_map<ComponentID, ComponentStorage> components;
+    std::unordered_map<Node, std::vector<Node>> edges_in;
+    std::unordered_map<Node, std::vector<Node>> edges_out;
+    dstk::FreeList handle_pool;
+
+    static ComponentID DeclareComponent() {
+        static ComponentID next_component = 0;
+        return next_component++;
+    };
+
+    template <typename T>
+    static ComponentID ComponentImpl() {
+        static ComponentID const tag = DeclareComponent();
+        return tag;
+    }
+
+    template <typename T>
+    static ComponentID Component() {
+        return ComponentImpl<typename std::remove_cvref<T>::type>();
+    }
+};
+
 struct ShaderStage {
     VkShaderStageFlagBits stage;
     std::vector<std::string> source;
