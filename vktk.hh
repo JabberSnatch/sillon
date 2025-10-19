@@ -443,6 +443,14 @@ namespace vkrg
 namespace layout
 {
 
+enum NodeTag {
+    NodeTag_Output,
+    NodeTag_Input,
+    NodeTag_Present,
+    NodeTag_BindPoint,
+    NodeTag_Edge
+};
+
 struct _DispatchGraph
 {
     using Node = dstk::FreeList::Index;
@@ -460,11 +468,36 @@ struct _DispatchGraph
         dstk::BlockVector bindings;
     };
 
-    Node MakeNode() {
-        return handle_pool.Reserve();
+    struct EdgeDesc {
+        Node source;
+        Node target;
+    };
+
+    Node MakeNode(std::string const& name = "") {
+        Node node = handle_pool.Reserve();
+        nodes[node] = {};
+        if (name != "" && name_lookup.count(name) == 0)
+            name_lookup.emplace(name, node);
+        return node;
     }
 
-    template <typename CType> void BindComponent(Node n, CType const& c) {
+    Node MakeEdge(Node source, Node target) {
+        Node edge = handle_pool.Reserve();
+        edges_in[target].push_back(edge);
+        edges_out[source].push_back(edge);
+        BindComponent(edge, EdgeDesc{ source, target });
+        return edge;
+    }
+
+    Node operator[](std::string const& name) const {
+        if (name_lookup.count(name) == 0)
+            return ~(Node)0;
+        return name_lookup.at(name);
+    }
+
+    template <typename ArgType> void BindComponent(Node n, ArgType&& c)
+    {
+        using CType = typename std::remove_cvref<ArgType>::type;
         ComponentID const component_id = Component<CType>();
 
         if (components.count(component_id) == 0)
@@ -477,45 +510,35 @@ struct _DispatchGraph
         storage.data.Expand(storage.indices.RequiredSize());
         storage.bindings.Expand(storage.indices.RequiredSize());
 
-        std::memcpy(storage.data[component_tag], &c, storage.data.object_size);
-        //*(CType*)storage.data[component_tag] = c;
+        new (storage.data[component_tag]) CType(std::forward<ArgType>(c));
         *(uint64_t*)storage.bindings[component_tag] = n;
 
         nodes[n].push_back({ component_id, component_tag });
     }
 
     template <typename CType> CType* ComponentLookup(Node n) {
-        ComponentID const component_id = Component<CType>();
-
-        std::vector<ComponentBinding> const& bindings = nodes[n];
-        auto binding_it = std::find_if(bindings.begin(), bindings.end(), [](ComponentBinding const& binding){
-            return binding.type == Component<CType>();
-        });
-        if (binding_it == bindings.end())
-            return nullptr;
-
-        ComponentStorage& storage = components.at(component_id);
-        return (CType*)storage.data[binding_it->tag];
+        return (CType*)((_DispatchGraph const*)this)->ComponentLookup<CType>(n);
     }
 
     template <typename CType> CType const* ComponentLookup(Node n) const {
         ComponentID const component_id = Component<CType>();
 
-        std::vector<ComponentBinding> const& bindings = nodes[n];
+        std::vector<ComponentBinding> const& bindings = nodes.at(n);
         auto binding_it = std::find_if(bindings.begin(), bindings.end(), [](ComponentBinding const& binding){
             return binding.type == Component<CType>();
         });
         if (binding_it == bindings.end())
             return nullptr;
 
-        ComponentStorage& storage = components.at(component_id);
+        ComponentStorage const& storage = components.at(component_id);
         return (CType const*)storage.data[binding_it->tag];
     }
 
     std::unordered_map<Node, std::vector<ComponentBinding>> nodes;
-    std::unordered_map<ComponentID, ComponentStorage> components;
     std::unordered_map<Node, std::vector<Node>> edges_in;
     std::unordered_map<Node, std::vector<Node>> edges_out;
+    std::unordered_map<ComponentID, ComponentStorage> components;
+    std::unordered_map<std::string, Node> name_lookup;
     dstk::FreeList handle_pool;
 
     static ComponentID DeclareComponent() {
@@ -673,6 +696,18 @@ struct DispatchGraph {
         VkFormat const* _swapchain_format = nullptr) const;
 
     static BindingPointSync BindingPointSyncRequirements(EdgeType type, BindingPoint const& binding_point);
+};
+
+struct _DispatchStage {
+    std::vector<ShaderStage> shaders;
+    std::vector<StageBindingGroup> binding_groups;
+    std::vector<PushConstantRange> push_constants;
+    GraphicsStage graphics;
+};
+
+struct DispatchPass {
+    DispatchMode mode;
+    GraphicsNode graphics;
 };
 
 } // namespace layout
