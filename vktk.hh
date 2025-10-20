@@ -443,15 +443,33 @@ namespace vkrg
 namespace layout
 {
 
+namespace _
+{
+
 enum NodeTag {
     NodeTag_Output,
     NodeTag_Input,
-    NodeTag_Present,
-    NodeTag_BindPoint,
-    NodeTag_Edge
+    NodeTag_Present
 };
 
-struct _DispatchGraph
+enum BindingType {
+    BindingType_None,
+    BindingType_Framebuffer,
+};
+
+struct BindingPoint {
+    BindingType type = BindingType_None;
+    union {
+        uint32_t attachment_index;
+    };
+};
+
+struct EdgeBindings {
+    BindingPoint source;
+    BindingPoint target;
+};
+
+struct DispatchGraph
 {
     using Node = dstk::FreeList::Index;
     using ComponentID = uint64_t;
@@ -502,7 +520,7 @@ struct _DispatchGraph
 
         if (components.count(component_id) == 0)
             components.emplace(component_id, ComponentStorage{
-                {}, dstk::BlockVector{ sizeof(CType), 256 }, dstk::BlockVector{ sizeof(uint64_t), 2046 }
+                {}, dstk::BlockVector{ sizeof(CType), 256 }, dstk::BlockVector{ sizeof(uint64_t), 2048 }
             });
 
         ComponentStorage& storage = components.at(component_id);
@@ -517,7 +535,7 @@ struct _DispatchGraph
     }
 
     template <typename CType> CType* ComponentLookup(Node n) {
-        return (CType*)((_DispatchGraph const*)this)->ComponentLookup<CType>(n);
+        return (CType*)((DispatchGraph const*)this)->ComponentLookup<CType>(n);
     }
 
     template <typename CType> CType const* ComponentLookup(Node n) const {
@@ -557,6 +575,8 @@ struct _DispatchGraph
         return ComponentImpl<typename std::remove_cvref<T>::type>();
     }
 };
+
+} // namespace _
 
 struct ShaderStage {
     VkShaderStageFlagBits stage;
@@ -698,7 +718,9 @@ struct DispatchGraph {
     static BindingPointSync BindingPointSyncRequirements(EdgeType type, BindingPoint const& binding_point);
 };
 
-struct _DispatchStage {
+namespace _ {
+
+struct DispatchStage {
     std::vector<ShaderStage> shaders;
     std::vector<StageBindingGroup> binding_groups;
     std::vector<PushConstantRange> push_constants;
@@ -709,6 +731,8 @@ struct DispatchPass {
     DispatchMode mode;
     GraphicsNode graphics;
 };
+
+} // namespace _
 
 } // namespace layout
 

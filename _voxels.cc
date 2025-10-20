@@ -2844,12 +2844,11 @@ vkrg::layout::DispatchNode ResolveDispatchInfo()
 vkrg::layout::DispatchGraph SparseRegionRenderGraph()
 {
     {
-        vkrg::layout::_DispatchGraph graph{};
+        vkrg::layout::_::DispatchGraph graph{};
         {
-            vkrg::layout::_DispatchGraph::Node framebuffer_pass = graph.MakeNode("SparseRegionDispatch");
+            vkrg::layout::_::DispatchGraph::Node framebuffer_pass = graph.MakeNode("SparseRegionDispatch");
             {
-                vkrg::layout::DispatchNode pass_desc = {};
-                pass_desc.name = "SparseRegionDispatch";
+                vkrg::layout::_::DispatchPass pass_desc = {};
                 pass_desc.mode = vkrg::layout::DispatchMode_Graphics;
                 pass_desc.graphics.attachments = std::vector<vkrg::layout::RenderAttachment>{
                     {
@@ -2864,9 +2863,9 @@ vkrg::layout::DispatchGraph SparseRegionRenderGraph()
                 graph.BindComponent(framebuffer_pass, pass_desc);
             }
 
-            vkrg::layout::_DispatchGraph subpasses = {};
+            vkrg::layout::_::DispatchGraph subpasses = {};
             {
-                vkrg::layout::_DispatchGraph::Node region_node = subpasses.MakeNode("SparseRegionSubpass");
+                vkrg::layout::_::DispatchGraph::Node region_node = subpasses.MakeNode("SparseRegionSubpass");
                 {
                     vkrg::layout::DispatchNode region_desc = {};
                     region_desc.name = "SparseRegionSubpass";
@@ -2876,7 +2875,7 @@ vkrg::layout::DispatchGraph SparseRegionRenderGraph()
                     subpasses.BindComponent(region_node, region_desc);
                 }
 
-                vkrg::layout::_DispatchGraph::Node gui_node = subpasses.MakeNode("GUISubpass");
+                vkrg::layout::_::DispatchGraph::Node gui_node = subpasses.MakeNode("GUISubpass");
                 {
                     vkrg::layout::DispatchNode gui_desc = {};
                     gui_desc.name = "GUISubpass";
@@ -2887,17 +2886,20 @@ vkrg::layout::DispatchGraph SparseRegionRenderGraph()
                     subpasses.BindComponent(gui_node, gui_desc);
                 }
 
-                vkrg::layout::_DispatchGraph::Node output_node = subpasses.MakeNode();
-                subpasses.BindComponent(output_node, vkrg::layout::NodeTag_Output);
-
                 subpasses.MakeEdge(region_node, gui_node);
-                subpasses.MakeEdge(gui_node, output_node);
             }
             graph.BindComponent(graph["SparseRegionDispatch"], std::move(subpasses));
 
-            vkrg::layout::_DispatchGraph::Node present = graph.MakeNode();
-            graph.BindComponent(present, vkrg::layout::NodeTag_Present);
-            graph.MakeEdge(framebuffer_pass, present);
+            vkrg::layout::_::DispatchGraph::Node present = graph.MakeNode();
+            graph.BindComponent(present, vkrg::layout::_::NodeTag_Present);
+            graph.BindComponent(graph.MakeEdge(framebuffer_pass, present),
+                                vkrg::layout::_::EdgeBindings{
+                                    vkrg::layout::_::BindingPoint{
+                                        .type = vkrg::layout::_::BindingType_Framebuffer,
+                                        .attachment_index = 0
+                                    },
+                                    {}
+                                });
         }
     }
 
