@@ -469,8 +469,7 @@ struct EdgeBindings {
     BindingPoint target;
 };
 
-struct DispatchGraph
-{
+struct Registry {
     using Node = dstk::FreeList::Index;
     using ComponentID = uint64_t;
     using ComponentTag = uint64_t;
@@ -486,34 +485,33 @@ struct DispatchGraph
         dstk::BlockVector bindings;
     };
 
-    struct EdgeDesc {
-        Node source;
-        Node target;
-    };
+    std::unordered_map<ComponentID, ComponentStorage> components;
+    std::unordered_map<Node, std::vector<ComponentBinding>> nodes;
+    dstk::FreeList handle_pool;
 
-    Node MakeNode(std::string const& name = "") {
+    Node MakeNode() {
         Node node = handle_pool.Reserve();
         nodes[node] = {};
-        if (name != "" && name_lookup.count(name) == 0)
-            name_lookup.emplace(name, node);
         return node;
     }
 
-    Node MakeEdge(Node source, Node target) {
-        Node edge = handle_pool.Reserve();
-        edges_in[target].push_back(edge);
-        edges_out[source].push_back(edge);
-        BindComponent(edge, EdgeDesc{ source, target });
-        return edge;
+    static ComponentID DeclareComponent() {
+        static ComponentID next_component = 0;
+        return next_component++;
     }
 
-    Node operator[](std::string const& name) const {
-        if (name_lookup.count(name) == 0)
-            return ~(Node)0;
-        return name_lookup.at(name);
+    template <typename T>
+    static ComponentID ComponentImpl() {
+        static ComponentID const tag = DeclareComponent();
+        return tag;
     }
 
-    template <typename ArgType> void BindComponent(Node n, ArgType&& c)
+    template <typename T>
+    static ComponentID Component() {
+        return ComponentImpl<typename std::remove_cvref<T>::type>();
+    }
+
+    template <typename ArgType> void BindComponent(Node node, ArgType&& component)
     {
         using CType = typename std::remove_cvref<ArgType>::type;
         ComponentID const component_id = Component<CType>();
@@ -528,52 +526,85 @@ struct DispatchGraph
         storage.data.Expand(storage.indices.RequiredSize());
         storage.bindings.Expand(storage.indices.RequiredSize());
 
-        new (storage.data[component_tag]) CType(std::forward<ArgType>(c));
-        *(uint64_t*)storage.bindings[component_tag] = n;
+        new (storage.data[component_tag]) CType(std::forward<ArgType>(component));
+        *(uint64_t*)storage.bindings[component_tag] = node;
 
-        nodes[n].push_back({ component_id, component_tag });
+        nodes[node].push_back({ component_id, component_tag });
     }
 
     template <typename CType> CType* ComponentLookup(Node n) {
-        return (CType*)((DispatchGraph const*)this)->ComponentLookup<CType>(n);
+        return (CType*)((Registry const*)this)->ComponentLookup<CType>(n);
     }
 
     template <typename CType> CType const* ComponentLookup(Node n) const {
         ComponentID const component_id = Component<CType>();
 
         std::vector<ComponentBinding> const& bindings = nodes.at(n);
-        auto binding_it = std::find_if(bindings.begin(), bindings.end(), [](ComponentBinding const& binding){
-            return binding.type == Component<CType>();
-        });
+        auto binding_it = std::find_if(
+            bindings.begin(), bindings.end(),
+            [](ComponentBinding const& binding){
+                return binding.type == Component<CType>();
+            });
         if (binding_it == bindings.end())
             return nullptr;
 
         ComponentStorage const& storage = components.at(component_id);
         return (CType const*)storage.data[binding_it->tag];
     }
+};
 
-    std::unordered_map<Node, std::vector<ComponentBinding>> nodes;
-    std::unordered_map<Node, std::vector<Node>> edges_in;
-    std::unordered_map<Node, std::vector<Node>> edges_out;
-    std::unordered_map<ComponentID, ComponentStorage> components;
-    std::unordered_map<std::string, Node> name_lookup;
-    dstk::FreeList handle_pool;
+struct DispatchGraph
+{
+    DispatchGraph(Registry* registry_)
+        : registry{ registry_ }
+    {}
+    DispatchGraph(DispatchGraph const&) = default;
+    DispatchGraph& operator=(DispatchGraph const&) = default;
+    DispatchGraph(DispatchGraph&&) = default;
+    DispatchGraph& operator=(DispatchGraph&&) = default;
 
-    static ComponentID DeclareComponent() {
-        static ComponentID next_component = 0;
-        return next_component++;
+    struct EdgeDesc {
+        Registry::Node source;
+        Registry::Node target;
     };
 
-    template <typename T>
-    static ComponentID ComponentImpl() {
-        static ComponentID const tag = DeclareComponent();
-        return tag;
+    Registry::Node MakeNode(std::string const& name = "") {
+        Registry::Node node = registry->MakeNode();
+        if (name != "" && name_lookup.count(name) == 0)
+            name_lookup.emplace(name, node);
+        return node;
     }
 
-    template <typename T>
-    static ComponentID Component() {
-        return ComponentImpl<typename std::remove_cvref<T>::type>();
+    Registry::Node MakeEdge(Registry::Node source, Registry::Node target) {
+        Registry::Node edge = registry->handle_pool.Reserve();
+        edges_in[target].push_back(edge);
+        edges_out[source].push_back(edge);
+        registry->BindComponent(edge, EdgeDesc{ source, target });
+        return edge;
     }
+
+    Registry::Node operator[](std::string const& name) {
+        Registry::Node node = ~(Registry::Node)0;
+        if (name_lookup.count(name) == 0) {
+            node = registry->MakeNode();
+            name_lookup.emplace(name, node);
+        }
+        else
+            node = name_lookup.at(name);
+        return node;
+    }
+
+    Registry::Node operator[](std::string const& name) const {
+        if (name_lookup.count(name) == 0)
+            return ~(Registry::Node)0;
+        return name_lookup.at(name);
+    }
+
+    Registry* registry;
+
+    std::unordered_map<Registry::Node, std::vector<Registry::Node>> edges_in;
+    std::unordered_map<Registry::Node, std::vector<Registry::Node>> edges_out;
+    std::unordered_map<std::string, Registry::Node> name_lookup;
 };
 
 } // namespace _

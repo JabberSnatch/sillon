@@ -2844,9 +2844,9 @@ vkrg::layout::DispatchNode ResolveDispatchInfo()
 vkrg::layout::DispatchGraph SparseRegionRenderGraph()
 {
     {
-        vkrg::layout::_::DispatchGraph graph{};
+        std::unique_ptr<vkrg::layout::_::Registry> registry{ new vkrg::layout::_::Registry{} };
+        vkrg::layout::_::DispatchGraph graph{ registry.get() };
         {
-            vkrg::layout::_::DispatchGraph::Node framebuffer_pass = graph.MakeNode("SparseRegionDispatch");
             {
                 vkrg::layout::_::DispatchPass pass_desc = {};
                 pass_desc.mode = vkrg::layout::DispatchMode_Graphics;
@@ -2860,46 +2860,36 @@ vkrg::layout::DispatchGraph SparseRegionRenderGraph()
                         vkrg::layout::ClearValue{ 1.f, 0u }
                     }
                 };
-                graph.BindComponent(framebuffer_pass, pass_desc);
+
+                registry->BindComponent(graph["FramebufferDispatch"], pass_desc);
             }
 
-            vkrg::layout::_::DispatchGraph subpasses = {};
             {
-                vkrg::layout::_::DispatchGraph::Node region_node = subpasses.MakeNode("SparseRegionSubpass");
+                vkrg::layout::_::DispatchGraph subpasses{ registry.get() };
+                registry->BindComponent(subpasses["SparseRegionSubpass"], SparseRegionDispatchStageInfo());
+
                 {
-                    vkrg::layout::DispatchNode region_desc = {};
-                    region_desc.name = "SparseRegionSubpass";
-                    region_desc.sequence = std::vector<vkrg::layout::DispatchStage>{
-                        SparseRegionDispatchStageInfo()
-                    };
-                    subpasses.BindComponent(region_node, region_desc);
+                    vkrg::layout::_::DispatchGraph gui_subpasses{ registry.get() };
+                    registry->BindComponent(gui_subpasses["GUIFrames"], GUIFramesDispatchStageInfo());
+                    registry->BindComponent(gui_subpasses["GUIGlyphs"], GUIGlyphsDispatchStageInfo());
+                    gui_subpasses.MakeEdge(gui_subpasses["GUIFrames"], gui_subpasses["GUIGlyphs"]);
+                    registry->BindComponent(subpasses["GUISubpass"], gui_subpasses);
                 }
 
-                vkrg::layout::_::DispatchGraph::Node gui_node = subpasses.MakeNode("GUISubpass");
-                {
-                    vkrg::layout::DispatchNode gui_desc = {};
-                    gui_desc.name = "GUISubpass";
-                    gui_desc.sequence = std::vector<vkrg::layout::DispatchStage>{
-                        GUIFramesDispatchStageInfo(),
-                        GUIGlyphsDispatchStageInfo()
-                    };
-                    subpasses.BindComponent(gui_node, gui_desc);
-                }
-
-                subpasses.MakeEdge(region_node, gui_node);
+                subpasses.MakeEdge(subpasses["SparseRegionSubpass"], subpasses["GUISubpass"]);
+                registry->BindComponent(graph["FramebufferDispatch"], subpasses);
             }
-            graph.BindComponent(graph["SparseRegionDispatch"], std::move(subpasses));
 
-            vkrg::layout::_::DispatchGraph::Node present = graph.MakeNode();
-            graph.BindComponent(present, vkrg::layout::_::NodeTag_Present);
-            graph.BindComponent(graph.MakeEdge(framebuffer_pass, present),
-                                vkrg::layout::_::EdgeBindings{
-                                    vkrg::layout::_::BindingPoint{
-                                        .type = vkrg::layout::_::BindingType_Framebuffer,
-                                        .attachment_index = 0
-                                    },
-                                    {}
-                                });
+            vkrg::layout::_::Registry::Node present = graph.MakeNode();
+            registry->BindComponent(present, vkrg::layout::_::NodeTag_Present);
+            registry->BindComponent(graph.MakeEdge(graph["FramebufferDispatch"], present),
+                                    vkrg::layout::_::EdgeBindings{
+                                        vkrg::layout::_::BindingPoint{
+                                            .type = vkrg::layout::_::BindingType_Framebuffer,
+                                            .attachment_index = 0
+                                        },
+                                        {}
+                                    });
         }
     }
 
