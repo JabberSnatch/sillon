@@ -2843,6 +2843,7 @@ vkrg::layout::DispatchNode ResolveDispatchInfo()
 
 vkrg::layout::DispatchGraph SparseRegionRenderGraph()
 {
+#if 0
     {
         std::unique_ptr<vkrg::layout::_::Registry> registry{ new vkrg::layout::_::Registry{} };
         vkrg::layout::_::DispatchGraph graph{ registry.get() };
@@ -2892,6 +2893,59 @@ vkrg::layout::DispatchGraph SparseRegionRenderGraph()
                                     });
         }
     }
+#else
+
+    {
+        vkrg::layout::_::DispatchGraph graph{};
+        {
+            graph["FramebufferDispatch"].pass_desc.reset(new vkrg::layout::_::DispatchPass{
+                .mode = vkrg::layout::DispatchMode_Graphics,
+                .graphics = {
+                    .attachments = std::vector<vkrg::layout::RenderAttachment>{
+                        {
+                            VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
+                            numtk::vec4f{ 0.f, 1.f, 1.f, 0.f }
+                        },
+                        {
+                            VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
+                            vkrg::layout::ClearValue{ 1.f, 0u }
+                        }
+                    }
+                }
+            });
+
+            {
+                graph["FramebufferDispatch"].subgraph.reset(new vkrg::layout::_::DispatchGraph());
+                vkrg::layout::_::DispatchGraph& subpasses = *graph["FramebufferDispatch"].subgraph.get();
+
+                subpasses["SparseRegionSubpass"].stage_desc.reset(
+                    new vkrg::layout::DispatchStage{ SparseRegionDispatchStageInfo() }
+                    );
+
+                {
+                    subpasses["GUISubpass"].subgraph.reset(new vkrg::layout::_::DispatchGraph());
+                    vkrg::layout::_::DispatchGraph& gui_subpasses = *subpasses["GUISubpass"].subgraph.get();
+
+                    gui_subpasses["GUIFrames"].stage_desc.reset(
+                        new vkrg::layout::DispatchStage{ GUIFramesDispatchStageInfo() }
+                        );
+                    gui_subpasses["GUIGlyphs"].stage_desc.reset(
+                        new vkrg::layout::DispatchStage{ GUIGlyphsDispatchStageInfo() }
+                        );
+                    gui_subpasses.MakeEdge("GUIFrames", "GUIGlyphs");
+                }
+
+                subpasses.MakeEdge("SparseRegionSubpass", "GUISubpass");
+            }
+            graph["Present"].node_tag = vkrg::layout::_::NodeTag_Present;
+            graph.MakeEdge("FramebufferDispatch", "Present").source_point = vkrg::layout::_::BindingPoint{
+                .type = vkrg::layout::_::BindingType_Framebuffer,
+                .attachment_index = 0
+            };
+        }
+    }
+
+#endif
 
     vkrg::layout::DispatchNode node{};
     node.name = "SparseRegionDispatch";
