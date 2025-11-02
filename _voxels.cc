@@ -181,7 +181,7 @@ vkrg::layout::DispatchNode MainWorldDispatchInfo();
 vkrg::layout::DispatchNode ResolveDispatchInfo();
 vkrg::layout::DispatchNode GUIDispatchInfo();
 
-vkrg::layout::DispatchGraph SparseRegionRenderGraph();
+vkrg::runtime::DispatchContext SparseRegionRenderGraph();
 vkrg::layout::DispatchGraph FullFrameRenderGraph();
 vkrg::layout::DispatchGraph PixelCyclingRenderGraph();
 
@@ -1043,9 +1043,10 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->pixel_cycling_runtime.vulkan = _vulkan;
     _state->pixel_cycling_runtime.graph = &_state->pixel_cycling_graph;
 
-    _state->sparse_graph = SparseRegionRenderGraph();
-    _state->sparse_runtime.vulkan = _vulkan;
-    _state->sparse_runtime.graph = &_state->sparse_graph;
+    //_state->sparse_graph = SparseRegionRenderGraph();
+    //_state->sparse_runtime.vulkan = _vulkan;
+    //_state->sparse_runtime.graph = &_state->sparse_graph;
+    _state->sparse_runtime = SparseRegionRenderGraph();
 
     //_state->region = DeserialiseRegion("../r.-1.6.mca");
 
@@ -2841,58 +2842,62 @@ vkrg::layout::DispatchNode ResolveDispatchInfo()
     return output;
 }
 
-vkrg::layout::DispatchGraph SparseRegionRenderGraph()
+vkrg::runtime::DispatchContext SparseRegionRenderGraph()
 {
-#if 0
+#if 1
+    vkrg::runtime::DispatchContext context = {};
+
     {
-        std::unique_ptr<vkrg::layout::_::Registry> registry{ new vkrg::layout::_::Registry{} };
-        vkrg::layout::_::DispatchGraph graph{ registry.get() };
+        vkrg::layout::_::DispatchGraph& graph = context._graph;
+        vkrg::layout::_::Registry& registry = *context.registry.get();
         {
-            {
-                vkrg::layout::_::DispatchPass pass_desc = {};
-                pass_desc.mode = vkrg::layout::DispatchMode_Graphics;
-                pass_desc.graphics.attachments = std::vector<vkrg::layout::RenderAttachment>{
-                    {
-                        VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
-                        numtk::vec4f{ 0.f, 1.f, 1.f, 0.f }
-                    },
-                    {
-                        VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
-                        vkrg::layout::ClearValue{ 1.f, 0u }
+            registry.BindComponent(graph["FramebufferDispatch"], vkrg::layout::_::DispatchPass{
+                .mode = vkrg::layout::DispatchMode_Graphics,
+                .graphics = {
+                    .attachments = std::vector<vkrg::layout::RenderAttachment>{
+                        {
+                            VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
+                            numtk::vec4f{ 0.f, 1.f, 1.f, 0.f }
+                        },
+                        {
+                            VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
+                            vkrg::layout::ClearValue{ 1.f, 0u }
+                        }
                     }
-                };
-
-                registry->BindComponent(graph["FramebufferDispatch"], pass_desc);
-            }
+                }
+            });
 
             {
-                vkrg::layout::_::DispatchGraph subpasses{ registry.get() };
-                registry->BindComponent(subpasses["SparseRegionSubpass"], SparseRegionDispatchStageInfo());
+                vkrg::layout::_::DispatchGraph subpasses = graph.MakeSubgraph();
+                registry.BindComponent(subpasses["SparseRegionSubpass"], SparseRegionDispatchStageInfo());
 
                 {
-                    vkrg::layout::_::DispatchGraph gui_subpasses{ registry.get() };
-                    registry->BindComponent(gui_subpasses["GUIFrames"], GUIFramesDispatchStageInfo());
-                    registry->BindComponent(gui_subpasses["GUIGlyphs"], GUIGlyphsDispatchStageInfo());
+                    vkrg::layout::_::DispatchGraph gui_subpasses = subpasses.MakeSubgraph();
+                    registry.BindComponent(gui_subpasses["GUIFrames"], GUIFramesDispatchStageInfo());
+                    registry.BindComponent(gui_subpasses["GUIGlyphs"], GUIGlyphsDispatchStageInfo());
                     gui_subpasses.MakeEdge(gui_subpasses["GUIFrames"], gui_subpasses["GUIGlyphs"]);
-                    registry->BindComponent(subpasses["GUISubpass"], gui_subpasses);
+                    registry.BindComponent(subpasses["GUISubpass"], gui_subpasses);
                 }
 
                 subpasses.MakeEdge(subpasses["SparseRegionSubpass"], subpasses["GUISubpass"]);
-                registry->BindComponent(graph["FramebufferDispatch"], subpasses);
+                registry.BindComponent(graph["FramebufferDispatch"], subpasses);
             }
 
             vkrg::layout::_::Registry::Node present = graph.MakeNode();
-            registry->BindComponent(present, vkrg::layout::_::NodeTag_Present);
-            registry->BindComponent(graph.MakeEdge(graph["FramebufferDispatch"], present),
-                                    vkrg::layout::_::EdgeBindings{
-                                        vkrg::layout::_::BindingPoint{
-                                            .type = vkrg::layout::_::BindingType_Framebuffer,
-                                            .attachment_index = 0
-                                        },
-                                        {}
-                                    });
+            registry.BindComponent(present, vkrg::layout::_::NodeTag_Present);
+            registry.BindComponent(graph.MakeEdge(graph["FramebufferDispatch"], present),
+                                   vkrg::layout::_::EdgeBindings{
+                                       vkrg::layout::_::BindingPoint{
+                                           .type = vkrg::layout::_::BindingType_Framebuffer,
+                                           .attachment_index = 0
+                                       },
+                                       {}
+                                   });
         }
     }
+
+    return context;
+
 #else
 
     {
@@ -2947,6 +2952,7 @@ vkrg::layout::DispatchGraph SparseRegionRenderGraph()
 
 #endif
 
+#if 0
     vkrg::layout::DispatchNode node{};
     node.name = "SparseRegionDispatch";
     node.mode = vkrg::layout::DispatchMode_Graphics;
@@ -2986,6 +2992,7 @@ vkrg::layout::DispatchGraph SparseRegionRenderGraph()
     });
 
     return output;
+#endif
 }
 
 vkrg::layout::DispatchGraph FullFrameRenderGraph()

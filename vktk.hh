@@ -710,6 +710,67 @@ struct Registry {
     }
 };
 
+#if 1
+struct DispatchGraph
+{
+    DispatchGraph(Registry* registry_ = nullptr)
+        : registry{ registry_ }
+    {}
+    DispatchGraph(DispatchGraph const&) = default;
+    DispatchGraph& operator=(DispatchGraph const&) = default;
+    DispatchGraph(DispatchGraph&&) = default;
+    DispatchGraph& operator=(DispatchGraph&&) = default;
+
+    struct EdgeDesc {
+        Registry::Node source;
+        Registry::Node target;
+    };
+
+    DispatchGraph MakeSubgraph() const {
+        return DispatchGraph{ registry };
+    }
+
+    Registry::Node MakeNode(std::string const& name = "") {
+        Registry::Node node = registry->MakeNode();
+        if (name != "" && name_lookup.count(name) == 0)
+            name_lookup.emplace(name, node);
+        return node;
+    }
+
+    Registry::Node MakeEdge(Registry::Node source, Registry::Node target) {
+        Registry::Node edge = registry->handle_pool.Reserve();
+        edges_in[target].push_back(edge);
+        edges_out[source].push_back(edge);
+        registry->BindComponent(edge, EdgeDesc{ source, target });
+        return edge;
+    }
+
+    Registry::Node operator[](std::string const& name) {
+        Registry::Node node = ~(Registry::Node)0;
+        if (name_lookup.count(name) == 0) {
+            node = registry->MakeNode();
+            name_lookup.emplace(name, node);
+        }
+        else
+            node = name_lookup.at(name);
+        return node;
+    }
+
+    Registry::Node operator[](std::string const& name) const {
+        if (name_lookup.count(name) == 0)
+            return ~(Registry::Node)0;
+        return name_lookup.at(name);
+    }
+
+    Registry* registry;
+
+    std::unordered_map<Registry::Node, std::vector<Registry::Node>> edges_in;
+    std::unordered_map<Registry::Node, std::vector<Registry::Node>> edges_out;
+    std::unordered_map<std::string, Registry::Node> name_lookup;
+};
+
+#else
+
 struct DispatchGraph
 {
     using Handle = dstk::FreeList::Index;
@@ -763,60 +824,6 @@ struct DispatchGraph
     dstk::FreeList handle_pool;
 };
 
-#if 0
-struct DispatchGraph
-{
-    DispatchGraph(Registry* registry_)
-        : registry{ registry_ }
-    {}
-    DispatchGraph(DispatchGraph const&) = default;
-    DispatchGraph& operator=(DispatchGraph const&) = default;
-    DispatchGraph(DispatchGraph&&) = default;
-    DispatchGraph& operator=(DispatchGraph&&) = default;
-
-    struct EdgeDesc {
-        Registry::Node source;
-        Registry::Node target;
-    };
-
-    Registry::Node MakeNode(std::string const& name = "") {
-        Registry::Node node = registry->MakeNode();
-        if (name != "" && name_lookup.count(name) == 0)
-            name_lookup.emplace(name, node);
-        return node;
-    }
-
-    Registry::Node MakeEdge(Registry::Node source, Registry::Node target) {
-        Registry::Node edge = registry->handle_pool.Reserve();
-        edges_in[target].push_back(edge);
-        edges_out[source].push_back(edge);
-        registry->BindComponent(edge, EdgeDesc{ source, target });
-        return edge;
-    }
-
-    Registry::Node operator[](std::string const& name) {
-        Registry::Node node = ~(Registry::Node)0;
-        if (name_lookup.count(name) == 0) {
-            node = registry->MakeNode();
-            name_lookup.emplace(name, node);
-        }
-        else
-            node = name_lookup.at(name);
-        return node;
-    }
-
-    Registry::Node operator[](std::string const& name) const {
-        if (name_lookup.count(name) == 0)
-            return ~(Registry::Node)0;
-        return name_lookup.at(name);
-    }
-
-    Registry* registry;
-
-    std::unordered_map<Registry::Node, std::vector<Registry::Node>> edges_in;
-    std::unordered_map<Registry::Node, std::vector<Registry::Node>> edges_out;
-    std::unordered_map<std::string, Registry::Node> name_lookup;
-};
 #endif
 
 } // namespace _
@@ -957,6 +964,9 @@ struct DispatchNodeDynamic {
 struct DispatchContext {
     vktk::Context* vulkan;
     layout::DispatchGraph const* graph;
+
+    std::unique_ptr<vkrg::layout::_::Registry> registry{ new vkrg::layout::_::Registry{} };
+    vkrg::layout::_::DispatchGraph _graph{ registry.get() };
 
     std::vector<DispatchNodeStatic> nodes_static;
     std::vector<DispatchNodeFramebuffer> nodes_framebuffer;
