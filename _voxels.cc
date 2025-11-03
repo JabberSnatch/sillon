@@ -2849,7 +2849,7 @@ vkrg::runtime::DispatchContext SparseRegionRenderGraph()
 
     {
         vkrg::layout::_::DispatchGraph& graph = context._graph;
-        vkrg::layout::_::Registry& registry = *context.registry.get();
+        dstk::Registry& registry = *context.registry.get();
         {
             registry.BindComponent(graph["FramebufferDispatch"], vkrg::layout::_::DispatchPass{
                 .mode = vkrg::layout::DispatchMode_Graphics,
@@ -2883,9 +2883,8 @@ vkrg::runtime::DispatchContext SparseRegionRenderGraph()
                 registry.BindComponent(graph["FramebufferDispatch"], subpasses);
             }
 
-            vkrg::layout::_::Registry::Node present = graph.MakeNode();
-            registry.BindComponent(present, vkrg::layout::_::NodeTag_Present);
-            registry.BindComponent(graph.MakeEdge(graph["FramebufferDispatch"], present),
+            registry.BindComponent(graph["present"], vkrg::layout::_::NodeTag_Present);
+            registry.BindComponent(graph.MakeEdge(graph["FramebufferDispatch"], graph["present"]),
                                    vkrg::layout::_::EdgeBindings{
                                        vkrg::layout::_::BindingPoint{
                                            .type = vkrg::layout::_::BindingType_Framebuffer,

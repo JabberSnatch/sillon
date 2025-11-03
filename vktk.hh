@@ -626,94 +626,10 @@ struct EdgeBindings {
     BindingPoint target;
 };
 
-struct Registry {
-    using Node = dstk::FreeList::Index;
-    using ComponentID = uint64_t;
-    using ComponentTag = uint64_t;
-
-    struct ComponentBinding {
-        ComponentID type;
-        ComponentTag tag;
-    };
-
-    struct ComponentStorage {
-        dstk::FreeList indices;
-        dstk::BlockVector data;
-        dstk::BlockVector bindings;
-    };
-
-    std::unordered_map<ComponentID, ComponentStorage> components;
-    std::unordered_map<Node, std::vector<ComponentBinding>> nodes;
-    dstk::FreeList handle_pool;
-
-    Node MakeNode() {
-        Node node = handle_pool.Reserve();
-        nodes[node] = {};
-        return node;
-    }
-
-    static ComponentID DeclareComponent() {
-        static ComponentID next_component = 0;
-        return next_component++;
-    }
-
-    template <typename T>
-    static ComponentID ComponentImpl() {
-        static ComponentID const tag = DeclareComponent();
-        return tag;
-    }
-
-    template <typename T>
-    static ComponentID Component() {
-        return ComponentImpl<typename std::remove_cvref<T>::type>();
-    }
-
-    template <typename ArgType> void BindComponent(Node node, ArgType&& component)
-    {
-        using CType = typename std::remove_cvref<ArgType>::type;
-        ComponentID const component_id = Component<CType>();
-
-        if (components.count(component_id) == 0)
-            components.emplace(component_id, ComponentStorage{
-                {}, dstk::BlockVector{ sizeof(CType), 256 }, dstk::BlockVector{ sizeof(uint64_t), 2048 }
-            });
-
-        ComponentStorage& storage = components.at(component_id);
-        ComponentTag component_tag = storage.indices.Reserve();
-        storage.data.Expand(storage.indices.RequiredSize());
-        storage.bindings.Expand(storage.indices.RequiredSize());
-
-        new (storage.data[component_tag]) CType(std::forward<ArgType>(component));
-        *(uint64_t*)storage.bindings[component_tag] = node;
-
-        nodes[node].push_back({ component_id, component_tag });
-    }
-
-    template <typename CType> CType* ComponentLookup(Node n) {
-        return (CType*)((Registry const*)this)->ComponentLookup<CType>(n);
-    }
-
-    template <typename CType> CType const* ComponentLookup(Node n) const {
-        ComponentID const component_id = Component<CType>();
-
-        std::vector<ComponentBinding> const& bindings = nodes.at(n);
-        auto binding_it = std::find_if(
-            bindings.begin(), bindings.end(),
-            [](ComponentBinding const& binding){
-                return binding.type == Component<CType>();
-            });
-        if (binding_it == bindings.end())
-            return nullptr;
-
-        ComponentStorage const& storage = components.at(component_id);
-        return (CType const*)storage.data[binding_it->tag];
-    }
-};
-
 #if 1
 struct DispatchGraph
 {
-    DispatchGraph(Registry* registry_ = nullptr)
+    DispatchGraph(dstk::Registry* registry_ = nullptr)
         : registry{ registry_ }
     {}
     DispatchGraph(DispatchGraph const&) = default;
@@ -722,31 +638,53 @@ struct DispatchGraph
     DispatchGraph& operator=(DispatchGraph&&) = default;
 
     struct EdgeDesc {
-        Registry::Node source;
-        Registry::Node target;
+        dstk::Registry::Node source;
+        dstk::Registry::Node target;
     };
 
     DispatchGraph MakeSubgraph() const {
         return DispatchGraph{ registry };
     }
 
-    Registry::Node MakeNode(std::string const& name = "") {
-        Registry::Node node = registry->MakeNode();
+    dstk::Registry::Node MakeNode(std::string const& name = "") {
+        dstk::Registry::Node node = registry->MakeNode();
         if (name != "" && name_lookup.count(name) == 0)
             name_lookup.emplace(name, node);
         return node;
     }
 
-    Registry::Node MakeEdge(Registry::Node source, Registry::Node target) {
-        Registry::Node edge = registry->handle_pool.Reserve();
+    dstk::Registry::Node MakeEdge(dstk::Registry::Node source, dstk::Registry::Node target) {
+        dstk::Registry::Node edge = registry->handle_pool.Reserve();
         edges_in[target].push_back(edge);
         edges_out[source].push_back(edge);
         registry->BindComponent(edge, EdgeDesc{ source, target });
         return edge;
     }
 
-    Registry::Node operator[](std::string const& name) {
-        Registry::Node node = ~(Registry::Node)0;
+    std::vector<dstk::Registry::Node> Inputs() const {
+        std::vector<dstk::Registry::Node> result = {};
+        for (auto const& pair : name_lookup)
+        {
+            if (edges_in.count(pair.second) == 0
+                || edges_in.at(pair.second).empty())
+                result.push_back(pair.second);
+        }
+        return result;
+    }
+
+    std::vector<dstk::Registry::Node> Outputs() const {
+        std::vector<dstk::Registry::Node> result = {};
+        for (auto const& pair : name_lookup)
+        {
+            if (edges_out.count(pair.second) == 0
+                || edges_out.at(pair.second).empty())
+                result.push_back(pair.second);
+        }
+        return result;
+    }
+
+    dstk::Registry::Node operator[](std::string const& name) {
+        dstk::Registry::Node node = ~(dstk::Registry::Node)0;
         if (name_lookup.count(name) == 0) {
             node = registry->MakeNode();
             name_lookup.emplace(name, node);
@@ -756,17 +694,17 @@ struct DispatchGraph
         return node;
     }
 
-    Registry::Node operator[](std::string const& name) const {
+    dstk::Registry::Node operator[](std::string const& name) const {
         if (name_lookup.count(name) == 0)
-            return ~(Registry::Node)0;
+            return ~(dstk::Registry::Node)0;
         return name_lookup.at(name);
     }
 
-    Registry* registry;
+    dstk::Registry* registry;
 
-    std::unordered_map<Registry::Node, std::vector<Registry::Node>> edges_in;
-    std::unordered_map<Registry::Node, std::vector<Registry::Node>> edges_out;
-    std::unordered_map<std::string, Registry::Node> name_lookup;
+    std::unordered_map<dstk::Registry::Node, std::vector<dstk::Registry::Node>> edges_in;
+    std::unordered_map<dstk::Registry::Node, std::vector<dstk::Registry::Node>> edges_out;
+    std::unordered_map<std::string, dstk::Registry::Node> name_lookup;
 };
 
 #else
@@ -965,7 +903,7 @@ struct DispatchContext {
     vktk::Context* vulkan;
     layout::DispatchGraph const* graph;
 
-    std::unique_ptr<vkrg::layout::_::Registry> registry{ new vkrg::layout::_::Registry{} };
+    std::unique_ptr<dstk::Registry> registry{ new dstk::Registry{} };
     vkrg::layout::_::DispatchGraph _graph{ registry.get() };
 
     std::vector<DispatchNodeStatic> nodes_static;
