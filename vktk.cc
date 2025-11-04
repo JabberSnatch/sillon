@@ -2423,7 +2423,9 @@ DispatchContext::GenerateStaticRuntime()
 
     while (!node_stack.empty())
     {
-        dstk::Registry::Node current_node = node_stack.back(); node_stack.pop_back();
+        dstk::Registry::Node current_node = node_stack.back();
+        vkrg::layout::_::DispatchGraph const* current_graph = graph_stack.back();
+
         vkrg::layout::_::DispatchPass const* dispatch_pass = registry->ComponentLookup<vkrg::layout::_::DispatchPass>(current_node);
         vkrg::layout::_::DispatchGraph const* dispatch_graph = registry->ComponentLookup<vkrg::layout::_::DispatchGraph>(current_node);
         vkrg::layout::DispatchStage const* dispatch_stage = registry->ComponentLookup<vkrg::layout::DispatchStage>(current_node);
@@ -2433,6 +2435,19 @@ DispatchContext::GenerateStaticRuntime()
             std::vector<dstk::Registry::Node> graph_inputs = dispatch_graph->Inputs();
             node_stack.insert(node_stack.end(), graph_inputs.begin(), graph_inputs.end());
             graph_stack.push_back(dispatch_graph);
+        }
+        else
+        {
+            node_stack.pop_back();
+            if (current_graph->edges_out.count(current_node))
+            {
+                for (dstk::Registry::Node edge : current_graph->edges_out.at(current_node))
+                {
+                    vkrg::layout::_::DispatchGraph::EdgeDesc const* edge_desc =
+                        registry->ComponentLookup<vkrg::layout::_::DispatchGraph::EdgeDesc>(edge);
+                    node_stack.push_back(edge_desc->target);
+                }
+            }
         }
     }
 
