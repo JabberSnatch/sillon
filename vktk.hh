@@ -649,7 +649,7 @@ struct DispatchGraph
     dstk::Registry::Node MakeNode(std::string const& name = "") {
         dstk::Registry::Node node = registry->MakeNode();
         if (name != "" && !name_lookup.contains(name))
-            name_lookup.emplace(name, node);
+            name_lookup.emplace(node, name);
         return node;
     }
 
@@ -663,22 +663,22 @@ struct DispatchGraph
 
     std::vector<dstk::Registry::Node> Inputs() const {
         std::vector<dstk::Registry::Node> result = {};
-        for (auto const& pair : name_lookup.right)
+        for (auto const& pair : name_lookup.pairs)
         {
-            if (edges_in.count(pair.second) == 0
-                || edges_in.at(pair.second).empty())
-                result.push_back(pair.second);
+            if (edges_in.count(pair.first) == 0
+                || edges_in.at(pair.first).empty())
+                result.push_back(pair.first);
         }
         return result;
     }
 
     std::vector<dstk::Registry::Node> Outputs() const {
         std::vector<dstk::Registry::Node> result = {};
-        for (auto const& pair : name_lookup.right)
+        for (auto const& pair : name_lookup.pairs)
         {
-            if (edges_out.count(pair.second) == 0
-                || edges_out.at(pair.second).empty())
-                result.push_back(pair.second);
+            if (edges_out.count(pair.first) == 0
+                || edges_out.at(pair.first).empty())
+                result.push_back(pair.first);
         }
         return result;
     }
@@ -687,17 +687,17 @@ struct DispatchGraph
         dstk::Registry::Node node = ~(dstk::Registry::Node)0;
         if (!name_lookup.contains(name)) {
             node = registry->MakeNode();
-            name_lookup.emplace(name, node);
+            name_lookup.emplace(node, name);
         }
         else
-            node = name_lookup.right.at(name);
+            node = name_lookup[name];
         return node;
     }
 
     dstk::Registry::Node operator[](std::string const& name) const {
         if (!name_lookup.contains(name))
             return ~(dstk::Registry::Node)0;
-        return name_lookup.right.at(name);
+        return name_lookup[name];
     }
 
     dstk::Registry* registry;
