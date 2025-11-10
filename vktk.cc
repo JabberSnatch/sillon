@@ -2430,6 +2430,17 @@ DispatchContext::GenerateStaticRuntime()
         vkrg::layout::_::DispatchGraph const* dispatch_graph = registry->ComponentLookup<vkrg::layout::_::DispatchGraph>(current_node);
         vkrg::layout::DispatchStage const* dispatch_stage = registry->ComponentLookup<vkrg::layout::DispatchStage>(current_node);
         vkrg::layout::_::NodeTag const* node_tag = registry->ComponentLookup<vkrg::layout::_::NodeTag>(current_node);
+
+        while (!current_graph->name_lookup.contains(current_node))
+        {
+            graph_stack.pop_back();
+            current_graph = graph_stack.back();
+            dispatch_graph = nullptr;
+        }
+
+        if (!node_tag)
+            std::cout << current_graph->name_lookup[current_node] << std::endl;
+
         if (dispatch_graph)
         {
             std::vector<dstk::Registry::Node> graph_inputs = dispatch_graph->Inputs();
