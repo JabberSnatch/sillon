@@ -1047,6 +1047,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     //_state->sparse_runtime.vulkan = _vulkan;
     //_state->sparse_runtime.graph = &_state->sparse_graph;
     _state->sparse_runtime = SparseRegionRenderGraph();
+    _state->sparse_runtime.vulkan = _vulkan;
 
     //_state->region = DeserialiseRegion("../r.-1.6.mca");
 
