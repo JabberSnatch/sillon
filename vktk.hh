@@ -653,12 +653,19 @@ struct DispatchGraph
         return node;
     }
 
-    dstk::Registry::Node MakeEdge(dstk::Registry::Node source, dstk::Registry::Node target) {
+    dstk::Registry::Node MakeEdge(std::string const& source, std::string const& target) {
+        dstk::Registry::Node source_node = name_lookup[source];
+        dstk::Registry::Node target_node = name_lookup[target];
+
         dstk::Registry::Node edge = registry->handle_pool.Reserve();
-        edges_in[target].push_back(edge);
-        edges_out[source].push_back(edge);
-        registry->BindComponent(edge, EdgeDesc{ source, target });
+        edges_in[target_node].push_back(edge);
+        edges_out[source_node].push_back(edge);
+        registry->BindComponent(edge, EdgeDesc{ source_node, target_node });
         return edge;
+    }
+
+    DispatchGraph const& Subgraph(std::string const& name) const {
+        return *registry->ComponentLookup<DispatchGraph>((*this)[name]);
     }
 
     std::vector<dstk::Registry::Node> Inputs() const {
@@ -942,7 +949,7 @@ struct DispatchNodeDynamic {
 
 struct DispatchContext {
     vktk::Context* vulkan;
-    layout::DispatchGraph const* graph;
+    //layout::DispatchGraph const* graph;
 
     std::unique_ptr<dstk::Registry> registry{ new dstk::Registry{} };
     vkrg::layout::_::DispatchGraph _graph{ registry.get() };

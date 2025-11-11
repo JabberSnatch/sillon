@@ -182,8 +182,8 @@ vkrg::layout::DispatchNode ResolveDispatchInfo();
 vkrg::layout::DispatchNode GUIDispatchInfo();
 
 vkrg::runtime::DispatchContext SparseRegionRenderGraph();
-vkrg::layout::DispatchGraph FullFrameRenderGraph();
-vkrg::layout::DispatchGraph PixelCyclingRenderGraph();
+vkrg::runtime::DispatchContext FullFrameRenderGraph();
+vkrg::runtime::DispatchContext PixelCyclingRenderGraph();
 
 void DecodeChunk(voxtk::BinaryRegion& region,
                  mctk::MCAChunkData const& chunk_data,
@@ -1035,13 +1035,17 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     }
 #endif
 
-    _state->forward_graph = FullFrameRenderGraph();
+    //_state->forward_graph = FullFrameRenderGraph();
+    //_state->forward_runtime.vulkan = _vulkan;
+    //_state->forward_runtime.graph = &_state->forward_graph;
+    _state->forward_runtime = FullFrameRenderGraph();
     _state->forward_runtime.vulkan = _vulkan;
-    _state->forward_runtime.graph = &_state->forward_graph;
 
-    _state->pixel_cycling_graph = PixelCyclingRenderGraph();
+    //_state->pixel_cycling_graph = PixelCyclingRenderGraph();
+    //_state->pixel_cycling_runtime.vulkan = _vulkan;
+    //_state->pixel_cycling_runtime.graph = &_state->pixel_cycling_graph;
+    _state->pixel_cycling_runtime = PixelCyclingRenderGraph();
     _state->pixel_cycling_runtime.vulkan = _vulkan;
-    _state->pixel_cycling_runtime.graph = &_state->pixel_cycling_graph;
 
     //_state->sparse_graph = SparseRegionRenderGraph();
     //_state->sparse_runtime.vulkan = _vulkan;
@@ -2876,16 +2880,16 @@ vkrg::runtime::DispatchContext SparseRegionRenderGraph()
                     vkrg::layout::_::DispatchGraph gui_subpasses = subpasses.MakeSubgraph();
                     registry.BindComponent(gui_subpasses["GUIFrames"], GUIFramesDispatchStageInfo());
                     registry.BindComponent(gui_subpasses["GUIGlyphs"], GUIGlyphsDispatchStageInfo());
-                    gui_subpasses.MakeEdge(gui_subpasses["GUIFrames"], gui_subpasses["GUIGlyphs"]);
+                    gui_subpasses.MakeEdge("GUIFrames", "GUIGlyphs");
                     registry.BindComponent(subpasses["GUISubpass"], gui_subpasses);
                 }
 
-                subpasses.MakeEdge(subpasses["SparseRegionSubpass"], subpasses["GUISubpass"]);
+                subpasses.MakeEdge("SparseRegionSubpass", "GUISubpass");
                 registry.BindComponent(graph["FramebufferDispatch"], subpasses);
             }
 
             registry.BindComponent(graph["present"], vkrg::layout::_::NodeTag_Present);
-            registry.BindComponent(graph.MakeEdge(graph["FramebufferDispatch"], graph["present"]),
+            registry.BindComponent(graph.MakeEdge("FramebufferDispatch", "present"),
                                    vkrg::layout::_::EdgeBindings{
                                        vkrg::layout::_::BindingPoint{
                                            .type = vkrg::layout::_::BindingType_Framebuffer,
@@ -2995,8 +2999,53 @@ vkrg::runtime::DispatchContext SparseRegionRenderGraph()
 #endif
 }
 
-vkrg::layout::DispatchGraph FullFrameRenderGraph()
+vkrg::runtime::DispatchContext FullFrameRenderGraph()
 {
+    vkrg::runtime::DispatchContext context = {};
+
+    {
+        vkrg::layout::_::DispatchGraph& graph = context._graph;
+        dstk::Registry& registry = *context.registry.get();
+        {
+            registry.BindComponent(graph["FramebufferDispatch"], vkrg::layout::_::DispatchPass{
+                .mode = vkrg::layout::DispatchMode_Graphics,
+                .graphics = {
+                    .attachments = {
+                        {
+                            VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
+                            numtk::vec4f{ 0.f, 1.f, 1.f, 0.f }
+                        },
+                        {
+                            VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
+                            vkrg::layout::ClearValue{ 1.f, 0u }
+                        }
+                    }
+                }
+            });
+
+            {
+                vkrg::layout::_::DispatchGraph subpasses = graph.MakeSubgraph();
+                registry.BindComponent(subpasses["RegionPass"], RegionPassDispatchStageInfo());
+                registry.BindComponent(subpasses["SkyboxPass"], SkyboxDispatchStageInfo());
+                subpasses.MakeEdge("RegionPass", "SkyboxPass");
+                registry.BindComponent(graph["FramebufferDispatch"], subpasses);
+            }
+
+            registry.BindComponent(graph["present"], vkrg::layout::_::NodeTag_Present);
+            registry.BindComponent(graph.MakeEdge("FramebufferDispatch", "present"),
+                                   vkrg::layout::_::EdgeBindings{
+                                       vkrg::layout::_::BindingPoint{
+                                           .type = vkrg::layout::_::BindingType_Framebuffer,
+                                           .attachment_index = 0
+                                       },
+                                       {}
+                                   });
+        }
+    }
+
+    return context;
+
+#if 0
     vkrg::layout::DispatchGraph output = {};
     output.nodes.push_back(MainWorldDispatchInfo());
 
@@ -3016,10 +3065,13 @@ vkrg::layout::DispatchGraph FullFrameRenderGraph()
     });
 
     return output;
+#endif
 }
 
-vkrg::layout::DispatchGraph PixelCyclingRenderGraph()
+vkrg::runtime::DispatchContext PixelCyclingRenderGraph()
 {
+    return vkrg::runtime::DispatchContext{};
+#if 0
     vkrg::layout::DispatchGraph output = {};
     output.nodes.push_back(MainWorldDispatchInfo());
     output.nodes.push_back(ResolveDispatchInfo());
@@ -3072,6 +3124,7 @@ vkrg::layout::DispatchGraph PixelCyclingRenderGraph()
     });
 
     return output;
+#endif
 }
 
 }
