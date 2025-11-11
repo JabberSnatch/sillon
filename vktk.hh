@@ -700,6 +700,47 @@ struct DispatchGraph
         return name_lookup[name];
     }
 
+    void DepthFirstTraversal(std::function<void(vkrg::layout::_::DispatchGraph const&, dstk::Registry::Node)> const& callback) {
+        std::vector<dstk::Registry::Node> node_stack = Inputs();
+        std::vector<vkrg::layout::_::DispatchGraph const*> graph_stack{ this };
+
+        while (!node_stack.empty())
+        {
+            dstk::Registry::Node current_node = node_stack.back();
+            vkrg::layout::_::DispatchGraph const* current_graph = graph_stack.back();
+            vkrg::layout::_::DispatchGraph const* dispatch_graph = registry->ComponentLookup<vkrg::layout::_::DispatchGraph>(current_node);
+
+            while (!current_graph->name_lookup.contains(current_node))
+            {
+                graph_stack.pop_back();
+                current_graph = graph_stack.back();
+                dispatch_graph = nullptr;
+            }
+
+            if (dispatch_graph)
+            {
+                std::vector<dstk::Registry::Node> graph_inputs = dispatch_graph->Inputs();
+                node_stack.insert(node_stack.end(), graph_inputs.begin(), graph_inputs.end());
+                graph_stack.push_back(dispatch_graph);
+            }
+            else
+            {
+                node_stack.pop_back();
+                if (current_graph->edges_out.count(current_node))
+                {
+                    for (dstk::Registry::Node edge : current_graph->edges_out.at(current_node))
+                    {
+                        vkrg::layout::_::DispatchGraph::EdgeDesc const* edge_desc =
+                            registry->ComponentLookup<vkrg::layout::_::DispatchGraph::EdgeDesc>(edge);
+                        node_stack.push_back(edge_desc->target);
+                    }
+                }
+            }
+
+            callback(*current_graph, current_node);
+        }
+    }
+
     dstk::Registry* registry;
 
     std::unordered_map<dstk::Registry::Node, std::vector<dstk::Registry::Node>> edges_in;
