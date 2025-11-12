@@ -612,12 +612,17 @@ enum NodeTag {
 enum BindingType {
     BindingType_None,
     BindingType_Framebuffer,
+    BindingType_Shader,
 };
 
 struct BindingPoint {
     BindingType type = BindingType_None;
     union {
         uint32_t attachment_index;
+        struct {
+            uint32_t group_index;
+            uint32_t binding_index;
+        } shader;
     };
 };
 

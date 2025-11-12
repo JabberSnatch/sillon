@@ -3070,7 +3070,82 @@ vkrg::runtime::DispatchContext FullFrameRenderGraph()
 
 vkrg::runtime::DispatchContext PixelCyclingRenderGraph()
 {
-    return vkrg::runtime::DispatchContext{};
+    vkrg::runtime::DispatchContext context = {};
+
+    {
+        vkrg::layout::_::DispatchGraph& graph = context._graph;
+        dstk::Registry& registry = *context.registry.get();
+        {
+            registry.BindComponent(graph["FramebufferDispatch"], vkrg::layout::_::DispatchPass{
+                .mode = vkrg::layout::DispatchMode_Graphics,
+                .graphics = {
+                    .attachments = {
+                        {
+                            VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
+                            numtk::vec4f{ 0.f, 1.f, 1.f, 0.f }
+                        },
+                        {
+                            VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
+                            vkrg::layout::ClearValue{ 1.f, 0u }
+                        }
+                    }
+                }
+            });
+
+            {
+                vkrg::layout::_::DispatchGraph subpasses = graph.MakeSubgraph();
+                registry.BindComponent(subpasses["RegionPass"], RegionPassDispatchStageInfo());
+                registry.BindComponent(subpasses["SkyboxPass"], SkyboxDispatchStageInfo());
+                subpasses.MakeEdge("RegionPass", "SkyboxPass");
+                registry.BindComponent(graph["FramebufferDispatch"], subpasses);
+            }
+
+            registry.BindComponent(graph["FramebufferResolve"], vkrg::layout::_::DispatchPass{
+                .mode = vkrg::layout::DispatchMode_Graphics,
+                .graphics = {
+                    .attachments = {
+                        {
+                            VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
+                            numtk::vec4f{ 0.f, 1.f, 1.f, 0.f }
+                        },
+                        {
+                            VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
+                            vkrg::layout::ClearValue{ 1.f, 0u }
+                        }
+                    }
+                }
+            });
+
+            {
+                vkrg::layout::_::DispatchGraph subpasses = graph.MakeSubgraph();
+                registry.BindComponent(subpasses["ResolvePass"], ResolveDispatchStageInfo());
+                registry.BindComponent(graph["FramebufferResolve"], subpasses);
+            }
+
+            registry.BindComponent(graph["present"], vkrg::layout::_::NodeTag_Present);
+            registry.BindComponent(graph.MakeEdge("FramebufferDispatch", "FramebufferResolve"),
+                                   vkrg::layout::_::EdgeBindings{
+                                       vkrg::layout::_::BindingPoint{
+                                           .type = vkrg::layout::_::BindingType_Framebuffer,
+                                           .attachment_index = 0
+                                       },
+                                       vkrg::layout::_::BindingPoint{
+                                           .type = vkrg::layout::_::BindingType_Shader,
+                                           .shader = { 0, 0 }
+                                       }
+                                   });
+            registry.BindComponent(graph.MakeEdge("FramebufferResolve", "present"),
+                                   vkrg::layout::_::EdgeBindings{
+                                       vkrg::layout::_::BindingPoint{
+                                           .type = vkrg::layout::_::BindingType_Framebuffer,
+                                           .attachment_index = 0
+                                       },
+                                       {}
+                                   });
+        }
+    }
+
+    return context;
 #if 0
     vkrg::layout::DispatchGraph output = {};
     output.nodes.push_back(MainWorldDispatchInfo());
