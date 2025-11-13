@@ -2077,6 +2077,29 @@ void Draw(void* _pstate,
     skybox_params.light_dir = sun_dir;
 
     {
+        dstk::Registry::Node main_world_node =
+            _state->current_runtime->_graph.Subgraph("FramebufferDispatch")["RegionPass"];
+
+        _state->current_runtime->registry->BindComponent(
+            main_world_node,
+            vkrg::bind::FramebufferArea{
+                !_state->pixel_cycling_enabled ? _swapchain.index : 0,
+                scissor,
+                viewport
+            });
+
+        {
+            vkrg::bind::GraphicsCommand command = {};
+            command.command = vkrg::bind::DispatchCommand_Draw;
+            command.vertex_count = 36;
+            command.instance_count = 1;
+
+            for (uint32_t index = 0; index < 64; ++index)
+            {
+            }
+        }
+
+#if 0
         vkrg::layout::DispatchNode const& main_world_node =
             *std::find_if(_state->current_runtime->graph->nodes.begin(),
                           _state->current_runtime->graph->nodes.end(),
@@ -2139,10 +2162,15 @@ void Draw(void* _pstate,
                     }, 0);
             *push_constants = skybox_params;
         }
+#endif
     }
 
     if (_state->pixel_cycling_enabled)
     {
+        dstk::Registry::Node resolve_node =
+            _state->current_runtime->_graph.Subgraph("FramebufferResolve")["ResolveDispatch"];
+
+#if 0
         vkrg::layout::DispatchNode const& resolve_node =
             *std::find_if(_state->current_runtime->graph->nodes.begin(),
                           _state->current_runtime->graph->nodes.end(),
@@ -2173,9 +2201,14 @@ void Draw(void* _pstate,
                     { (float)_swapchain.size.width, (float)_swapchain.size.height }
                 }
             });
+#endif
     }
 
     {
+        dstk::Registry::Node sparse_region_node =
+            _state->sparse_runtime._graph.Subgraph("FramebufferDispatch")["SparseRegionSubpass"];
+
+#if 0
         vkrg::layout::DispatchNode const& sparse_region_node =
             *std::find_if(_state->sparse_graph.nodes.begin(), _state->sparse_graph.nodes.end(),
                           [](vkrg::layout::DispatchNode const& node) {
@@ -2249,6 +2282,7 @@ void Draw(void* _pstate,
                     { (float)_swapchain.size.width, (float)_swapchain.size.height }
                 }
             });
+#endif
     }
 
 #if defined(TRAVERSAL_V1)
