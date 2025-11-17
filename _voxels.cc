@@ -1183,6 +1183,23 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     region_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     {
+        dstk::Registry::Node main_world_node =
+            _state->forward_runtime._graph.Subgraph("FramebufferDispatch")["RegionPass"];
+
+        for (uint32_t index = 0; index < 64; ++index)
+        {
+            _state->forward_runtime.registry->BindComponent(
+                main_world_node,
+                index,
+                vkrg::bind::ShaderResource{
+                    .descriptor_count = 1,
+                    .images = &region_image_info
+                });
+        }
+
+        std::vector<vkrg::bind::ShaderResource const*> test_vector =
+            _state->forward_runtime.registry->ComponentRangeLookup<vkrg::bind::ShaderResource>(main_world_node);
+#if 0
         vkrg::layout::DispatchNode const& main_world_node =
             *std::find_if(_state->forward_graph.nodes.begin(), _state->forward_graph.nodes.end(),
                           [](vkrg::layout::DispatchNode const& node) {
@@ -1258,6 +1275,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
             vkUpdateDescriptorSets(_vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
         }
+#endif
     }
 
     {
@@ -2096,6 +2114,10 @@ void Draw(void* _pstate,
 
             for (uint32_t index = 0; index < 64; ++index)
             {
+                _state->current_runtime->registry->BindComponent(
+                    main_world_node,
+                    index,
+                    command);
             }
         }
 
