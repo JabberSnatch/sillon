@@ -911,6 +911,20 @@ struct PNextEntry {
 
 using PNextMap = std::unordered_map<std::string, std::vector<PNextEntry>>;
 
+namespace _ {
+
+struct ShaderResources {
+    std::vector<VkDescriptorImageInfo> images;
+    std::vector<VkDescriptorBufferInfo> buffers;
+};
+
+struct ShaderBinding {
+    ::vkrg::layout::_::BindingPoint target;
+    ShaderResources resources;
+};
+
+} // namespace _
+
 } // namespace bind
 
 namespace runtime
