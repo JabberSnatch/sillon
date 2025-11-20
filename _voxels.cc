@@ -899,6 +899,71 @@ void SparseRegionUpdateBindings(voxel_state_t* _state, vktk::Context* _vulkan)
         _state->sparse_runtime.ResetDynamicRuntime(pNext_map);
     }
 
+    dstk::Registry::Node sparse_region_node = _state->sparse_runtime._graph.Subgraph("FramebufferDispatch")["SparseRegionSubpass"];
+
+    std::vector<VkDescriptorImageInfo> nodes_info{};
+    std::vector<VkDescriptorImageInfo> offsets_info{};
+
+    for (vktk::Texture const& node : _state->region_package.masks)
+    {
+        VkDescriptorImageInfo region_image_info{};
+        region_image_info.sampler = _state->sampler;
+        region_image_info.imageView = node.view;
+        region_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        nodes_info.push_back(region_image_info);
+    }
+
+    for (vktk::Texture const& offsets : _state->region_package.offsets)
+    {
+        VkDescriptorImageInfo offsets_image_info{};
+        offsets_image_info.sampler = _state->sampler;
+        offsets_image_info.imageView = offsets.view;
+        offsets_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        offsets_info.push_back(offsets_image_info);
+    }
+
+    VkDescriptorBufferInfo matrix_buffer_info = {};
+    matrix_buffer_info.buffer = _state->matrix_buffer;
+    matrix_buffer_info.offset = 0;
+    matrix_buffer_info.range = sizeof(MatrixBlock);
+
+    _state->sparse_runtime.registry->BindComponent(
+        sparse_region_node,
+        vkrg::bind::_::ShaderBinding{
+            vkrg::layout::_::BindingPoint{
+                .type = vkrg::layout::_::BindingType_Shader,
+                .shader = { 0, 0 }
+            },
+            vkrg::bind::_::ShaderResources{
+                .buffers = { matrix_buffer_info }
+            }
+        });
+
+    _state->sparse_runtime.registry->BindComponent(
+        sparse_region_node,
+        vkrg::bind::_::ShaderBinding{
+            vkrg::layout::_::BindingPoint{
+                .type = vkrg::layout::_::BindingType_Shader,
+                .shader = { 1, 0 }
+            },
+            vkrg::bind::_::ShaderResources{
+                .images = nodes_info
+            }
+        });
+
+    _state->sparse_runtime.registry->BindComponent(
+        sparse_region_node,
+        vkrg::bind::_::ShaderBinding{
+            vkrg::layout::_::BindingPoint{
+                .type = vkrg::layout::_::BindingType_Shader,
+                .shader = { 2, 0 }
+            },
+            vkrg::bind::_::ShaderResources{
+                .images = offsets_info
+            }
+        });
+
+#if 0
     vkrg::layout::DispatchNode const* sparse_region_node = _state->sparse_graph["SparseRegionDispatch"];
     std::vector<VkWriteDescriptorSet> bindings = {};
     std::vector<VkDescriptorImageInfo> nodes_info{};
@@ -971,6 +1036,7 @@ void SparseRegionUpdateBindings(voxel_state_t* _state, vktk::Context* _vulkan)
         );
 
     vkUpdateDescriptorSets(_vulkan->device, bindings.size(), bindings.data(), 0u, nullptr);
+#endif
 }
 
 void ConstantResources(void* _pstate, vktk::Context* _vulkan)
