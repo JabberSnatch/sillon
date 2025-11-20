@@ -1244,9 +1244,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                 });
         }
 
-        std::vector<vkrg::bind::_::ShaderBinding const*> test_vector =
-            _state->forward_runtime.registry->ComponentRangeLookup<vkrg::bind::_::ShaderBinding>(main_world_node);
-
 #if 0
         vkrg::layout::DispatchNode const& main_world_node =
             *std::find_if(_state->forward_graph.nodes.begin(), _state->forward_graph.nodes.end(),
@@ -1327,6 +1324,68 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     }
 
     {
+        dstk::Registry::Node main_world_node =
+            _state->pixel_cycling_runtime._graph.Subgraph("FramebufferDispatch")["RegionPass"];
+
+        for (uint32_t index = 0; index < 64; ++index)
+        {
+            _state->pixel_cycling_runtime.registry->BindComponent(
+                main_world_node,
+                index,
+                vkrg::bind::_::ShaderBinding{
+                    vkrg::layout::_::BindingPoint{
+                        .type = vkrg::layout::_::BindingType_Shader,
+                        .shader = { 0, 1 }
+                    },
+                    vkrg::bind::_::ShaderResources{
+                        .images = { region_image_info }
+                    }
+                });
+
+            VkDescriptorBufferInfo buffer_info = {};
+            buffer_info.buffer = _state->matrix_buffer;
+            buffer_info.offset = sizeof(MatrixBlock) * index;
+            buffer_info.range = sizeof(MatrixBlock);
+
+            _state->pixel_cycling_runtime.registry->BindComponent(
+                main_world_node,
+                index,
+                vkrg::bind::_::ShaderBinding{
+                    vkrg::layout::_::BindingPoint{
+                        .type = vkrg::layout::_::BindingType_Shader,
+                        .shader = { 0, 0 }
+                    },
+                    vkrg::bind::_::ShaderResources{
+                        .buffers = { buffer_info }
+                    }
+                });
+
+            std::vector<VkDescriptorImageInfo> section_images_info(_state->section_textures.size());
+            for (uint32_t section_index = 0u;
+                 section_index < _state->section_textures.size();
+                 ++section_index)
+            {
+                VkDescriptorImageInfo& image_info = section_images_info[section_index];
+                image_info.sampler = _state->sampler;
+                image_info.imageView = _state->section_textures[section_index].view;
+                image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            }
+
+            _state->pixel_cycling_runtime.registry->BindComponent(
+                main_world_node,
+                index,
+                vkrg::bind::_::ShaderBinding{
+                    vkrg::layout::_::BindingPoint{
+                        .type = vkrg::layout::_::BindingType_Shader,
+                        .shader = { 0, 2 }
+                    },
+                    vkrg::bind::_::ShaderResources{
+                        .images = section_images_info
+                    }
+                });
+        }
+
+#if 0
         vkrg::layout::DispatchNode const& main_world_node =
             *std::find_if(_state->pixel_cycling_graph.nodes.begin(), _state->pixel_cycling_graph.nodes.end(),
                           [](vkrg::layout::DispatchNode const& node) {
@@ -1402,6 +1461,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
             vkUpdateDescriptorSets(_vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
         }
+#endif
     }
 
     SparseRegionUpdateBindings(_state, _vulkan);
