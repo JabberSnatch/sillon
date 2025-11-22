@@ -1620,6 +1620,7 @@ void RenderResources(void* _pstate,
         _state->forward_runtime.ClearFramebufferRuntime();
         _state->forward_runtime.GenerateFramebufferRuntime(&_swapchain.format);
 
+#if 0
         vkrg::layout::DispatchNode const& main_world_node =
             *std::find_if(_state->forward_graph.nodes.begin(), _state->forward_graph.nodes.end(),
                           [](vkrg::layout::DispatchNode const& node) {
@@ -1627,6 +1628,7 @@ void RenderResources(void* _pstate,
                           });
 
         _state->forward_runtime.BindSwapchain(&main_world_node, _swapchain);
+#endif
     }
 
     {
@@ -1668,7 +1670,9 @@ void RenderResources(void* _pstate,
             &main_world_node, size,
             { _state->primary_pass_color.view, _state->primary_pass_depth.view }
             );
+#if 0
         _state->pixel_cycling_runtime.BindSwapchain(&resolve_node, _swapchain);
+#endif
 
         VkDescriptorImageInfo image_info{};
         image_info.sampler = _state->sampler;
@@ -1704,6 +1708,7 @@ void RenderResources(void* _pstate,
         _state->sparse_runtime.ClearFramebufferRuntime();
         _state->sparse_runtime.GenerateFramebufferRuntime(&_swapchain.format);
 
+#if 0
         vkrg::layout::DispatchNode const& sparse_region_node =
             *std::find_if(_state->sparse_graph.nodes.begin(), _state->sparse_graph.nodes.end(),
                           [](vkrg::layout::DispatchNode const& node) {
@@ -1711,6 +1716,7 @@ void RenderResources(void* _pstate,
                           });
 
         _state->sparse_runtime.BindSwapchain(&sparse_region_node, _swapchain);
+#endif
     }
 
     {

@@ -987,6 +987,15 @@ struct DispatchContext {
     void ResetDynamicRuntime(bind::PNextMap const& _pNext_map = {});
     void Dispatch(vktk::CommandBuffer& _command_buffer) const;
 
+    std::vector<vktk::Context::RenderPassAttachment> RenderPassDescription(
+        dstk::Registry::Node _node,
+        VkFormat const* _swapchain_format = nullptr) const;
+
+    vkrg::layout::BindingPointSync BindingPointSyncRequirements(
+        dstk::Registry::Node _node,
+        vkrg::layout::EdgeType _type,
+        vkrg::layout::_::BindingPoint const& _binding_point) const;
+
     void UpdateDynamicInvocationCount(layout::DispatchNode const* _node,
                                       uint32_t _stage_index,
                                       uint32_t _invocation_count);
@@ -1002,7 +1011,7 @@ struct DispatchContext {
     void ClearStageBarriers(layout::DispatchNode const* _node,
                             uint32_t _stage_index);
 
-    void BindSwapchain(layout::DispatchNode const* _node,
+    void BindSwapchain(dstk::Registry::Node _node,
                        vktk::Swapchain const& _swapchain);
     void BindAttachments(layout::DispatchNode const* _node,
                          numtk::vec2u const& _size,

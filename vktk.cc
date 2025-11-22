@@ -2868,6 +2868,109 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
 #endif
 }
 
+std::vector<vktk::Context::RenderPassAttachment>
+DispatchContext::RenderPassDescription(
+    dstk::Registry::Node _node,
+    VkFormat const* _swapchain_format) const
+{
+    auto const& dispatch_pass = *_graph.registry->ComponentLookup<vkrg::layout::_::DispatchPass>(_node);
+
+    std::vector<vktk::Context::RenderPassAttachment> output = {};
+
+    for (uint32_t index = 0u; index < (uint32_t)dispatch_pass.graphics.attachments.size(); ++index)
+    {
+        output.push_back(vktk::Context::RenderPassAttachment{
+            dispatch_pass.graphics.attachments[index].format,
+            VK_IMAGE_LAYOUT_UNDEFINED,
+            {}
+        });
+    }
+
+    return output;
+}
+
+vkrg::layout::BindingPointSync
+DispatchContext::BindingPointSyncRequirements(
+    dstk::Registry::Node _node,
+    vkrg::layout::EdgeType _type,
+    vkrg::layout::_::BindingPoint const& _binding_point) const
+{
+    vkrg::layout::BindingPointSync output = {};
+    output.access = VK_ACCESS_NONE;
+    output.layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    output.stage = 0;
+
+    if (_type == vkrg::layout::EdgeType_Image)
+    {
+        switch (_binding_point.type)
+        {
+
+#if 0
+        case BindingType_Shader:
+        {
+            ShaderLocation const& location = binding_point.shader;
+            DispatchStage const& stage_info =
+                binding_point.node->sequence[binding_point.stage_index];
+            StageBinding const& binding = stage_info
+                .binding_groups[location.group_index]
+                .bindings[location.binding_index];
+
+            switch (binding.type)
+            {
+
+            case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER: {
+                output.access = VK_ACCESS_SHADER_READ_BIT;
+                output.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            } break;
+
+            case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE: {
+                output.access = VK_ACCESS_SHADER_READ_BIT;
+                output.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            } break;
+
+            case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE: {
+                output.access = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+                output.layout = VK_IMAGE_LAYOUT_GENERAL;
+            } break;
+
+            default: break;
+            }
+        } break;
+
+        case BindingType_Framebuffer:
+        {
+            FramebufferLocation const& location = binding_point.framebuffer;
+            RenderAttachment const& attachment_info =
+                binding_point.node->graphics.attachments[location.attachment_index];
+
+            if (attachment_info.format >= VK_FORMAT_D16_UNORM
+                && attachment_info.format < VK_FORMAT_BC1_RGB_UNORM_BLOCK)
+            {
+                output.access = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT
+                    | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+                output.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            }
+            else
+            {
+                output.access = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT
+                    | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+                output.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+            }
+        } break;
+
+        case BindingType_Present:
+        {
+            output.access = 0;
+            output.layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        } break;
+#endif
+
+        default: break;
+        }
+    }
+
+    return output;
+}
 
 void
 DispatchContext::UpdateDynamicInvocationCount(layout::DispatchNode const* _node,
@@ -3008,11 +3111,17 @@ DispatchContext::ClearStageBarriers(layout::DispatchNode const* _node,
 #endif
 }
 
-
 void
-DispatchContext::BindSwapchain(layout::DispatchNode const* _node,
+DispatchContext::BindSwapchain(dstk::Registry::Node _node,
                                vktk::Swapchain const& _swapchain)
 {
+#if 0
+    for (uint32_t index = 0u; index < (uint32_t)_swapchain.framebuffer.size(); ++index)
+    {
+        vulkan->CreateFramebuffer(framebuffer.graphics.render_pass);
+    }
+#endif
+
 #if 0
     uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
     if (nodes_bindings.size() < node_index+1)
