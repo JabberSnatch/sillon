@@ -2418,11 +2418,11 @@ DispatchContext::ClearDynamicRuntime()
 void
 DispatchContext::GenerateStaticRuntime()
 {
-    _graph.DepthFirstTraversal([this](vkrg::layout::_::DispatchGraph const& graph, dstk::Registry::Node node) {
-        auto const* dispatch_pass = graph.registry->ComponentLookup<vkrg::layout::_::DispatchPass>(node);
-        auto const* dispatch_graph = graph.registry->ComponentLookup<vkrg::layout::_::DispatchGraph>(node);
-        auto const* dispatch_stage = graph.registry->ComponentLookup<vkrg::layout::DispatchStage>(node);
-        auto const* node_tag = graph.registry->ComponentLookup<vkrg::layout::_::NodeTag>(node);
+    _graph.DepthFirstTraversal([this](layout::_::DispatchGraph const& graph, dstk::Registry::Node node) {
+        auto const* dispatch_pass = graph.registry->ComponentLookup<layout::_::DispatchPass>(node);
+        auto const* dispatch_graph = graph.registry->ComponentLookup<layout::_::DispatchGraph>(node);
+        auto const* dispatch_stage = graph.registry->ComponentLookup<layout::DispatchStage>(node);
+        auto const* node_tag = graph.registry->ComponentLookup<layout::_::NodeTag>(node);
 
         std::string const& node_name = graph.name_lookup[node];
 
@@ -2479,7 +2479,7 @@ DispatchContext::GenerateStaticRuntime()
 
         if (!node_tag)
             std::cout << graph.name_lookup[node] << std::endl;
-        else if (*node_tag == vkrg::layout::_::NodeTag_Present)
+        else if (*node_tag == layout::_::NodeTag_Present)
             std::cout << "Present" << std::endl;
     });
 
@@ -2550,16 +2550,37 @@ DispatchContext::GenerateStaticRuntime()
 void
 DispatchContext::GenerateFramebufferRuntime(VkFormat const* _swapchain_format)
 {
-    _graph.DepthFirstTraversal([this, _swapchain_format](vkrg::layout::_::DispatchGraph const& graph,
+    _graph.DepthFirstTraversal([this, _swapchain_format](layout::_::DispatchGraph const& graph,
                                                          dstk::Registry::Node node) {
-        auto const* dispatch_pass = graph.registry->ComponentLookup<vkrg::layout::_::DispatchPass>(node);
-        auto const* dispatch_stage = graph.registry->ComponentLookup<vkrg::layout::DispatchStage>(node);
-        auto const* stage_static = graph.registry->ComponentLookup<DispatchStageStatic>(node);
+        auto const* dispatch_pass = graph.registry->ComponentLookup<layout::_::DispatchPass>(node);
+        auto const* dispatch_stage = graph.registry->ComponentLookup<layout::DispatchStage>(node);
 
-        if (dispatch_pass)
+        if (dispatch_pass
+            && dispatch_pass->mode == layout::DispatchMode_Graphics)
+            registry->BindComponent(
+                node,
+                vulkan->CreateRenderPass(RenderPassDescription(node, _swapchain_format)));
+
+        if (dispatch_stage)
         {
-            if (dispatch_pass->mode == layout::DispatchMode_Graphics)
-            {}
+            auto const& runtime = *graph.registry->ComponentLookup<DispatchStageStatic>(node);
+
+            std::vector<vktk::Context::PipelineStage> pipeline_stages = {};
+            for (layout::ShaderStage const& shader : dispatch_stage->shaders)
+            {
+                std::string shader_name = dispatch_stage->name;
+                switch (shader.stage)
+                {
+                case VK_SHADER_STAGE_VERTEX_BIT: shader_name += "_vertex"; break;
+                case VK_SHADER_STAGE_FRAGMENT_BIT: shader_name += "_fragment"; break;
+                default: shader_name += "_unknown"; break;
+                }
+
+                VkShaderModule shader_module =
+                    vulkan->CompileShader_GLSL(shader.stage, shader_name.c_str(), shader.source);
+
+                pipeline_stages.push_back(vktk::Context::PipelineStage{ shader_module, shader.stage });
+            }
         }
     });
 
@@ -2873,7 +2894,7 @@ DispatchContext::RenderPassDescription(
     dstk::Registry::Node _node,
     VkFormat const* _swapchain_format) const
 {
-    auto const& dispatch_pass = *_graph.registry->ComponentLookup<vkrg::layout::_::DispatchPass>(_node);
+    auto const& dispatch_pass = *_graph.registry->ComponentLookup<layout::_::DispatchPass>(_node);
 
     std::vector<vktk::Context::RenderPassAttachment> output = {};
 
@@ -2889,31 +2910,28 @@ DispatchContext::RenderPassDescription(
     return output;
 }
 
-vkrg::layout::BindingPointSync
+layout::BindingPointSync
 DispatchContext::BindingPointSyncRequirements(
     dstk::Registry::Node _node,
-    vkrg::layout::EdgeType _type,
-    vkrg::layout::_::BindingPoint const& _binding_point) const
+    layout::EdgeType _type,
+    layout::_::BindingPoint const& _binding_point) const
 {
-    vkrg::layout::BindingPointSync output = {};
+    layout::BindingPointSync output = {};
     output.access = VK_ACCESS_NONE;
     output.layout = VK_IMAGE_LAYOUT_UNDEFINED;
     output.stage = 0;
 
-    if (_type == vkrg::layout::EdgeType_Image)
+    if (_type == layout::EdgeType_Image)
     {
         switch (_binding_point.type)
         {
 
-#if 0
-        case BindingType_Shader:
+        case layout::_::BindingType_Shader:
         {
-            ShaderLocation const& location = binding_point.shader;
-            DispatchStage const& stage_info =
-                binding_point.node->sequence[binding_point.stage_index];
-            StageBinding const& binding = stage_info
-                .binding_groups[location.group_index]
-                .bindings[location.binding_index];
+            layout::_::DispatchStage const& stage = *registry->ComponentLookup<layout::_::DispatchStage>(_node);
+            layout::StageBinding const& binding = stage
+                .binding_groups[_binding_point.shader.group_index]
+                .bindings[_binding_point.shader.binding_index];
 
             switch (binding.type)
             {
@@ -2937,11 +2955,11 @@ DispatchContext::BindingPointSyncRequirements(
             }
         } break;
 
-        case BindingType_Framebuffer:
+        case layout::_::BindingType_Framebuffer:
         {
-            FramebufferLocation const& location = binding_point.framebuffer;
-            RenderAttachment const& attachment_info =
-                binding_point.node->graphics.attachments[location.attachment_index];
+            layout::_::DispatchPass const& pass = *registry->ComponentLookup<layout::_::DispatchPass>(_node);
+            layout::RenderAttachment const& attachment_info =
+                pass.graphics.attachments[_binding_point.attachment_index];
 
             if (attachment_info.format >= VK_FORMAT_D16_UNORM
                 && attachment_info.format < VK_FORMAT_BC1_RGB_UNORM_BLOCK)
@@ -2958,6 +2976,7 @@ DispatchContext::BindingPointSyncRequirements(
             }
         } break;
 
+#if 0
         case BindingType_Present:
         {
             output.access = 0;
