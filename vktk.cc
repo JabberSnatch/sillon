@@ -2418,7 +2418,8 @@ DispatchContext::ClearDynamicRuntime()
 void
 DispatchContext::GenerateStaticRuntime()
 {
-    _graph.DepthFirstTraversal([this](layout::_::DispatchGraph const& graph, dstk::Registry::Node node) {
+    _graph.DepthFirstTraversal([this](std::vector<layout::_::DispatchGraph const*> const& graph_stack, dstk::Registry::Node node) {
+        layout::_::DispatchGraph const& graph = *graph_stack.back();
         auto const* dispatch_pass = graph.registry->ComponentLookup<layout::_::DispatchPass>(node);
         auto const* dispatch_graph = graph.registry->ComponentLookup<layout::_::DispatchGraph>(node);
         auto const* dispatch_stage = graph.registry->ComponentLookup<layout::DispatchStage>(node);
@@ -2550,8 +2551,9 @@ DispatchContext::GenerateStaticRuntime()
 void
 DispatchContext::GenerateFramebufferRuntime(VkFormat const* _swapchain_format)
 {
-    _graph.DepthFirstTraversal([this, _swapchain_format](layout::_::DispatchGraph const& graph,
+    _graph.DepthFirstTraversal([this, _swapchain_format](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
                                                          dstk::Registry::Node node) {
+        layout::_::DispatchGraph const& graph = *graph_stack.back();
         auto const* dispatch_pass = graph.registry->ComponentLookup<layout::_::DispatchPass>(node);
         auto const* dispatch_stage = graph.registry->ComponentLookup<layout::DispatchStage>(node);
 

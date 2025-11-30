@@ -647,8 +647,12 @@ struct DispatchGraph
         dstk::Registry::Node target;
     };
 
-    DispatchGraph MakeSubgraph() const {
-        return DispatchGraph{ registry };
+    DispatchGraph& MakeSubgraph(std::string const& parent_node) {
+        dstk::Registry::Node node = this->operator[](parent_node);
+        DispatchGraph output{ registry };
+        output.parent_node = node;
+        registry->BindComponent(node, output);
+        return *registry->ComponentLookup<DispatchGraph>(node);
     }
 
     dstk::Registry::Node MakeNode(std::string const& name = "") {
@@ -712,7 +716,7 @@ struct DispatchGraph
         return name_lookup[name];
     }
 
-    void DepthFirstTraversal(std::function<void(vkrg::layout::_::DispatchGraph const&, dstk::Registry::Node)> const& callback) {
+    void DepthFirstTraversal(std::function<void(std::vector<vkrg::layout::_::DispatchGraph const*> const&, dstk::Registry::Node)> const& callback) {
         std::vector<dstk::Registry::Node> node_stack = Inputs();
         std::vector<vkrg::layout::_::DispatchGraph const*> graph_stack{ this };
 
@@ -728,6 +732,8 @@ struct DispatchGraph
                 current_graph = graph_stack.back();
                 dispatch_graph = nullptr;
             }
+
+            callback(graph_stack, current_node);
 
             if (dispatch_graph)
             {
@@ -748,13 +754,12 @@ struct DispatchGraph
                     }
                 }
             }
-
-            callback(*current_graph, current_node);
         }
     }
 
     dstk::Registry* registry;
 
+    dstk::Registry::Node parent_node = dstk::FreeList::kInvalidIndex;
     std::unordered_map<dstk::Registry::Node, std::vector<dstk::Registry::Node>> edges_in;
     std::unordered_map<dstk::Registry::Node, std::vector<dstk::Registry::Node>> edges_out;
     dstk::BijectiveMap<dstk::Registry::Node, std::string> name_lookup;

@@ -3109,19 +3109,17 @@ vkrg::runtime::DispatchContext SparseRegionRenderGraph()
             });
 
             {
-                vkrg::layout::_::DispatchGraph subpasses = graph.MakeSubgraph();
+                vkrg::layout::_::DispatchGraph& subpasses = graph.MakeSubgraph("FramebufferDispatch");
                 registry.BindComponent(subpasses["SparseRegionSubpass"], SparseRegionDispatchStageInfo());
 
                 {
-                    vkrg::layout::_::DispatchGraph gui_subpasses = subpasses.MakeSubgraph();
+                    vkrg::layout::_::DispatchGraph& gui_subpasses = subpasses.MakeSubgraph("GUISubpass");
                     registry.BindComponent(gui_subpasses["GUIFrames"], GUIFramesDispatchStageInfo());
                     registry.BindComponent(gui_subpasses["GUIGlyphs"], GUIGlyphsDispatchStageInfo());
                     gui_subpasses.MakeEdge("GUIFrames", "GUIGlyphs");
-                    registry.BindComponent(subpasses["GUISubpass"], gui_subpasses);
                 }
 
                 subpasses.MakeEdge("SparseRegionSubpass", "GUISubpass");
-                registry.BindComponent(graph["FramebufferDispatch"], subpasses);
             }
 
             registry.BindComponent(graph["present"], vkrg::layout::_::NodeTag_Present);
@@ -3260,11 +3258,10 @@ vkrg::runtime::DispatchContext FullFrameRenderGraph()
             });
 
             {
-                vkrg::layout::_::DispatchGraph subpasses = graph.MakeSubgraph();
+                vkrg::layout::_::DispatchGraph& subpasses = graph.MakeSubgraph("FramebufferDispatch");
                 registry.BindComponent(subpasses["RegionPass"], RegionPassDispatchStageInfo());
                 registry.BindComponent(subpasses["SkyboxPass"], SkyboxDispatchStageInfo());
                 subpasses.MakeEdge("RegionPass", "SkyboxPass");
-                registry.BindComponent(graph["FramebufferDispatch"], subpasses);
             }
 
             registry.BindComponent(graph["present"], vkrg::layout::_::NodeTag_Present);
@@ -3329,11 +3326,10 @@ vkrg::runtime::DispatchContext PixelCyclingRenderGraph()
             });
 
             {
-                vkrg::layout::_::DispatchGraph subpasses = graph.MakeSubgraph();
+                vkrg::layout::_::DispatchGraph& subpasses = graph.MakeSubgraph("FramebufferDispatch");
                 registry.BindComponent(subpasses["RegionPass"], RegionPassDispatchStageInfo());
                 registry.BindComponent(subpasses["SkyboxPass"], SkyboxDispatchStageInfo());
                 subpasses.MakeEdge("RegionPass", "SkyboxPass");
-                registry.BindComponent(graph["FramebufferDispatch"], subpasses);
             }
 
             registry.BindComponent(graph["FramebufferResolve"], vkrg::layout::_::DispatchPass{
@@ -3353,9 +3349,8 @@ vkrg::runtime::DispatchContext PixelCyclingRenderGraph()
             });
 
             {
-                vkrg::layout::_::DispatchGraph subpasses = graph.MakeSubgraph();
+                vkrg::layout::_::DispatchGraph& subpasses = graph.MakeSubgraph("FramebufferResolve");
                 registry.BindComponent(subpasses["ResolvePass"], ResolveDispatchStageInfo());
-                registry.BindComponent(graph["FramebufferResolve"], subpasses);
             }
 
             registry.BindComponent(graph["present"], vkrg::layout::_::NodeTag_Present);
