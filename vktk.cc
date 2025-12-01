@@ -2567,6 +2567,25 @@ DispatchContext::GenerateFramebufferRuntime(VkFormat const* _swapchain_format)
         {
             auto const& runtime = *graph.registry->ComponentLookup<DispatchStageStatic>(node);
 
+            dstk::Registry::Node dispatch_pass_node = dstk::FreeList::kInvalidIndex;
+            layout::_::DispatchPass const* parent_pass = nullptr;
+            for (uint32_t index = 0u; index < graph_stack.size(); ++index)
+            {
+                layout::_::DispatchGraph const* graph = graph_stack[graph_stack.size()-index-1];
+                if (graph->parent_node == dstk::FreeList::kInvalidIndex)
+                    continue;
+
+                parent_pass = registry->ComponentLookup<layout::_::DispatchPass>(graph->parent_node);
+                if (parent_pass)
+                {
+                    dispatch_pass_node = graph->parent_node;
+                    break;
+                }
+            }
+            assert(parent_pass);
+
+            auto const* render_pass = registry->ComponentLookup<VkRenderPass>(dispatch_pass_node);
+
             std::vector<vktk::Context::PipelineStage> pipeline_stages = {};
             for (layout::ShaderStage const& shader : dispatch_stage->shaders)
             {
@@ -2583,6 +2602,23 @@ DispatchContext::GenerateFramebufferRuntime(VkFormat const* _swapchain_format)
 
                 pipeline_stages.push_back(vktk::Context::PipelineStage{ shader_module, shader.stage });
             }
+
+            if (parent_pass->mode == layout::DispatchMode_Graphics)
+            {
+                VkPipeline pipeline = vulkan->CreatePipeline(
+                    runtime.pipeline_layout,
+                    *render_pass,
+                    pipeline_stages,
+                    dispatch_stage->graphics.state_overrides,
+                    dispatch_stage->graphics.topology,
+                    dispatch_stage->graphics.input_layout
+                    );
+
+                registry->BindComponent(node, pipeline);
+            }
+
+            for (vktk::Context::PipelineStage const& pipeline_stage : pipeline_stages)
+                vkDestroyShaderModule(vulkan->device, pipeline_stage.module, nullptr);
         }
     });
 
