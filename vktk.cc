@@ -2682,6 +2682,62 @@ DispatchContext::GenerateFramebufferRuntime(VkFormat const* _swapchain_format)
 void
 DispatchContext::ResetDynamicRuntime(bind::PNextMap const& _pNext_map)
 {
+    _graph.DepthFirstTraversal([this, _pNext_map](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
+                                                  dstk::Registry::Node node) {
+        std::string const& node_name = graph_stack.back()->name_lookup[node];
+
+        auto const* dispatch_stage = registry->ComponentLookup<layout::DispatchStage>(node);
+
+        if (dispatch_stage)
+        {
+            auto* stage_static = registry->ComponentLookup<DispatchStageStatic>(node);
+            DispatchStageDynamic stage_dynamic = {};
+            stage_dynamic.invocation_count = dispatch_stage->invocation_count;
+
+            std::vector<bind::PNextEntry> stage_pnexts = {};
+            if (_pNext_map.count(node_name))
+                stage_pnexts = _pNext_map.at(node_name);
+
+            for (uint32_t group_index = 0u; group_index < (uint32_t)dispatch_stage->binding_groups.size(); ++group_index)
+            {
+                StageBindingGroupStatic& binding_group_static = stage_static->binding_groups[group_index];
+                StageBindingGroupDynamic binding_group_dynamic = {};
+                binding_group_dynamic.sets.resize(stage_dynamic.invocation_count);
+
+                void* pnext_begin = nullptr;
+
+                VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc;
+                {
+                    auto group_pnext_it = std::find_if(
+                        stage_pnexts.begin(), stage_pnexts.end(),
+                        [group_index](bind::PNextEntry const& entry) {
+                            return entry.binding_group_index == group_index;
+                        });
+
+                    if (group_pnext_it != stage_pnexts.end())
+                    {
+                        void* desc_count_alloc_ptr = vktk::PNextLookup(
+                            (VkBaseOutStructure*)group_pnext_it->pnext,
+                            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO);
+                        desc_count_alloc = desc_count_alloc_ptr
+                            ? *(VkDescriptorSetVariableDescriptorCountAllocateInfo const*)desc_count_alloc_ptr
+                            : VkDescriptorSetVariableDescriptorCountAllocateInfo{};
+                        desc_count_alloc.pNext = nullptr;
+                        pnext_begin = desc_count_alloc_ptr ? &desc_count_alloc : nullptr;
+                    }
+                }
+
+                for (uint32_t index = 0; index < stage_dynamic.invocation_count; ++index)
+                    binding_group_dynamic.sets[index] = binding_group_static.pool.AllocateDescriptorSet(pnext_begin);
+
+                stage_dynamic.binding_groups.push_back(binding_group_dynamic);
+            }
+
+            registry->BindComponent(node, stage_dynamic);
+        }
+    });
+
+
 #if 0
     ClearDynamicRuntime();
 
