@@ -716,7 +716,7 @@ struct DispatchGraph
         return name_lookup[name];
     }
 
-    void DepthFirstTraversal(std::function<void(std::vector<vkrg::layout::_::DispatchGraph const*> const&, dstk::Registry::Node)> const& callback) {
+    void DepthFirstTraversal(std::function<void(std::vector<vkrg::layout::_::DispatchGraph const*> const&, dstk::Registry::Node)> const& callback) const {
         std::vector<dstk::Registry::Node> node_stack = Inputs();
         std::vector<vkrg::layout::_::DispatchGraph const*> graph_stack{ this };
 
