@@ -2870,6 +2870,7 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
 
             VkRenderPass render_pass = *registry->ComponentLookup<VkRenderPass>(node);
 
+#if 0
             VkRenderPassBeginInfo rp_begin_info{};
             rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
             rp_begin_info.pNext = nullptr;
@@ -2880,6 +2881,7 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
             rp_begin_info.clearValueCount = clear_values.size();
             rp_begin_info.pClearValues = clear_values.data();
             vkCmdBeginRenderPass(_command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+#endif
 
             // TODO
         }
@@ -3295,12 +3297,17 @@ void
 DispatchContext::BindSwapchain(dstk::Registry::Node _node,
                                vktk::Swapchain const& _swapchain)
 {
-#if 0
-    for (uint32_t index = 0u; index < (uint32_t)_swapchain.framebuffer.size(); ++index)
+    VkRenderPass render_pass = *registry->ComponentLookup<VkRenderPass>(_node);
+    std::vector<VkFramebuffer> framebuffers = {};
+    for (uint32_t index = 0u; index < (uint32_t)_swapchain.framebuffers.size(); ++index)
     {
-        vulkan->CreateFramebuffer(framebuffer.graphics.render_pass);
+        framebuffers.push_back(
+            vulkan->CreateFramebuffer(render_pass,
+                                      { _swapchain.size.width, _swapchain.size.height },
+                                      { _swapchain.views[index*2], _swapchain.views[index*2 + 1] })
+            );
     }
-#endif
+    registry->BindComponent(_node, framebuffers);
 
 #if 0
     uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
@@ -3322,10 +3329,21 @@ DispatchContext::BindSwapchain(dstk::Registry::Node _node,
 }
 
 void
-DispatchContext::BindAttachments(layout::DispatchNode const* _node,
+DispatchContext::BindAttachments(dstk::Registry::Node _node,
                                  numtk::vec2u const& _size,
                                  std::vector<VkImageView> const& _attachments)
 {
+    std::vector<VkFramebuffer>& framebuffers = [&]() -> std::vector<VkFramebuffer>& {
+        auto* framebuffers = registry->ComponentLookup<std::vector<VkFramebuffer>>(_node);
+        if (!framebuffers)
+            framebuffers = registry->BindComponent(_node, std::vector<VkFramebuffer>{});
+        return *framebuffers;
+    }();
+
+    VkRenderPass render_pass = *registry->ComponentLookup<VkRenderPass>(_node);
+
+    framebuffers.push_back(vulkan->CreateFramebuffer(render_pass, _size, _attachments));
+
 #if 0
     uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
     if (nodes_bindings.size() < node_index+1)

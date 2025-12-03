@@ -1629,6 +1629,7 @@ void RenderResources(void* _pstate,
 
         _state->forward_runtime.BindSwapchain(&main_world_node, _swapchain);
 #endif
+        _state->forward_runtime.BindSwapchain(_state->forward_runtime._graph["FramebufferDispatch"], _swapchain);
     }
 
     {
@@ -1667,12 +1668,13 @@ void RenderResources(void* _pstate,
 
         numtk::vec2u size = { _swapchain.size.width, _swapchain.size.height };
         _state->pixel_cycling_runtime.BindAttachments(
-            &main_world_node, size,
+            _state->pixel_cycling_runtime._graph["FramebufferDispatch"], size,
             { _state->primary_pass_color.view, _state->primary_pass_depth.view }
             );
 #if 0
         _state->pixel_cycling_runtime.BindSwapchain(&resolve_node, _swapchain);
 #endif
+        _state->pixel_cycling_runtime.BindSwapchain(_state->pixel_cycling_runtime._graph["FramebufferResolve"], _swapchain);
 
         VkDescriptorImageInfo image_info{};
         image_info.sampler = _state->sampler;
@@ -1717,6 +1719,7 @@ void RenderResources(void* _pstate,
 
         _state->sparse_runtime.BindSwapchain(&sparse_region_node, _swapchain);
 #endif
+        _state->sparse_runtime.BindSwapchain(_state->sparse_runtime._graph["FramebufferDispatch"], _swapchain);
     }
 
     {

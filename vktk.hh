@@ -1018,7 +1018,7 @@ struct DispatchContext {
 
     void BindSwapchain(dstk::Registry::Node _node,
                        vktk::Swapchain const& _swapchain);
-    void BindAttachments(layout::DispatchNode const* _node,
+    void BindAttachments(dstk::Registry::Node _node,
                          numtk::vec2u const& _size,
                          std::vector<VkImageView> const& _attachments);
     void BindFramebufferArea(layout::DispatchNode const* _node,
