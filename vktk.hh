@@ -613,12 +613,14 @@ enum BindingType {
     BindingType_None,
     BindingType_Framebuffer,
     BindingType_Shader,
+    BindingType_PushConstantRange,
 };
 
 struct BindingPoint {
     BindingType type = BindingType_None;
     union {
         uint32_t attachment_index;
+        uint32_t push_constant_range;
         struct {
             uint32_t group_index;
             uint32_t binding_index;
@@ -645,6 +647,18 @@ struct DispatchGraph
     struct EdgeDesc {
         dstk::Registry::Node source;
         dstk::Registry::Node target;
+    };
+
+    struct NodeView {
+        operator dstk::Registry::Node() const { return node; }
+        NodeView operator[](std::string const& name) const {
+            return (*graph->registry->ComponentLookup<DispatchGraph>(node))[name];
+        }
+        NodeView operator[](char const* name) {
+            return this->operator[](std::string{ name });
+        }
+        DispatchGraph const* graph;
+        dstk::Registry::Node node;
     };
 
     DispatchGraph& MakeSubgraph(std::string const& parent_node) {
@@ -699,7 +713,15 @@ struct DispatchGraph
         return result;
     }
 
-    dstk::Registry::Node operator[](std::string const& name) {
+    NodeView operator[](char const* name) {
+        return this->operator[](std::string{ name });
+    }
+
+    NodeView operator[](char const* name) const {
+        return this->operator[](std::string{ name });
+    }
+
+    NodeView operator[](std::string const& name) {
         dstk::Registry::Node node = ~(dstk::Registry::Node)0;
         if (!name_lookup.contains(name)) {
             node = registry->MakeNode();
@@ -707,13 +729,13 @@ struct DispatchGraph
         }
         else
             node = name_lookup[name];
-        return node;
+        return NodeView{ this, node };
     }
 
-    dstk::Registry::Node operator[](std::string const& name) const {
+    NodeView operator[](std::string const& name) const {
         if (!name_lookup.contains(name))
-            return ~(dstk::Registry::Node)0;
-        return name_lookup[name];
+            return NodeView{ this, ~(dstk::Registry::Node)0 };
+        return NodeView{ this, name_lookup[name] };
     }
 
     void DepthFirstTraversal(std::function<void(std::vector<vkrg::layout::_::DispatchGraph const*> const&, dstk::Registry::Node)> const& callback) const {
@@ -1021,10 +1043,9 @@ struct DispatchContext {
     void BindAttachments(dstk::Registry::Node _node,
                          numtk::vec2u const& _size,
                          std::vector<VkImageView> const& _attachments);
-    void BindFramebufferArea(layout::DispatchNode const* _node,
+    void BindFramebufferArea(dstk::Registry::Node _node,
                              bind::FramebufferArea const& _area);
-    void BindGraphicsCommand(layout::DispatchNode const* _node,
-                             uint32_t _stage_index,
+    void BindGraphicsCommand(dstk::Registry::Node _node,
                              uint32_t _invoc_index,
                              bind::GraphicsCommand const& _command);
 
@@ -1035,7 +1056,8 @@ struct DispatchContext {
                         uint32_t _stage_index,
                         uint32_t _invoc_index,
                         bind::IndexInput const& _index_input);
-    void* BindPushConstants(layout::BindingPoint const& _location,
+    void* BindPushConstants(dstk::Registry::Node _node,
+                            layout::_::BindingPoint const& _location,
                             uint32_t _invoc_index);
     VkWriteDescriptorSet BindShaderResource(layout::BindingPoint const& _location,
                                             uint32_t _invoc_index,

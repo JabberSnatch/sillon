@@ -3359,9 +3359,11 @@ DispatchContext::BindAttachments(dstk::Registry::Node _node,
 }
 
 void
-DispatchContext::BindFramebufferArea(layout::DispatchNode const* _node,
+DispatchContext::BindFramebufferArea(dstk::Registry::Node _node,
                                      bind::FramebufferArea const& _area)
 {
+    registry->BindComponent(_node, _area);
+
 #if 0
     uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
     if (nodes_bindings.size() < node_index+1)
@@ -3373,11 +3375,12 @@ DispatchContext::BindFramebufferArea(layout::DispatchNode const* _node,
 }
 
 void
-DispatchContext::BindGraphicsCommand(layout::DispatchNode const* _node,
-                                     uint32_t _stage_index,
+DispatchContext::BindGraphicsCommand(dstk::Registry::Node _node,
                                      uint32_t _invoc_index,
                                      bind::GraphicsCommand const& _command)
 {
+    registry->BindComponent(_node, _invoc_index, _command);
+
 #if 0
     uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
     if (nodes_bindings.size() < node_index+1)
@@ -3458,9 +3461,15 @@ DispatchContext::BindIndexInput(layout::DispatchNode const* _node,
 }
 
 void*
-DispatchContext::BindPushConstants(layout::BindingPoint const& _location,
+DispatchContext::BindPushConstants(dstk::Registry::Node _node,
+                                   layout::_::BindingPoint const& _location,
                                    uint32_t _invoc_index)
 {
+    layout::_::DispatchStage const& stage = *registry->ComponentLookup<layout::_::DispatchStage>(_node);
+    layout::PushConstantRange const& range = stage.push_constants[_location.push_constant_range];
+    std::unique_ptr<uint8_t[]> range_memory{ new uint8_t[range.size] };
+    return nullptr;
+
 #if 0
     layout::DispatchStage const& stage = _location.node->sequence[_location.stage_index];
     layout::PushConstantRange const& range = stage.push_constants[_location.push_constants.range_index];
@@ -3484,7 +3493,6 @@ DispatchContext::BindPushConstants(layout::BindingPoint const& _location,
 
     return invocation.push_constants[_location.push_constants.range_index].get();
 #endif
-    return {};
 }
 
 VkWriteDescriptorSet

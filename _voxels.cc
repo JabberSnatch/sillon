@@ -1076,6 +1076,22 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     }
 #endif
 
+    {
+        dstk::Registry test_registry = {};
+        struct Deleter {
+            void operator () (auto ptr) {
+                std::cout << "Deleted" << std::endl;
+                delete ptr;
+            }
+        };
+
+        for (uint32_t index = 0; index < 10; ++index)
+        {
+            std::unique_ptr<uint8_t, Deleter> custom_deleter{ new uint8_t(index) };
+            test_registry.BindComponent(test_registry.MakeNode(), std::move(custom_deleter));
+        }
+    }
+
     uint32_t area_size = 0u;
     uint32_t node_size = 0u;
 #if 1
@@ -1249,8 +1265,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     region_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     {
-        dstk::Registry::Node main_world_node =
-            _state->forward_runtime._graph.Subgraph("FramebufferDispatch")["RegionPass"];
+        dstk::Registry::Node main_world_node = _state->forward_runtime._graph["FramebufferDispatch"]["RegionPass"];
 
         for (uint32_t index = 0; index < 64; ++index)
         {
@@ -1391,7 +1406,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
     {
         dstk::Registry::Node main_world_node =
-            _state->pixel_cycling_runtime._graph.Subgraph("FramebufferDispatch")["RegionPass"];
+            _state->pixel_cycling_runtime._graph["FramebufferDispatch"]["RegionPass"];
 
         for (uint32_t index = 0; index < 64; ++index)
         {
@@ -1695,6 +1710,7 @@ void RenderResources(void* _pstate,
         vkUpdateDescriptorSets(_vulkan->device, 1, &desc_write, 0u, nullptr);
 
         numtk::vec2i screen_size{ (int32_t)_swapchain.size.width, (int32_t)_swapchain.size.height };
+#if 0
         numtk::vec2i* push_constants =
             (numtk::vec2i*)_state->pixel_cycling_runtime.BindPushConstants(
                 vkrg::layout::BindingPoint{
@@ -1704,6 +1720,7 @@ void RenderResources(void* _pstate,
                     .push_constants = { 0 }
                 }, 0);
         *push_constants = screen_size;
+#endif
     }
 
     {
@@ -1934,10 +1951,12 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
             for (uint32_t index = 0u; index < (uint32_t)gui_record->frames.size(); ++index)
             {
+#if 0
                 _state->sparse_runtime.BindGraphicsCommand(
                     &sparse_region_node, 1, index, {
                         vkrg::bind::DispatchCommand_Draw, 6*9, 1
                     });
+#endif
 
                 {
                     _state->sparse_runtime.BindVertexInput(
@@ -1969,10 +1988,12 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
             std::vector<VkDescriptorImageInfo> image_info(gui_record->glyphs.size());
             for (uint32_t index = 0u; index < (uint32_t)gui_record->glyphs.size(); ++index)
             {
+#if 0
                 _state->sparse_runtime.BindGraphicsCommand(
                     &sparse_region_node, 2, index, {
                         vkrg::bind::DispatchCommand_Draw, 6, 1
                     });
+#endif
 
                 {
                     _state->sparse_runtime.BindVertexInput(
@@ -2278,12 +2299,10 @@ void Draw(void* _pstate,
     skybox_params.light_dir = sun_dir;
 
     {
-        dstk::Registry::Node main_world_node =
-            _state->current_runtime->_graph.Subgraph("FramebufferDispatch")["RegionPass"];
+        dstk::Registry::Node main_world_node = _state->current_runtime->_graph["FramebufferDispatch"]["RegionPass"];
 
-        _state->current_runtime->registry->BindComponent(
-            main_world_node,
-            vkrg::bind::FramebufferArea{
+        _state->current_runtime->BindFramebufferArea(
+            _state->current_runtime->_graph["FramebufferDispatch"], {
                 !_state->pixel_cycling_enabled ? _swapchain.index : 0,
                 scissor,
                 viewport
@@ -2296,12 +2315,8 @@ void Draw(void* _pstate,
             command.instance_count = 1;
 
             for (uint32_t index = 0; index < 64; ++index)
-            {
-                _state->current_runtime->registry->BindComponent(
-                    main_world_node,
-                    index,
-                    command);
-            }
+                _state->current_runtime->BindGraphicsCommand(main_world_node, index, command);
+
         }
 
 #if 0
@@ -2373,7 +2388,7 @@ void Draw(void* _pstate,
     if (_state->pixel_cycling_enabled)
     {
         dstk::Registry::Node resolve_node =
-            _state->current_runtime->_graph.Subgraph("FramebufferResolve")["ResolveDispatch"];
+            _state->current_runtime->_graph["FramebufferResolve"]["ResolveDispatch"];
 
 #if 0
         vkrg::layout::DispatchNode const& resolve_node =
@@ -2411,7 +2426,7 @@ void Draw(void* _pstate,
 
     {
         dstk::Registry::Node sparse_region_node =
-            _state->sparse_runtime._graph.Subgraph("FramebufferDispatch")["SparseRegionSubpass"];
+            _state->sparse_runtime._graph["FramebufferDispatch"]["SparseRegionSubpass"];
 
 #if 0
         vkrg::layout::DispatchNode const& sparse_region_node =
