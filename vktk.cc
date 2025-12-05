@@ -3468,7 +3468,7 @@ DispatchContext::BindPushConstants(dstk::Registry::Node _node,
     layout::_::DispatchStage const& stage = *registry->ComponentLookup<layout::_::DispatchStage>(_node);
     layout::PushConstantRange const& range = stage.push_constants[_location.push_constant_range];
     std::unique_ptr<uint8_t[]> range_memory{ new uint8_t[range.size] };
-    return nullptr;
+    return ((std::unique_ptr<uint8_t[]>*)registry->BindComponent(_node, std::move(range_memory)))->get();
 
 #if 0
     layout::DispatchStage const& stage = _location.node->sequence[_location.stage_index];
@@ -3496,10 +3496,61 @@ DispatchContext::BindPushConstants(dstk::Registry::Node _node,
 }
 
 VkWriteDescriptorSet
-DispatchContext::BindShaderResource(layout::BindingPoint const& _location,
+DispatchContext::BindShaderResource(dstk::Registry::Node _node,
+                                    layout::_::BindingPoint const& _location,
                                     uint32_t _invoc_index,
                                     bind::ShaderResource const& _resources)
 {
+    DispatchStageDynamic const& stage_dynamic = *registry->ComponentLookup<DispatchStageDynamic>(_node);
+    StageBindingGroupDynamic const& group_runtime = stage_dynamic.binding_groups[_location.shader.group_index];
+
+    layout::_::DispatchStage const& stage = *registry->ComponentLookup<layout::_::DispatchStage>(_node);
+    layout::StageBindingGroup const& binding_group = stage.binding_groups[_location.shader.group_index];
+    layout::StageBinding const& binding = binding_group.bindings[_location.shader.binding_index];
+
+    VkWriteDescriptorSet desc_write = {};
+    desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    desc_write.pNext = nullptr;
+    desc_write.dstSet = group_runtime.sets[_invoc_index];
+    desc_write.dstBinding = _location.shader.binding_index;
+    desc_write.dstArrayElement = 0u;
+    desc_write.descriptorCount = _resources.descriptor_count;
+    desc_write.descriptorType = binding.type;
+    desc_write.pImageInfo = _resources.images;
+    desc_write.pBufferInfo = _resources.buffers;
+    desc_write.pTexelBufferView = nullptr;
+
+    bind::DispatchStage& stage_bindings = [&]() -> bind::DispatchStage&{
+        bind::DispatchStage* stage_bindings = registry->ComponentLookup<bind::DispatchStage>(_node);
+        if (!stage_bindings)
+            stage_bindings = registry->BindComponent(_node, bind::DispatchStage{});
+        return *stage_bindings;
+    }();
+
+    switch (binding.type)
+    {
+    case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+    case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+        for (uint32_t desc_index = 0u; desc_index < _resources.descriptor_count; ++desc_index)
+            stage_bindings.buffer_barriers[_resources.buffers[desc_index].buffer].second = bind::AccessInfo{
+                binding.stages,
+                VK_ACCESS_UNIFORM_READ_BIT
+            };
+        break;
+
+    case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+    case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+        for (uint32_t desc_index = 0u; desc_index < _resources.descriptor_count; ++desc_index)
+            stage_bindings.buffer_barriers[_resources.buffers[desc_index].buffer].second = bind::AccessInfo{
+                binding.stages,
+                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT
+            };
+        break;
+    default:
+        break;
+    }
+
+    return desc_write;
 #if 0
     uint32_t node_index = (uint32_t)(_location.node - graph->nodes.data());
     DispatchNodeDynamic const& dynamic_runtime = nodes_dynamic[node_index];
@@ -3558,7 +3609,6 @@ DispatchContext::BindShaderResource(layout::BindingPoint const& _location,
 
     return desc_write;
 #endif
-    return {};
 }
 
 } // namespace runtime

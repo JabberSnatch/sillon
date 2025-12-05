@@ -1669,6 +1669,7 @@ void RenderResources(void* _pstate,
         _state->pixel_cycling_runtime.ClearFramebufferRuntime();
         _state->pixel_cycling_runtime.GenerateFramebufferRuntime(&_swapchain.format);
 
+#if 0
         vkrg::layout::DispatchNode const& main_world_node =
             *std::find_if(_state->pixel_cycling_graph.nodes.begin(), _state->pixel_cycling_graph.nodes.end(),
                           [](vkrg::layout::DispatchNode const& node) {
@@ -1680,6 +1681,7 @@ void RenderResources(void* _pstate,
                           [](vkrg::layout::DispatchNode const& node) {
                               return node.name == "ResolveDispatch";
                           });
+#endif
 
         numtk::vec2u size = { _swapchain.size.width, _swapchain.size.height };
         _state->pixel_cycling_runtime.BindAttachments(
@@ -1695,6 +1697,7 @@ void RenderResources(void* _pstate,
         image_info.sampler = _state->sampler;
         image_info.imageView = _state->primary_pass_color.view;
         image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+#if 0
         VkWriteDescriptorSet desc_write = _state->pixel_cycling_runtime.BindShaderResource(
             vkrg::layout::BindingPoint{
                 .node = &resolve_node,
@@ -1708,8 +1711,17 @@ void RenderResources(void* _pstate,
                 .images = &image_info
             });
         vkUpdateDescriptorSets(_vulkan->device, 1, &desc_write, 0u, nullptr);
+#endif
 
         numtk::vec2i screen_size{ (int32_t)_swapchain.size.width, (int32_t)_swapchain.size.height };
+
+        numtk::vec2i* push_constants =
+            (numtk::vec2i*)_state->pixel_cycling_runtime.BindPushConstants(
+                _state->pixel_cycling_runtime._graph["FramebufferResolve"]["ResolvePass"],
+                {
+                    .type = vkrg::layout::_::BindingType_PushConstantRange,
+                    .push_constant_range = 0
+                }, 0);
 #if 0
         numtk::vec2i* push_constants =
             (numtk::vec2i*)_state->pixel_cycling_runtime.BindPushConstants(
@@ -1719,8 +1731,8 @@ void RenderResources(void* _pstate,
                     .type = vkrg::layout::BindingType_PushConstantRange,
                     .push_constants = { 0 }
                 }, 0);
-        *push_constants = screen_size;
 #endif
+        *push_constants = screen_size;
     }
 
     {
@@ -2026,6 +2038,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
                 };
 
+#if 0
                 bindings.push_back(
                     _state->sparse_runtime.BindShaderResource(
                         vkrg::layout::BindingPoint{
@@ -2040,6 +2053,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                             .images = &image_info[index]
                         })
                     );
+#endif
             }
             vkUpdateDescriptorSets(_vulkan->device, bindings.size(), bindings.data(), 0u, nullptr);
 

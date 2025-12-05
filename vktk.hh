@@ -1059,7 +1059,9 @@ struct DispatchContext {
     void* BindPushConstants(dstk::Registry::Node _node,
                             layout::_::BindingPoint const& _location,
                             uint32_t _invoc_index);
-    VkWriteDescriptorSet BindShaderResource(layout::BindingPoint const& _location,
+
+    VkWriteDescriptorSet BindShaderResource(dstk::Registry::Node _node,
+                                            layout::_::BindingPoint const& _location,
                                             uint32_t _invoc_index,
                                             bind::ShaderResource const& _resources);
 };
