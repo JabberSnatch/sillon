@@ -1955,11 +1955,17 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                                   return node.name == "SparseRegionDispatch";
                               });
 
-            _state->sparse_runtime.UpdateDynamicInvocationCount(&sparse_region_node, 1, gui_record->frames.size());
-            _state->sparse_runtime.ClearStageBarriers(&sparse_region_node, 1);
+            _state->sparse_runtime.UpdateDynamicInvocationCount(
+                _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
+                gui_record->frames.size());
+            _state->sparse_runtime.ClearStageBarriers(
+                _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"]);
 
-            _state->sparse_runtime.UpdateDynamicInvocationCount(&sparse_region_node, 2, gui_record->glyphs.size());
-            _state->sparse_runtime.ClearStageBarriers(&sparse_region_node, 2);
+            _state->sparse_runtime.UpdateDynamicInvocationCount(
+                _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
+                gui_record->glyphs.size());
+            _state->sparse_runtime.ClearStageBarriers(
+                _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"]);
 
             for (uint32_t index = 0u; index < (uint32_t)gui_record->frames.size(); ++index)
             {
@@ -1972,25 +1978,24 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
                 {
                     _state->sparse_runtime.BindVertexInput(
-                        { .node = &sparse_region_node,
-                          .stage_index = 1,
-                          .type = vkrg::layout::BindingType_VertexInput,
-                          .vertex_input = vkrg::layout::VertexInputLocation{ 0 } },
+                        _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
+                        { .type = vkrg::layout::_::BindingType_VertexInput,
+                          .vertex_input_index = 0 },
                         index,
                         { _state->gui_frames_vertices, index * sizeof(numtk::vec2f) * 16 }
                         );
 
                     _state->sparse_runtime.BindVertexInput(
-                        { .node = &sparse_region_node,
-                          .stage_index = 1,
-                          .type = vkrg::layout::BindingType_VertexInput,
-                          .vertex_input = vkrg::layout::VertexInputLocation{ 1 } },
+                        _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
+                        { .type = vkrg::layout::_::BindingType_VertexInput,
+                          .vertex_input_index = 1 },
                         index,
                         { _state->gui_frame_uv, 0 }
                         );
 
                     _state->sparse_runtime.BindIndexInput(
-                        &sparse_region_node, 1, index,
+                        _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
+                        index,
                         { _state->gui_frame_indices, 0 }
                         );
                 }
@@ -2009,25 +2014,24 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
                 {
                     _state->sparse_runtime.BindVertexInput(
-                        { .node = &sparse_region_node,
-                          .stage_index = 2,
-                          .type = vkrg::layout::BindingType_VertexInput,
-                          .vertex_input = vkrg::layout::VertexInputLocation(0) },
+                        _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
+                        { .type = vkrg::layout::_::BindingType_VertexInput,
+                          .vertex_input_index = 0 },
                         index,
                         { _state->gui_glyph_vertices, index * sizeof(numtk::vec2f) * 4 }
                         );
 
                     _state->sparse_runtime.BindVertexInput(
-                        { .node = &sparse_region_node,
-                          .stage_index = 2,
-                          .type = vkrg::layout::BindingType_VertexInput,
-                          .vertex_input = vkrg::layout::VertexInputLocation(1) },
+                        _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
+                        { .type = vkrg::layout::_::BindingType_VertexInput,
+                          .vertex_input_index = 1 },
                         index,
                         { _state->gui_glyph_vertices, (index + (uint32_t)gui_record->glyphs.size()) * sizeof(numtk::vec2f) * 4 }
                         );
 
                     _state->sparse_runtime.BindIndexInput(
-                        &sparse_region_node, 2, index,
+                        _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
+                        index,
                         { _state->gui_glyph_indices, 0 }
                         );
                 }
@@ -2057,40 +2061,45 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
             }
             vkUpdateDescriptorSets(_vulkan->device, bindings.size(), bindings.data(), 0u, nullptr);
 
-            _state->sparse_runtime.BindBarrier(&sparse_region_node, 1, {
-                .type = vkrg::bind::BufferResource,
-                .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
-                .access = VK_ACCESS_TRANSFER_WRITE_BIT,
-                .buffer = _state->gui_frames_vertices
-            });
+            _state->sparse_runtime.BindBarrier(
+                _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"], {
+                    .type = vkrg::bind::BufferResource,
+                    .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    .access = VK_ACCESS_TRANSFER_WRITE_BIT,
+                    .buffer = _state->gui_frames_vertices
+                });
 
-            _state->sparse_runtime.BindBarrier(&sparse_region_node, 1, {
-                .type = vkrg::bind::BufferResource,
-                .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
-                .access = VK_ACCESS_TRANSFER_WRITE_BIT,
-                .buffer = _state->gui_frame_indices
-            });
+            _state->sparse_runtime.BindBarrier(
+                _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"], {
+                    .type = vkrg::bind::BufferResource,
+                    .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    .access = VK_ACCESS_TRANSFER_WRITE_BIT,
+                    .buffer = _state->gui_frame_indices
+                });
 
-            _state->sparse_runtime.BindBarrier(&sparse_region_node, 1, {
-                .type = vkrg::bind::BufferResource,
-                .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
-                .access = VK_ACCESS_TRANSFER_WRITE_BIT,
-                .buffer = _state->gui_frame_uv
-            });
+            _state->sparse_runtime.BindBarrier(
+                _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"], {
+                    .type = vkrg::bind::BufferResource,
+                    .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    .access = VK_ACCESS_TRANSFER_WRITE_BIT,
+                    .buffer = _state->gui_frame_uv
+                });
 
-            _state->sparse_runtime.BindBarrier(&sparse_region_node, 2, {
-                .type = vkrg::bind::BufferResource,
-                .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
-                .access = VK_ACCESS_TRANSFER_WRITE_BIT,
-                .buffer = _state->gui_glyph_vertices
-            });
+            _state->sparse_runtime.BindBarrier(
+                _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"], {
+                    .type = vkrg::bind::BufferResource,
+                    .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    .access = VK_ACCESS_TRANSFER_WRITE_BIT,
+                    .buffer = _state->gui_glyph_vertices
+                });
 
-            _state->sparse_runtime.BindBarrier(&sparse_region_node, 2, {
-                .type = vkrg::bind::BufferResource,
-                .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
-                .access = VK_ACCESS_TRANSFER_WRITE_BIT,
-                .buffer = _state->gui_glyph_indices
-            });
+            _state->sparse_runtime.BindBarrier(
+                _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"], {
+                    .type = vkrg::bind::BufferResource,
+                    .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    .access = VK_ACCESS_TRANSFER_WRITE_BIT,
+                    .buffer = _state->gui_glyph_indices
+                });
         }
     }
 

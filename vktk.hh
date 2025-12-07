@@ -614,6 +614,7 @@ enum BindingType {
     BindingType_Framebuffer,
     BindingType_Shader,
     BindingType_PushConstantRange,
+    BindingType_VertexInput,
 };
 
 struct BindingPoint {
@@ -621,6 +622,7 @@ struct BindingPoint {
     union {
         uint32_t attachment_index;
         uint32_t push_constant_range;
+        uint32_t vertex_input_index;
         struct {
             uint32_t group_index;
             uint32_t binding_index;
@@ -673,6 +675,7 @@ struct DispatchGraph
         dstk::Registry::Node node = registry->MakeNode();
         if (name != "" && !name_lookup.contains(name))
             name_lookup.emplace(node, name);
+        registry->BindComponent(node, this);
         return node;
     }
 
@@ -1023,20 +1026,19 @@ struct DispatchContext {
         vkrg::layout::EdgeType _type,
         vkrg::layout::_::BindingPoint const& _binding_point) const;
 
-    void UpdateDynamicInvocationCount(layout::DispatchNode const* _node,
-                                      uint32_t _stage_index,
+    void UpdateDynamicInvocationCount(dstk::Registry::Node _node,
                                       uint32_t _invocation_count);
 
+#if 0
     void ReserveInvocations(layout::DispatchNode const* _node,
                             uint32_t _stage_index,
                             uint32_t _invocation_count,
                             bind::PNextMap const& _pNext_map = {});
+#endif
 
-    void BindBarrier(layout::DispatchNode const* _node,
-                     uint32_t _stage_index,
+    void BindBarrier(dstk::Registry::Node _node,
                      bind::ResourceBarrier const& _barrier);
-    void ClearStageBarriers(layout::DispatchNode const* _node,
-                            uint32_t _stage_index);
+    void ClearStageBarriers(dstk::Registry::Node _node);
 
     void BindSwapchain(dstk::Registry::Node _node,
                        vktk::Swapchain const& _swapchain);
@@ -1049,11 +1051,11 @@ struct DispatchContext {
                              uint32_t _invoc_index,
                              bind::GraphicsCommand const& _command);
 
-    void BindVertexInput(layout::BindingPoint const& _location,
+    void BindVertexInput(dstk::Registry::Node _node,
+                         layout::_::BindingPoint const& _location,
                          uint32_t _invoc_index,
                          bind::VertexInput const& _vertex_input);
-    void BindIndexInput(layout::DispatchNode const* _node,
-                        uint32_t _stage_index,
+    void BindIndexInput(dstk::Registry::Node _node,
                         uint32_t _invoc_index,
                         bind::IndexInput const& _index_input);
     void* BindPushConstants(dstk::Registry::Node _node,
