@@ -2682,6 +2682,8 @@ DispatchContext::GenerateFramebufferRuntime(VkFormat const* _swapchain_format)
 void
 DispatchContext::ResetDynamicRuntime(bind::PNextMap const& _pNext_map)
 {
+    ClearDynamicRuntime();
+
     _graph.DepthFirstTraversal([this, _pNext_map](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
                                                   dstk::Registry::Node node) {
         std::string const& node_name = graph_stack.back()->name_lookup[node];
@@ -2819,73 +2821,90 @@ DispatchContext::ResetDynamicRuntime(bind::PNextMap const& _pNext_map)
 void
 DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
 {
-    _graph.DepthFirstTraversal([this, &_command_buffer](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
-                                                        dstk::Registry::Node node) {
+    _graph.DepthFirstTraversal(
+        [this, &_command_buffer](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
+                                 dstk::Registry::Node node) {
         layout::_::DispatchGraph const& graph = *graph_stack.back();
 
         auto const* dispatch_pass = registry->ComponentLookup<layout::_::DispatchPass>(node);
 
-        if (dispatch_pass)
-        {
+        if (dispatch_pass) {
             auto const* area_binding = registry->ComponentLookup<bind::FramebufferArea>(node);
             layout::GraphicsNode const& graphics_info = dispatch_pass->graphics;
 
             std::vector<VkClearValue> clear_values = {};
-            for (layout::RenderAttachment const& attachment : graphics_info.attachments)
-            {
+            for (layout::RenderAttachment const& attachment : graphics_info.attachments) {
                 VkClearValue clear_value = {};
                 std::memcpy(&clear_value, &attachment.clear_value, sizeof(VkClearValue));
                 clear_values.push_back(clear_value);
             }
 
-            VkRect2D scissor{
-                VkOffset2D{
-                    (int32_t)area_binding->scissor.min.x(),
-                    (int32_t)area_binding->scissor.min.y()
-                },
-                VkExtent2D{
-                    area_binding->scissor.extent.x(),
-                    area_binding->scissor.extent.y()
-                }
-            };
+            VkRect2D scissor{ VkOffset2D{ (int32_t)area_binding->scissor.min.x(),
+                                          (int32_t)area_binding->scissor.min.y() },
+                              VkExtent2D{ area_binding->scissor.extent.x(),
+                                          area_binding->scissor.extent.y() } };
 
-            VkViewport viewport{
-                area_binding->viewport.min.x(),
-                area_binding->viewport.min.y(),
-                area_binding->viewport.extent.x(),
-                area_binding->viewport.extent.y(),
-                0.f, 1.f
-            };
+            VkViewport viewport{ area_binding->viewport.min.x(),
+                                 area_binding->viewport.min.y(),
+                                 area_binding->viewport.extent.x(),
+                                 area_binding->viewport.extent.y(),
+                                 0.f,
+                                 1.f };
 
             vkCmdSetViewport(_command_buffer, 0, 1, &viewport);
             vkCmdSetScissor(_command_buffer, 0, 1, &scissor);
 
             auto const* dispatch_graph = registry->ComponentLookup<layout::_::DispatchGraph>(node);
 
-            dispatch_graph->DepthFirstTraversal([this](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
-                                                       dstk::Registry::Node node) {
+            dispatch_graph->DepthFirstTraversal(
+                [this, &_command_buffer](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
+                                         dstk::Registry::Node node) {
                 auto const* dispatch_stage = registry->ComponentLookup<layout::DispatchStage>(node);
-                // TODO
+                auto const* stage_bindings = registry->ComponentLookup<bind::DispatchStage>(node);
+                if (!dispatch_stage || !stage_bindings)
+                    return;
+
+                for (auto&& barrier : stage_bindings->buffer_barriers)
+                    if (barrier.second.first.stage)
+                        _command_buffer.BufferTransitions(barrier.second.first.stage,
+                                                          barrier.second.second.stage,
+                                                          { { barrier.first,
+                                                              barrier.second.first.access,
+                                                              barrier.second.second.access } });
             });
 
             VkRenderPass render_pass = *registry->ComponentLookup<VkRenderPass>(node);
+            std::vector<VkFramebuffer> const& framebuffers = *registry->ComponentLookup<std::vector<VkFramebuffer>>(node);
 
-#if 0
             VkRenderPassBeginInfo rp_begin_info{};
             rp_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
             rp_begin_info.pNext = nullptr;
             rp_begin_info.renderPass = render_pass;
-            rp_begin_info.framebuffer = bindings.framebuffers[bindings.area_binding.framebuffer_index];
+            rp_begin_info.framebuffer = framebuffers[area_binding->framebuffer_index];
             rp_begin_info.renderArea = scissor;
             rp_begin_info.clearValueCount = graphics_info.attachments.size();
             rp_begin_info.clearValueCount = clear_values.size();
             rp_begin_info.pClearValues = clear_values.data();
             vkCmdBeginRenderPass(_command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-#endif
 
-            // TODO
+            dispatch_graph->DepthFirstTraversal(
+                [this, dispatch_pass](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
+                                      dstk::Registry::Node node) {
+                auto const* dispatch_stage = registry->ComponentLookup<layout::DispatchStage>(node);
+                auto const* stage_bindings = registry->ComponentLookup<bind::DispatchStage>(node);
+                if (!dispatch_stage || !stage_bindings)
+                    return;
+
+                layout::GraphicsNode const& graphics_info = dispatch_pass->graphics;
+                auto const* invocation = registry->ComponentLookup<bind::DispatchInvocation>(node);
+
+                for (uint32_t group_index = 0u;
+                     group_index < (uint32_t)dispatch_stage->binding_groups.size();
+                     ++group_index)
+                {
+                }
+            });
         }
-
     });
 
 #if 0
