@@ -2888,20 +2888,88 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
             vkCmdBeginRenderPass(_command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
             dispatch_graph->DepthFirstTraversal(
-                [this, dispatch_pass](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
-                                      dstk::Registry::Node node) {
+                [this, &_command_buffer, dispatch_pass](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
+                                                       dstk::Registry::Node node) {
                 auto const* dispatch_stage = registry->ComponentLookup<layout::DispatchStage>(node);
                 auto const* stage_bindings = registry->ComponentLookup<bind::DispatchStage>(node);
                 if (!dispatch_stage || !stage_bindings)
                     return;
 
                 layout::GraphicsNode const& graphics_info = dispatch_pass->graphics;
-                auto const* invocation = registry->ComponentLookup<bind::DispatchInvocation>(node);
+                auto const* stage_static = registry->ComponentLookup<DispatchStageStatic>(node);
+                auto const* stage_dynamic = registry->ComponentLookup<DispatchStageDynamic>(node);
 
-                for (uint32_t group_index = 0u;
-                     group_index < (uint32_t)dispatch_stage->binding_groups.size();
-                     ++group_index)
-                {
+                for (uint32_t invoc_index = 0u;
+                     invoc_index < stage_dynamic->invocation_count;
+                     ++invoc_index) {
+
+                    auto const* invocation = registry->ComponentLookup<bind::DispatchInvocation>(node);
+
+                    for (uint32_t group_index = 0u;
+                         group_index < (uint32_t)dispatch_stage->binding_groups.size();
+                         ++group_index)
+                    {
+                        VkDescriptorSet descset = stage_dynamic->binding_groups[group_index].sets[invoc_index];
+                        vkCmdBindDescriptorSets(_command_buffer,
+                                                VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                                stage_static->pipeline_layout,
+                                                group_index,
+                                                1u, &descset,
+                                                0u, nullptr);
+                    }
+
+                    for (uint32_t range_index = 0u;
+                         range_index < (uint32_t)dispatch_stage->push_constants.size();
+                         ++range_index)
+                    {
+                        layout::PushConstantRange const& range = dispatch_stage->push_constants[range_index];
+                        void* memory = registry->ComponentLookup<std::unique_ptr<uint8_t[]>>(node, range_index)->get();
+                        vkCmdPushConstants(_command_buffer,
+                                           stage_static->pipeline_layout,
+                                           range.stages,
+                                           range.offset,
+                                           range.size,
+                                           memory);
+                    }
+
+                    for (uint32_t vertex_input_index = 0u;
+                         vertex_input_index < (uint32_t)invocation->vertex_inputs.size();
+                         ++vertex_input_index)
+                    {
+                        bind::VertexInput const& binding = invocation->vertex_inputs[vertex_input_index];
+                        if (binding.buffer == VK_NULL_HANDLE)
+                            continue;
+
+                        vkCmdBindVertexBuffers(_command_buffer, vertex_input_index, 1,
+                                               &binding.buffer, &binding.offset);
+                    }
+
+                    bool indexed_draw = (invocation->index_input.buffer != VK_NULL_HANDLE);
+                    if (indexed_draw)
+                        vkCmdBindIndexBuffer(_command_buffer,
+                                             invocation->index_input.buffer,
+                                             invocation->index_input.offset,
+                                             VK_INDEX_TYPE_UINT32);
+
+                    auto const& graphics_command = *registry->ComponentLookup<bind::GraphicsCommand>(node, invoc_index);
+
+                    switch (graphics_command.command)
+                    {
+                    case bind::DispatchCommand_Draw:
+                    {
+                        if (!indexed_draw)
+                            vkCmdDraw(_command_buffer,
+                                      graphics_command.vertex_count,
+                                      graphics_command.instance_count,
+                                      0, 0);
+                        else
+                            vkCmdDrawIndexed(_command_buffer,
+                                             graphics_command.vertex_count,
+                                             graphics_command.instance_count,
+                                             0, 0, 0);
+                    } break;
+                    default: break;
+                    }
                 }
             });
         }
@@ -3539,8 +3607,9 @@ DispatchContext::BindPushConstants(dstk::Registry::Node _node,
 {
     layout::_::DispatchStage const& stage = *registry->ComponentLookup<layout::_::DispatchStage>(_node);
     layout::PushConstantRange const& range = stage.push_constants[_location.push_constant_range];
+    // NOTE this is wrong, we need to store a vector of push constants per invocation
     std::unique_ptr<uint8_t[]> range_memory{ new uint8_t[range.size] };
-    return ((std::unique_ptr<uint8_t[]>*)registry->BindComponent(_node, std::move(range_memory)))->get();
+    return ((std::unique_ptr<uint8_t[]>*)registry->BindComponent(_node, _location.push_constant_range, std::move(range_memory)))->get();
 
 #if 0
     layout::DispatchStage const& stage = _location.node->sequence[_location.stage_index];
