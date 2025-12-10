@@ -854,6 +854,8 @@ struct DispatchGraph
 namespace bind
 {
 
+using PushConstantStorage = std::vector<std::unique_ptr<uint8_t[]>>;
+
 struct ShaderResource {
     uint32_t descriptor_count;
     union {

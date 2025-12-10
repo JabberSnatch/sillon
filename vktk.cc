@@ -2379,6 +2379,32 @@ DispatchContext::ClearFramebufferRuntime()
 void
 DispatchContext::ClearDynamicRuntime()
 {
+    _graph.DepthFirstTraversal(
+        [this](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
+               dstk::Registry::Node node) {
+            auto const* dispatch_stage = registry->ComponentLookup<layout::DispatchStage>(node);
+
+            if (dispatch_stage)
+            {
+                auto* stage_static = registry->ComponentLookup<DispatchStageStatic>(node);
+                auto* stage_dynamic = registry->ComponentLookup<DispatchStageDynamic>(node);
+
+                for (uint32_t group_index = 0u; group_index < (uint32_t)dispatch_stage->binding_groups.size(); ++group_index)
+                {
+                    StageBindingGroupDynamic& group_dynamic = stage_dynamic->binding_groups[group_index];
+                    StageBindingGroupStatic& group_static = stage_static->binding_groups[group_index];
+
+                    for (VkDescriptorSet set : group_dynamic.sets)
+                        group_static.pool.FreeDescriptorSet(set);
+
+                    group_dynamic.sets.clear();
+                }
+
+                registry->ComponentErase(node, stage_dynamic);
+            }
+        });
+
+#if 0
     for (size_t node_index = 0; node_index < nodes_dynamic.size(); ++node_index)
     {
         DispatchNodeDynamic& node = nodes_dynamic[node_index];
@@ -2396,7 +2422,6 @@ DispatchContext::ClearDynamicRuntime()
 
                 for (VkDescriptorSet set : group.sets)
                     group_static.pool.FreeDescriptorSet(set);
-
 #if 0
                 vkFreeDescriptorSets(vulkan->device,
                                      group_static.pool.pool,
@@ -2413,6 +2438,7 @@ DispatchContext::ClearDynamicRuntime()
     }
 
     nodes_dynamic.clear();
+#endif
 }
 
 void
@@ -2923,7 +2949,7 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                          ++range_index)
                     {
                         layout::PushConstantRange const& range = dispatch_stage->push_constants[range_index];
-                        void* memory = registry->ComponentLookup<std::unique_ptr<uint8_t[]>>(node, range_index)->get();
+                        void* memory = registry->ComponentRequest<bind::PushConstantStorage>(node, invoc_index)[range_index].get();
                         vkCmdPushConstants(_command_buffer,
                                            stage_static->pipeline_layout,
                                            range.stages,
@@ -3607,9 +3633,11 @@ DispatchContext::BindPushConstants(dstk::Registry::Node _node,
 {
     layout::_::DispatchStage const& stage = *registry->ComponentLookup<layout::_::DispatchStage>(_node);
     layout::PushConstantRange const& range = stage.push_constants[_location.push_constant_range];
-    // NOTE this is wrong, we need to store a vector of push constants per invocation
-    std::unique_ptr<uint8_t[]> range_memory{ new uint8_t[range.size] };
-    return ((std::unique_ptr<uint8_t[]>*)registry->BindComponent(_node, _location.push_constant_range, std::move(range_memory)))->get();
+    bind::PushConstantStorage& storage = registry->ComponentRequest<bind::PushConstantStorage>(_node, _invoc_index);
+    if (storage.size() < _location.push_constant_range+1)
+        storage.resize(_location.push_constant_range+1);
+    storage[_location.push_constant_range].reset(new uint8_t[range.size]);
+    return storage[_location.push_constant_range].get();
 
 #if 0
     layout::DispatchStage const& stage = _location.node->sequence[_location.stage_index];
