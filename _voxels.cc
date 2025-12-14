@@ -891,7 +891,7 @@ void SparseRegionUpdateBindings(voxel_state_t* _state, vktk::Context* _vulkan)
         desc_count_allocs[1].descriptorSetCount = 1;
         desc_count_allocs[1].pDescriptorCounts = &desc_counts[1];
 
-        pNext_map.emplace("sparse_region", std::vector<vkrg::bind::PNextEntry>{
+        pNext_map.emplace("SparseRegionSubpass", std::vector<vkrg::bind::PNextEntry>{
             { 1, (void*)&desc_count_allocs[0] },
             { 2, (void*)&desc_count_allocs[1] }
         });
@@ -927,41 +927,47 @@ void SparseRegionUpdateBindings(voxel_state_t* _state, vktk::Context* _vulkan)
     matrix_buffer_info.offset = 0;
     matrix_buffer_info.range = sizeof(MatrixBlock);
 
-    _state->sparse_runtime.registry->BindComponent(
-        sparse_region_node,
-        vkrg::bind::_::ShaderBinding{
+    std::vector<VkWriteDescriptorSet> desc_writes = {};
+    desc_writes.push_back(
+        _state->sparse_runtime.BindShaderResource(
+            sparse_region_node,
             vkrg::layout::_::BindingPoint{
                 .type = vkrg::layout::_::BindingType_Shader,
                 .shader = { 0, 0 }
             },
+            0,
             vkrg::bind::_::ShaderResources{
                 .buffers = { matrix_buffer_info }
-            }
-        });
+            })
+        );
 
-    _state->sparse_runtime.registry->BindComponent(
-        sparse_region_node,
-        vkrg::bind::_::ShaderBinding{
+    desc_writes.push_back(
+        _state->sparse_runtime.BindShaderResource(
+            sparse_region_node,
             vkrg::layout::_::BindingPoint{
                 .type = vkrg::layout::_::BindingType_Shader,
                 .shader = { 1, 0 }
             },
+            0,
             vkrg::bind::_::ShaderResources{
                 .images = nodes_info
-            }
-        });
+            })
+        );
 
-    _state->sparse_runtime.registry->BindComponent(
-        sparse_region_node,
-        vkrg::bind::_::ShaderBinding{
+    desc_writes.push_back(
+        _state->sparse_runtime.BindShaderResource(
+            sparse_region_node,
             vkrg::layout::_::BindingPoint{
                 .type = vkrg::layout::_::BindingType_Shader,
                 .shader = { 2, 0 }
             },
+            0,
             vkrg::bind::_::ShaderResources{
                 .images = offsets_info
-            }
-        });
+            })
+        );
+
+    vkUpdateDescriptorSets(_vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
 
 #if 0
     vkrg::layout::DispatchNode const* sparse_region_node = _state->sparse_graph["SparseRegionDispatch"];
@@ -1076,22 +1082,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     }
 #endif
 
-    {
-        dstk::Registry test_registry = {};
-        struct Deleter {
-            void operator () (auto ptr) {
-                std::cout << "Deleted" << std::endl;
-                delete ptr;
-            }
-        };
-
-        for (uint32_t index = 0; index < 10; ++index)
-        {
-            std::unique_ptr<uint8_t, Deleter> custom_deleter{ new uint8_t(index) };
-            test_registry.BindComponent(test_registry.MakeNode(), std::move(custom_deleter));
-        }
-    }
-
     uint32_t area_size = 0u;
     uint32_t node_size = 0u;
 #if 1
@@ -1191,7 +1181,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         desc_count_alloc.pDescriptorCounts = &desc_count;
         void* pnext_begin = &desc_count_alloc;
 
-        pNext_map.emplace("render_region", std::vector<vkrg::bind::PNextEntry>{
+        pNext_map.emplace("RegionPass", std::vector<vkrg::bind::PNextEntry>{
             vkrg::bind::PNextEntry{ 0, (void*)&desc_count_alloc }
         });
 
@@ -1212,7 +1202,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         desc_count_alloc.pDescriptorCounts = &desc_count;
         void* pnext_begin = &desc_count_alloc;
 
-        pNext_map.emplace("render_region", std::vector<vkrg::bind::PNextEntry>{
+        pNext_map.emplace("RegionPass", std::vector<vkrg::bind::PNextEntry>{
             vkrg::bind::PNextEntry{ 0, (void*)&desc_count_alloc }
         });
 
@@ -1269,36 +1259,35 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
         for (uint32_t index = 0; index < 64; ++index)
         {
-            _state->forward_runtime.registry->BindComponent(
-                main_world_node,
-                index,
-                vkrg::bind::_::ShaderBinding{
+            std::vector<VkWriteDescriptorSet> desc_writes = {};
+
+            VkWriteDescriptorSet region_binding =
+                _state->forward_runtime.BindShaderResource(
+                    main_world_node,
                     vkrg::layout::_::BindingPoint{
                         .type = vkrg::layout::_::BindingType_Shader,
                         .shader = { 0, 1 }
                     },
+                    index,
                     vkrg::bind::_::ShaderResources{
                         .images = { region_image_info }
-                    }
-                });
+                    });
 
             VkDescriptorBufferInfo buffer_info = {};
             buffer_info.buffer = _state->matrix_buffer;
             buffer_info.offset = sizeof(MatrixBlock) * index;
             buffer_info.range = sizeof(MatrixBlock);
-
-            _state->forward_runtime.registry->BindComponent(
-                main_world_node,
-                index,
-                vkrg::bind::_::ShaderBinding{
+            VkWriteDescriptorSet matrix_binding =
+                _state->forward_runtime.BindShaderResource(
+                    main_world_node,
                     vkrg::layout::_::BindingPoint{
                         .type = vkrg::layout::_::BindingType_Shader,
                         .shader = { 0, 0 }
                     },
+                    index,
                     vkrg::bind::_::ShaderResources{
                         .buffers = { buffer_info }
-                    }
-                });
+                    });
 
             std::vector<VkDescriptorImageInfo> section_images_info(_state->section_textures.size());
             for (uint32_t section_index = 0u;
@@ -1311,18 +1300,25 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                 image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
             }
 
-            _state->forward_runtime.registry->BindComponent(
-                main_world_node,
-                index,
-                vkrg::bind::_::ShaderBinding{
+            VkWriteDescriptorSet section_bindings =
+                _state->forward_runtime.BindShaderResource(
+                    main_world_node,
                     vkrg::layout::_::BindingPoint{
                         .type = vkrg::layout::_::BindingType_Shader,
                         .shader = { 0, 2 }
                     },
+                    index,
                     vkrg::bind::_::ShaderResources{
                         .images = section_images_info
-                    }
-                });
+                    });
+
+            if (region_image_info.imageView)
+                desc_writes.push_back(region_binding);
+            desc_writes.push_back(matrix_binding);
+            if (!section_images_info.empty())
+                desc_writes.push_back(section_bindings);
+
+            vkUpdateDescriptorSets(_vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
         }
 
 #if 0
@@ -1410,36 +1406,35 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
         for (uint32_t index = 0; index < 64; ++index)
         {
-            _state->pixel_cycling_runtime.registry->BindComponent(
-                main_world_node,
-                index,
-                vkrg::bind::_::ShaderBinding{
+            std::vector<VkWriteDescriptorSet> desc_writes = {};
+
+            VkWriteDescriptorSet region_binding =
+                _state->pixel_cycling_runtime.BindShaderResource(
+                    main_world_node,
                     vkrg::layout::_::BindingPoint{
                         .type = vkrg::layout::_::BindingType_Shader,
                         .shader = { 0, 1 }
                     },
+                    index,
                     vkrg::bind::_::ShaderResources{
                         .images = { region_image_info }
-                    }
-                });
+                    });
 
             VkDescriptorBufferInfo buffer_info = {};
             buffer_info.buffer = _state->matrix_buffer;
             buffer_info.offset = sizeof(MatrixBlock) * index;
             buffer_info.range = sizeof(MatrixBlock);
-
-            _state->pixel_cycling_runtime.registry->BindComponent(
-                main_world_node,
-                index,
-                vkrg::bind::_::ShaderBinding{
+            VkWriteDescriptorSet matrix_binding =
+                _state->pixel_cycling_runtime.BindShaderResource(
+                    main_world_node,
                     vkrg::layout::_::BindingPoint{
                         .type = vkrg::layout::_::BindingType_Shader,
                         .shader = { 0, 0 }
                     },
+                    index,
                     vkrg::bind::_::ShaderResources{
                         .buffers = { buffer_info }
-                    }
-                });
+                    });
 
             std::vector<VkDescriptorImageInfo> section_images_info(_state->section_textures.size());
             for (uint32_t section_index = 0u;
@@ -1452,18 +1447,25 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                 image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
             }
 
-            _state->pixel_cycling_runtime.registry->BindComponent(
-                main_world_node,
-                index,
-                vkrg::bind::_::ShaderBinding{
+            VkWriteDescriptorSet section_bindings =
+                _state->pixel_cycling_runtime.BindShaderResource(
+                    main_world_node,
                     vkrg::layout::_::BindingPoint{
                         .type = vkrg::layout::_::BindingType_Shader,
                         .shader = { 0, 2 }
                     },
+                    index,
                     vkrg::bind::_::ShaderResources{
                         .images = section_images_info
-                    }
-                });
+                    });
+
+            if (region_image_info.imageView)
+                desc_writes.push_back(region_binding);
+            desc_writes.push_back(matrix_binding);
+            if (!section_images_info.empty())
+                desc_writes.push_back(section_bindings);
+
+            vkUpdateDescriptorSets(_vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
         }
 
 #if 0
@@ -1682,21 +1684,34 @@ void RenderResources(void* _pstate,
                               return node.name == "ResolveDispatch";
                           });
 #endif
+        dstk::Registry::Node resolve_node = _state->pixel_cycling_runtime._graph["FramebufferResolve"];
 
         numtk::vec2u size = { _swapchain.size.width, _swapchain.size.height };
         _state->pixel_cycling_runtime.BindAttachments(
             _state->pixel_cycling_runtime._graph["FramebufferDispatch"], size,
             { _state->primary_pass_color.view, _state->primary_pass_depth.view }
             );
+
 #if 0
         _state->pixel_cycling_runtime.BindSwapchain(&resolve_node, _swapchain);
 #endif
-        _state->pixel_cycling_runtime.BindSwapchain(_state->pixel_cycling_runtime._graph["FramebufferResolve"], _swapchain);
+        _state->pixel_cycling_runtime.BindSwapchain(resolve_node, _swapchain);
 
         VkDescriptorImageInfo image_info{};
         image_info.sampler = _state->sampler;
         image_info.imageView = _state->primary_pass_color.view;
         image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkWriteDescriptorSet desc_write = _state->pixel_cycling_runtime.BindShaderResource(
+            resolve_node,
+            vkrg::layout::_::BindingPoint{
+                .type = vkrg::layout::_::BindingType_Shader,
+                .shader = { 0, 0 }
+            },
+            0,
+            vkrg::bind::_::ShaderResources{
+                .images = { image_info }
+            });
+
 #if 0
         VkWriteDescriptorSet desc_write = _state->pixel_cycling_runtime.BindShaderResource(
             vkrg::layout::BindingPoint{
@@ -1710,8 +1725,9 @@ void RenderResources(void* _pstate,
                 .descriptor_count = 1,
                 .images = &image_info
             });
-        vkUpdateDescriptorSets(_vulkan->device, 1, &desc_write, 0u, nullptr);
 #endif
+
+        vkUpdateDescriptorSets(_vulkan->device, 1, &desc_write, 0u, nullptr);
 
         numtk::vec2i screen_size{ (int32_t)_swapchain.size.width, (int32_t)_swapchain.size.height };
 
@@ -1722,6 +1738,7 @@ void RenderResources(void* _pstate,
                     .type = vkrg::layout::_::BindingType_PushConstantRange,
                     .push_constant_range = 0
                 }, 0);
+
 #if 0
         numtk::vec2i* push_constants =
             (numtk::vec2i*)_state->pixel_cycling_runtime.BindPushConstants(
@@ -1949,11 +1966,13 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                 },
                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
+#if 0
             vkrg::layout::DispatchNode const& sparse_region_node =
                 *std::find_if(_state->sparse_graph.nodes.begin(), _state->sparse_graph.nodes.end(),
                               [](vkrg::layout::DispatchNode const& node) {
                                   return node.name == "SparseRegionDispatch";
                               });
+#endif
 
             _state->sparse_runtime.UpdateDynamicInvocationCount(
                 _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
@@ -1975,6 +1994,11 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                         vkrg::bind::DispatchCommand_Draw, 6*9, 1
                     });
 #endif
+                _state->sparse_runtime.BindGraphicsCommand(
+                    _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
+                    index, {
+                        vkrg::bind::DispatchCommand_Draw, 6*9, 1
+                    });
 
                 {
                     _state->sparse_runtime.BindVertexInput(
@@ -2012,6 +2036,12 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                     });
 #endif
 
+                _state->sparse_runtime.BindGraphicsCommand(
+                    _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
+                    index, {
+                        vkrg::bind::DispatchCommand_Draw, 6, 1
+                    });
+
                 {
                     _state->sparse_runtime.BindVertexInput(
                         _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
@@ -2041,6 +2071,19 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                     _state->gui_font_texture.view,
                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
                 };
+
+                bindings.push_back(
+                    _state->sparse_runtime.BindShaderResource(
+                        _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
+                        vkrg::layout::_::BindingPoint{
+                            .type = vkrg::layout::_::BindingType_Shader,
+                            .shader = { 0, 0 }
+                        },
+                        index,
+                        vkrg::bind::_::ShaderResources{
+                            .images = { image_info[index] }
+                        })
+                    );
 
 #if 0
                 bindings.push_back(
@@ -2323,6 +2366,7 @@ void Draw(void* _pstate,
 
     {
         dstk::Registry::Node main_world_node = _state->current_runtime->_graph["FramebufferDispatch"]["RegionPass"];
+        dstk::Registry::Node skybox_node = _state->current_runtime->_graph["FramebufferDispatch"]["SkyboxPass"];
 
         _state->current_runtime->BindFramebufferArea(
             _state->current_runtime->_graph["FramebufferDispatch"], {
@@ -2338,8 +2382,35 @@ void Draw(void* _pstate,
             command.instance_count = 1;
 
             for (uint32_t index = 0; index < 64; ++index)
+            {
                 _state->current_runtime->BindGraphicsCommand(main_world_node, index, command);
 
+                numtk::vec3f* push_constants =
+                    (numtk::vec3f*)_state->current_runtime->BindPushConstants(
+                        main_world_node,
+                        {
+                            .type = vkrg::layout::_::BindingType_PushConstantRange,
+                            .push_constant_range = 0
+                        }, index);
+                *push_constants = sun_dir;
+            }
+        }
+
+        {
+            vkrg::bind::GraphicsCommand command = {};
+            command.command = vkrg::bind::DispatchCommand_Draw;
+            command.vertex_count = 3;
+            command.instance_count = 1;
+
+            _state->current_runtime->BindGraphicsCommand(main_world_node, 0, command);
+            SkyboxPushConstants* push_constants =
+                (SkyboxPushConstants*)_state->current_runtime->BindPushConstants(
+                    skybox_node,
+                    {
+                        .type = vkrg::layout::_::BindingType_PushConstantRange,
+                        .push_constant_range = 0
+                    }, 0);
+            *push_constants = skybox_params;
         }
 
 #if 0
@@ -2413,6 +2484,24 @@ void Draw(void* _pstate,
         dstk::Registry::Node resolve_node =
             _state->current_runtime->_graph["FramebufferResolve"]["ResolveDispatch"];
 
+        vkrg::bind::GraphicsCommand command = {};
+        command.command = vkrg::bind::DispatchCommand_Draw;
+        command.vertex_count = 3;
+        command.instance_count = 1;
+
+        _state->current_runtime->BindGraphicsCommand(resolve_node, 0, command);
+        _state->current_runtime->BindFramebufferArea(
+            _state->current_runtime->_graph["FramebufferResolve"], {
+                _swapchain.index,
+                numtk::bounds2u{
+                    { 0, 0 },
+                    { _swapchain.size.width, _swapchain.size.height }
+                },
+                numtk::bounds2f{
+                    { 0.f, 0.f },
+                    { (float)_swapchain.size.width, (float)_swapchain.size.height }
+                }
+            });
 #if 0
         vkrg::layout::DispatchNode const& resolve_node =
             *std::find_if(_state->current_runtime->graph->nodes.begin(),
@@ -2450,6 +2539,70 @@ void Draw(void* _pstate,
     {
         dstk::Registry::Node sparse_region_node =
             _state->sparse_runtime._graph["FramebufferDispatch"]["SparseRegionSubpass"];
+        dstk::Registry::Node gui_frames_node =
+            _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"];
+        dstk::Registry::Node gui_glyphs_node =
+            _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"];
+
+        vkrg::bind::GraphicsCommand command = {};
+        command.command = vkrg::bind::DispatchCommand_Draw;
+        command.vertex_count = 36;
+        command.instance_count = 1;
+        _state->sparse_runtime.BindGraphicsCommand(sparse_region_node, 0, command);
+
+        SparseRegionPushConstants* push_constants =
+            (SparseRegionPushConstants*)_state->sparse_runtime.BindPushConstants(
+                sparse_region_node,
+                {
+                    .type = vkrg::layout::_::BindingType_PushConstantRange,
+                    .push_constant_range = 0
+                }, 0);
+        push_constants->light_dir = sun_dir;
+        push_constants->display_mode = (float)_state->display_mode;
+        push_constants->node_size = (float)_state->region_package.node_size;
+        push_constants->stack_depth = std::max(_state->region_package.display_depth-1, 0);
+
+        for (uint32_t index = 0u; index < (uint32_t)_state->current_gui_record->frames.size(); ++index)
+        {
+            numtk::vec2f* gui_push_constants =
+                (numtk::vec2f*)_state->sparse_runtime.BindPushConstants(
+                    gui_frames_node,
+                    {
+                        .type = vkrg::layout::_::BindingType_PushConstantRange,
+                        .push_constant_range = 0
+                    }, index);
+            gui_push_constants[0] = { (float)_swapchain.size.width, (float)_swapchain.size.height };
+            gui_push_constants[1] = _state->current_gui_record->frames[index].min.cast<float>();
+            gui_push_constants[2] = _state->current_gui_record->frames[index].extent.cast<float>();
+        }
+
+        for (uint32_t index = 0u; index < (uint32_t)_state->current_gui_record->glyphs.size(); ++index)
+        {
+            numtk::vec2f* gui_push_constants =
+                (numtk::vec2f*)_state->sparse_runtime.BindPushConstants(
+                    gui_glyphs_node,
+                    {
+                        .type = vkrg::layout::_::BindingType_PushConstantRange,
+                        .push_constant_range = 0
+                    }, index);
+            gui_push_constants[0] = { (float)_swapchain.size.width, (float)_swapchain.size.height };
+            gui_push_constants[1] = numtk::vec2f{};
+            gui_push_constants[2] = numtk::vec2f{};
+        }
+
+        _state->sparse_runtime.BindFramebufferArea(
+            _state->sparse_runtime._graph["FramebufferDispatch"],
+            {
+                _swapchain.index,
+                {
+                    { 0, 0 },
+                    { _swapchain.size.width, _swapchain.size.height }
+                },
+                {
+                    { 0.f, 0.f },
+                    { (float)_swapchain.size.width, (float)_swapchain.size.height }
+                }
+            });
 
 #if 0
         vkrg::layout::DispatchNode const& sparse_region_node =

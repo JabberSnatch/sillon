@@ -2383,12 +2383,13 @@ DispatchContext::ClearDynamicRuntime()
         [this](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
                dstk::Registry::Node node) {
             auto const* dispatch_stage = registry->ComponentLookup<layout::DispatchStage>(node);
+            auto* stage_static = registry->ComponentLookup<DispatchStageStatic>(node);
+            auto* stage_dynamic = registry->ComponentLookup<DispatchStageDynamic>(node);
 
-            if (dispatch_stage)
+            if (dispatch_stage
+                && stage_static
+                && stage_dynamic)
             {
-                auto* stage_static = registry->ComponentLookup<DispatchStageStatic>(node);
-                auto* stage_dynamic = registry->ComponentLookup<DispatchStageDynamic>(node);
-
                 for (uint32_t group_index = 0u; group_index < (uint32_t)dispatch_stage->binding_groups.size(); ++group_index)
                 {
                     StageBindingGroupDynamic& group_dynamic = stage_dynamic->binding_groups[group_index];
@@ -3668,7 +3669,7 @@ VkWriteDescriptorSet
 DispatchContext::BindShaderResource(dstk::Registry::Node _node,
                                     layout::_::BindingPoint const& _location,
                                     uint32_t _invoc_index,
-                                    bind::ShaderResource const& _resources)
+                                    bind::_::ShaderResources const& _resources)
 {
     DispatchStageDynamic const& stage_dynamic = *registry->ComponentLookup<DispatchStageDynamic>(_node);
     StageBindingGroupDynamic const& group_runtime = stage_dynamic.binding_groups[_location.shader.group_index];
@@ -3677,16 +3678,22 @@ DispatchContext::BindShaderResource(dstk::Registry::Node _node,
     layout::StageBindingGroup const& binding_group = stage.binding_groups[_location.shader.group_index];
     layout::StageBinding const& binding = binding_group.bindings[_location.shader.binding_index];
 
+    uint32_t descriptor_count = 0u;
+    if (!_resources.images.empty())
+        descriptor_count = _resources.images.size();
+    if (!_resources.buffers.empty())
+        descriptor_count = _resources.buffers.size();
+
     VkWriteDescriptorSet desc_write = {};
     desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     desc_write.pNext = nullptr;
     desc_write.dstSet = group_runtime.sets[_invoc_index];
     desc_write.dstBinding = _location.shader.binding_index;
     desc_write.dstArrayElement = 0u;
-    desc_write.descriptorCount = _resources.descriptor_count;
+    desc_write.descriptorCount = descriptor_count;
     desc_write.descriptorType = binding.type;
-    desc_write.pImageInfo = _resources.images;
-    desc_write.pBufferInfo = _resources.buffers;
+    desc_write.pImageInfo = _resources.images.data();
+    desc_write.pBufferInfo = _resources.buffers.data();
     desc_write.pTexelBufferView = nullptr;
 
     bind::DispatchStage& stage_bindings = registry->ComponentRequest<bind::DispatchStage>(_node);
@@ -3695,7 +3702,7 @@ DispatchContext::BindShaderResource(dstk::Registry::Node _node,
     {
     case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
     case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
-        for (uint32_t desc_index = 0u; desc_index < _resources.descriptor_count; ++desc_index)
+        for (uint32_t desc_index = 0u; desc_index < descriptor_count; ++desc_index)
             stage_bindings.buffer_barriers[_resources.buffers[desc_index].buffer].second = bind::AccessInfo{
                 binding.stages,
                 VK_ACCESS_UNIFORM_READ_BIT
@@ -3704,7 +3711,7 @@ DispatchContext::BindShaderResource(dstk::Registry::Node _node,
 
     case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
     case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
-        for (uint32_t desc_index = 0u; desc_index < _resources.descriptor_count; ++desc_index)
+        for (uint32_t desc_index = 0u; desc_index < descriptor_count; ++desc_index)
             stage_bindings.buffer_barriers[_resources.buffers[desc_index].buffer].second = bind::AccessInfo{
                 binding.stages,
                 VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT
