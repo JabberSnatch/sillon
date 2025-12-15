@@ -1684,7 +1684,7 @@ void RenderResources(void* _pstate,
                               return node.name == "ResolveDispatch";
                           });
 #endif
-        dstk::Registry::Node resolve_node = _state->pixel_cycling_runtime._graph["FramebufferResolve"];
+        dstk::Registry::Node resolve_node = _state->pixel_cycling_runtime._graph["FramebufferResolve"]["ResolvePass"];
 
         numtk::vec2u size = { _swapchain.size.width, _swapchain.size.height };
         _state->pixel_cycling_runtime.BindAttachments(
@@ -1695,7 +1695,7 @@ void RenderResources(void* _pstate,
 #if 0
         _state->pixel_cycling_runtime.BindSwapchain(&resolve_node, _swapchain);
 #endif
-        _state->pixel_cycling_runtime.BindSwapchain(resolve_node, _swapchain);
+        _state->pixel_cycling_runtime.BindSwapchain(_state->pixel_cycling_runtime._graph["FramebufferDispatch"], _swapchain);
 
         VkDescriptorImageInfo image_info{};
         image_info.sampler = _state->sampler;

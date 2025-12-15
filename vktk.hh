@@ -585,12 +585,14 @@ struct DispatchGraph {
 
 namespace _ {
 
+#if 0
 struct DispatchStage {
     std::vector<ShaderStage> shaders;
     std::vector<StageBindingGroup> binding_groups;
     std::vector<PushConstantRange> push_constants;
     GraphicsStage graphics;
 };
+#endif
 
 struct DispatchPass {
     DispatchMode mode;
@@ -726,10 +728,8 @@ struct DispatchGraph
 
     NodeView operator[](std::string const& name) {
         dstk::Registry::Node node = ~(dstk::Registry::Node)0;
-        if (!name_lookup.contains(name)) {
-            node = registry->MakeNode();
-            name_lookup.emplace(node, name);
-        }
+        if (!name_lookup.contains(name))
+            node = MakeNode(name);
         else
             node = name_lookup[name];
         return NodeView{ this, node };
