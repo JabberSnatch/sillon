@@ -2930,8 +2930,6 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                      invoc_index < stage_dynamic->invocation_count;
                      ++invoc_index) {
 
-                    auto const* invocation = registry->ComponentLookup<bind::DispatchInvocation>(node);
-
                     for (uint32_t group_index = 0u;
                          group_index < (uint32_t)dispatch_stage->binding_groups.size();
                          ++group_index)
@@ -2959,24 +2957,29 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                                            memory);
                     }
 
-                    for (uint32_t vertex_input_index = 0u;
-                         vertex_input_index < (uint32_t)invocation->vertex_inputs.size();
-                         ++vertex_input_index)
+                    auto const* invocation = registry->ComponentLookup<bind::DispatchInvocation>(node);
+                    bool indexed_draw = false;
+                    if (invocation)
                     {
-                        bind::VertexInput const& binding = invocation->vertex_inputs[vertex_input_index];
-                        if (binding.buffer == VK_NULL_HANDLE)
-                            continue;
+                        for (uint32_t vertex_input_index = 0u;
+                             vertex_input_index < (uint32_t)invocation->vertex_inputs.size();
+                             ++vertex_input_index)
+                        {
+                            bind::VertexInput const& binding = invocation->vertex_inputs[vertex_input_index];
+                            if (binding.buffer == VK_NULL_HANDLE)
+                                continue;
 
-                        vkCmdBindVertexBuffers(_command_buffer, vertex_input_index, 1,
-                                               &binding.buffer, &binding.offset);
+                            vkCmdBindVertexBuffers(_command_buffer, vertex_input_index, 1,
+                                                   &binding.buffer, &binding.offset);
+                        }
+
+                        indexed_draw = (invocation->index_input.buffer != VK_NULL_HANDLE);
+                        if (indexed_draw)
+                            vkCmdBindIndexBuffer(_command_buffer,
+                                                 invocation->index_input.buffer,
+                                                 invocation->index_input.offset,
+                                                 VK_INDEX_TYPE_UINT32);
                     }
-
-                    bool indexed_draw = (invocation->index_input.buffer != VK_NULL_HANDLE);
-                    if (indexed_draw)
-                        vkCmdBindIndexBuffer(_command_buffer,
-                                             invocation->index_input.buffer,
-                                             invocation->index_input.offset,
-                                             VK_INDEX_TYPE_UINT32);
 
                     auto const& graphics_command = *registry->ComponentLookup<bind::GraphicsCommand>(node, invoc_index);
 
@@ -3182,6 +3185,18 @@ DispatchContext::RenderPassDescription(
             VK_IMAGE_LAYOUT_UNDEFINED,
             {}
         });
+    }
+
+    for (dstk::Registry::Node edge : (_graph.edges_out.count(_node) ? _graph.edges_out.at(_node) : std::vector<dstk::Registry::Node>{}))
+    {
+        layout::_::DispatchGraph::EdgeDesc const* edge_desc =
+            registry->ComponentLookup<layout::_::DispatchGraph::EdgeDesc>(edge);
+    }
+
+    for (dstk::Registry::Node edge : (_graph.edges_in.count(_node) ? _graph.edges_in.at(_node) : std::vector<dstk::Registry::Node>{}))
+    {
+        layout::_::DispatchGraph::EdgeDesc const* edge_desc =
+            registry->ComponentLookup<layout::_::DispatchGraph::EdgeDesc>(edge);
     }
 
     return output;
