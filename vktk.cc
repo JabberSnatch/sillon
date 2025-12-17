@@ -3180,10 +3180,15 @@ DispatchContext::RenderPassDescription(
 
     for (uint32_t index = 0u; index < (uint32_t)dispatch_pass.graphics.attachments.size(); ++index)
     {
+        layout::_::BindingPoint binding_point = {};
+        binding_point.type = layout::_::BindingType_Framebuffer;
+        binding_point.attachment_index = index;
+        layout::BindingPointSync sync_reqs = BindingPointSyncRequirements(_node, layout::EdgeType_Image, binding_point);
+
         output.push_back(vktk::Context::RenderPassAttachment{
             dispatch_pass.graphics.attachments[index].format,
             VK_IMAGE_LAYOUT_UNDEFINED,
-            {}
+            sync_reqs.layout
         });
     }
 
@@ -3191,12 +3196,16 @@ DispatchContext::RenderPassDescription(
     {
         layout::_::DispatchGraph::EdgeDesc const* edge_desc =
             registry->ComponentLookup<layout::_::DispatchGraph::EdgeDesc>(edge);
+
+        layout::_::NodeTag* tag = registry->ComponentLookup<layout::_::NodeTag>(edge_desc->target);
     }
 
     for (dstk::Registry::Node edge : (_graph.edges_in.count(_node) ? _graph.edges_in.at(_node) : std::vector<dstk::Registry::Node>{}))
     {
         layout::_::DispatchGraph::EdgeDesc const* edge_desc =
             registry->ComponentLookup<layout::_::DispatchGraph::EdgeDesc>(edge);
+
+        layout::_::NodeTag* tag = registry->ComponentLookup<layout::_::NodeTag>(edge_desc->source);
     }
 
     return output;
