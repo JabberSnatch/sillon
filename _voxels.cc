@@ -3319,6 +3319,7 @@ vkrg::runtime::DispatchContext SparseRegionRenderGraph()
             registry.BindComponent(graph["present"], vkrg::layout::_::NodeTag_Present);
             registry.BindComponent(graph.MakeEdge("FramebufferDispatch", "present"),
                                    vkrg::layout::_::EdgeBindings{
+                                       vkrg::layout::EdgeType_Image,
                                        vkrg::layout::_::BindingPoint{
                                            .type = vkrg::layout::_::BindingType_Framebuffer,
                                            .attachment_index = 0
@@ -3461,6 +3462,7 @@ vkrg::runtime::DispatchContext FullFrameRenderGraph()
             registry.BindComponent(graph["present"], vkrg::layout::_::NodeTag_Present);
             registry.BindComponent(graph.MakeEdge("FramebufferDispatch", "present"),
                                    vkrg::layout::_::EdgeBindings{
+                                       vkrg::layout::EdgeType_Image,
                                        vkrg::layout::_::BindingPoint{
                                            .type = vkrg::layout::_::BindingType_Framebuffer,
                                            .attachment_index = 0
@@ -3550,6 +3552,7 @@ vkrg::runtime::DispatchContext PixelCyclingRenderGraph()
             registry.BindComponent(graph["present"], vkrg::layout::_::NodeTag_Present);
             registry.BindComponent(graph.MakeEdge("FramebufferDispatch", "FramebufferResolve"),
                                    vkrg::layout::_::EdgeBindings{
+                                       vkrg::layout::EdgeType_Image,
                                        vkrg::layout::_::BindingPoint{
                                            .type = vkrg::layout::_::BindingType_Framebuffer,
                                            .attachment_index = 0
@@ -3561,6 +3564,7 @@ vkrg::runtime::DispatchContext PixelCyclingRenderGraph()
                                    });
             registry.BindComponent(graph.MakeEdge("FramebufferResolve", "present"),
                                    vkrg::layout::_::EdgeBindings{
+                                       vkrg::layout::EdgeType_Image,
                                        vkrg::layout::_::BindingPoint{
                                            .type = vkrg::layout::_::BindingType_Framebuffer,
                                            .attachment_index = 0

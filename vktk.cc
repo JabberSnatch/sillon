@@ -3194,18 +3194,35 @@ DispatchContext::RenderPassDescription(
 
     for (dstk::Registry::Node edge : (_graph.edges_out.count(_node) ? _graph.edges_out.at(_node) : std::vector<dstk::Registry::Node>{}))
     {
-        layout::_::DispatchGraph::EdgeDesc const* edge_desc =
-            registry->ComponentLookup<layout::_::DispatchGraph::EdgeDesc>(edge);
+        layout::_::DispatchGraph::EdgeDesc const& edge_desc =
+            *registry->ComponentLookup<layout::_::DispatchGraph::EdgeDesc>(edge);
 
-        layout::_::NodeTag* tag = registry->ComponentLookup<layout::_::NodeTag>(edge_desc->target);
+        layout::_::EdgeBindings const* bindings = registry->ComponentLookup<layout::_::EdgeBindings>(edge);
+        if (!bindings
+            || bindings->source.type != layout::_::BindingType_Framebuffer)
+            continue;
+
+        vktk::Context::RenderPassAttachment& desc = output[bindings->source.attachment_index];
+        layout::BindingPointSync sync_reqs = BindingPointSyncRequirements(edge_desc.target, bindings->type, bindings->target);
+        desc.finalLayout = sync_reqs.layout;
+
+        if (_swapchain_format && sync_reqs.layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
+            desc.format = *_swapchain_format;
     }
 
     for (dstk::Registry::Node edge : (_graph.edges_in.count(_node) ? _graph.edges_in.at(_node) : std::vector<dstk::Registry::Node>{}))
     {
-        layout::_::DispatchGraph::EdgeDesc const* edge_desc =
-            registry->ComponentLookup<layout::_::DispatchGraph::EdgeDesc>(edge);
+        layout::_::DispatchGraph::EdgeDesc const& edge_desc =
+            *registry->ComponentLookup<layout::_::DispatchGraph::EdgeDesc>(edge);
 
-        layout::_::NodeTag* tag = registry->ComponentLookup<layout::_::NodeTag>(edge_desc->source);
+        layout::_::EdgeBindings const* bindings = registry->ComponentLookup<layout::_::EdgeBindings>(edge);
+        if (!bindings
+            || bindings->target.type != layout::_::BindingType_Framebuffer)
+            continue;
+
+        vktk::Context::RenderPassAttachment& desc = output[bindings->target.attachment_index];
+        layout::BindingPointSync sync_reqs = BindingPointSyncRequirements(edge_desc.source, bindings->type, bindings->source);
+        desc.initialLayout = sync_reqs.layout;
     }
 
     return output;
@@ -3277,15 +3294,17 @@ DispatchContext::BindingPointSyncRequirements(
             }
         } break;
 
-#if 0
-        case BindingType_Present:
-        {
-            output.access = 0;
-            output.layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        } break;
-#endif
+        default: {
+            layout::_::NodeTag const* tag = registry->ComponentLookup<layout::_::NodeTag>(_node);
+            if (!tag)
+                break;
 
-        default: break;
+            if (*tag == layout::_::NodeTag_Present)
+            {
+                output.access = 0;
+                output.layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+            }
+        } break;
         }
     }
 

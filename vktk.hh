@@ -633,6 +633,7 @@ struct BindingPoint {
 };
 
 struct EdgeBindings {
+    EdgeType type;
     BindingPoint source;
     BindingPoint target;
 };
