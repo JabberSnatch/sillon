@@ -2960,7 +2960,7 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                                            memory);
                     }
 
-                    auto const* invocation = registry->ComponentLookup<bind::DispatchInvocation>(node);
+                    auto const* invocation = registry->ComponentLookup<bind::DispatchInvocation>(node, invoc_index);
                     bool indexed_draw = false;
                     if (invocation)
                     {
