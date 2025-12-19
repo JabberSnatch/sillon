@@ -2919,12 +2919,15 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                                                        dstk::Registry::Node node) {
                 auto const* dispatch_stage = registry->ComponentLookup<layout::DispatchStage>(node);
                 auto const* stage_bindings = registry->ComponentLookup<bind::DispatchStage>(node);
-                if (!dispatch_stage || !stage_bindings)
+                auto const* pipeline = registry->ComponentLookup<VkPipeline>(node);
+                if (!dispatch_stage || !stage_bindings || !pipeline)
                     return;
 
                 layout::GraphicsNode const& graphics_info = dispatch_pass->graphics;
                 auto const* stage_static = registry->ComponentLookup<DispatchStageStatic>(node);
                 auto const* stage_dynamic = registry->ComponentLookup<DispatchStageDynamic>(node);
+
+                vkCmdBindPipeline(_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, *pipeline);
 
                 for (uint32_t invoc_index = 0u;
                      invoc_index < stage_dynamic->invocation_count;
@@ -3002,6 +3005,8 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                     }
                 }
             });
+
+            vkCmdEndRenderPass(_command_buffer);
         }
     });
 
@@ -3234,6 +3239,9 @@ DispatchContext::BindingPointSyncRequirements(
     layout::EdgeType _type,
     layout::_::BindingPoint const& _binding_point) const
 {
+    if (_binding_point.node_override != dstk::FreeList::kInvalidIndex)
+        _node = _binding_point.node_override;
+
     layout::BindingPointSync output = {};
     output.access = VK_ACCESS_NONE;
     output.layout = VK_IMAGE_LAYOUT_UNDEFINED;

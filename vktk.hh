@@ -621,6 +621,7 @@ enum BindingType {
 
 struct BindingPoint {
     BindingType type = BindingType_None;
+    dstk::Registry::Node node_override = dstk::FreeList::kInvalidIndex;
     union {
         uint32_t attachment_index;
         uint32_t push_constant_range;

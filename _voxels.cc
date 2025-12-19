@@ -3549,7 +3549,6 @@ vkrg::runtime::DispatchContext PixelCyclingRenderGraph()
                 registry.BindComponent(subpasses["ResolvePass"], ResolveDispatchStageInfo());
             }
 
-            registry.BindComponent(graph["present"], vkrg::layout::_::NodeTag_Present);
             registry.BindComponent(graph.MakeEdge("FramebufferDispatch", "FramebufferResolve"),
                                    vkrg::layout::_::EdgeBindings{
                                        vkrg::layout::EdgeType_Image,
@@ -3559,9 +3558,12 @@ vkrg::runtime::DispatchContext PixelCyclingRenderGraph()
                                        },
                                        vkrg::layout::_::BindingPoint{
                                            .type = vkrg::layout::_::BindingType_Shader,
+                                           .node_override = graph["FramebufferResolve"]["ResolvePass"],
                                            .shader = { 0, 0 }
                                        }
                                    });
+
+            registry.BindComponent(graph["present"], vkrg::layout::_::NodeTag_Present);
             registry.BindComponent(graph.MakeEdge("FramebufferResolve", "present"),
                                    vkrg::layout::_::EdgeBindings{
                                        vkrg::layout::EdgeType_Image,
