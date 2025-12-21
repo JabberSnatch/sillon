@@ -585,15 +585,6 @@ struct DispatchGraph {
 
 namespace _ {
 
-#if 0
-struct DispatchStage {
-    std::vector<ShaderStage> shaders;
-    std::vector<StageBindingGroup> binding_groups;
-    std::vector<PushConstantRange> push_constants;
-    GraphicsStage graphics;
-};
-#endif
-
 struct DispatchPass {
     DispatchMode mode;
     GraphicsNode graphics;
@@ -639,7 +630,6 @@ struct EdgeBindings {
     BindingPoint target;
 };
 
-#if 1
 struct DispatchGraph
 {
     DispatchGraph(dstk::Registry* registry_ = nullptr)
@@ -791,63 +781,6 @@ struct DispatchGraph
     std::unordered_map<dstk::Registry::Node, std::vector<dstk::Registry::Node>> edges_out;
     dstk::BijectiveMap<dstk::Registry::Node, std::string> name_lookup;
 };
-
-#else
-
-struct DispatchGraph
-{
-    using Handle = dstk::FreeList::Index;
-
-    struct Node {
-        Handle handle;
-        vkrg::layout::_::NodeTag node_tag = vkrg::layout::_::NodeTag_None;
-        std::unique_ptr<struct DispatchGraph> subgraph;
-        std::unique_ptr<vkrg::layout::_::DispatchPass> pass_desc;
-        std::unique_ptr<vkrg::layout::DispatchStage> stage_desc;
-    };
-
-    struct Edge {
-        Handle source;
-        Handle target;
-        vkrg::layout::_::BindingPoint source_point;
-        vkrg::layout::_::BindingPoint target_point;
-    };
-
-    Edge& MakeEdge(std::string const& source, std::string const& target) {
-        Handle source_handle = name_lookup[source];
-        Handle target_handle = name_lookup[target];
-
-        Handle handle = handle_pool.Reserve();
-        edges_in[target_handle].push_back(handle);
-        edges_out[source_handle].push_back(handle);
-        Edge& output = edges[handle];
-        output.source = source_handle;
-        output.target = target_handle;
-        return output;
-    }
-
-    Node& operator[](std::string const& name) {
-        Handle handle = ~0ull;
-        if (name_lookup.count(name) == 0) {
-            handle = handle_pool.Reserve();
-            name_lookup.emplace(name, handle);
-            Node& output = nodes[handle];
-            output.handle = handle;
-            return output;
-        }
-        else
-            return nodes[name_lookup.at(name)];
-    }
-
-    std::unordered_map<std::string, Handle> name_lookup;
-    std::unordered_map<Handle, std::vector<Handle>> edges_in;
-    std::unordered_map<Handle, std::vector<Handle>> edges_out;
-    std::unordered_map<Handle, Node> nodes;
-    std::unordered_map<Handle, Edge> edges;
-    dstk::FreeList handle_pool;
-};
-
-#endif
 
 } // namespace _
 
@@ -1032,13 +965,6 @@ struct DispatchContext {
 
     void UpdateDynamicInvocationCount(dstk::Registry::Node _node,
                                       uint32_t _invocation_count);
-
-#if 0
-    void ReserveInvocations(layout::DispatchNode const* _node,
-                            uint32_t _stage_index,
-                            uint32_t _invocation_count,
-                            bind::PNextMap const& _pNext_map = {});
-#endif
 
     void BindBarrier(dstk::Registry::Node _node,
                      bind::ResourceBarrier const& _barrier);
