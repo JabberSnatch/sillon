@@ -66,7 +66,7 @@ struct Context_t
     iotk::input_t const* input = nullptr;
     iotk::input_t const* past_input = nullptr;
 
-    dstk::OrderedVector<Frame, FrameInfo> registered_frames = {};
+    dstk::FlatMap<Frame, FrameInfo> registered_frames = {};
     std::vector<Frame> frame_order = {};
     Frame grabbed_frame = {};
 

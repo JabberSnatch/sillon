@@ -585,13 +585,6 @@ struct DispatchGraph {
 
 namespace _ {
 
-struct DispatchStage {
-    std::vector<ShaderStage> shaders;
-    std::vector<StageBindingGroup> binding_groups;
-    std::vector<PushConstantRange> push_constants;
-    GraphicsStage graphics;
-};
-
 struct DispatchPass {
     DispatchMode mode;
     GraphicsNode graphics;
@@ -612,161 +605,34 @@ enum NodeTag {
 enum BindingType {
     BindingType_None,
     BindingType_Framebuffer,
+    BindingType_Shader,
+    BindingType_PushConstantRange,
+    BindingType_VertexInput,
 };
 
 struct BindingPoint {
     BindingType type = BindingType_None;
+    dstk::Registry::Node node_override = dstk::FreeList::kInvalidIndex;
     union {
         uint32_t attachment_index;
+        uint32_t push_constant_range;
+        uint32_t vertex_input_index;
+        struct {
+            uint32_t group_index;
+            uint32_t binding_index;
+        } shader;
     };
 };
 
 struct EdgeBindings {
+    EdgeType type;
     BindingPoint source;
     BindingPoint target;
 };
 
-struct Registry {
-    using Node = dstk::FreeList::Index;
-    using ComponentID = uint64_t;
-    using ComponentTag = uint64_t;
-
-    struct ComponentBinding {
-        ComponentID type;
-        ComponentTag tag;
-    };
-
-    struct ComponentStorage {
-        dstk::FreeList indices;
-        dstk::BlockVector data;
-        dstk::BlockVector bindings;
-    };
-
-    std::unordered_map<ComponentID, ComponentStorage> components;
-    std::unordered_map<Node, std::vector<ComponentBinding>> nodes;
-    dstk::FreeList handle_pool;
-
-    Node MakeNode() {
-        Node node = handle_pool.Reserve();
-        nodes[node] = {};
-        return node;
-    }
-
-    static ComponentID DeclareComponent() {
-        static ComponentID next_component = 0;
-        return next_component++;
-    }
-
-    template <typename T>
-    static ComponentID ComponentImpl() {
-        static ComponentID const tag = DeclareComponent();
-        return tag;
-    }
-
-    template <typename T>
-    static ComponentID Component() {
-        return ComponentImpl<typename std::remove_cvref<T>::type>();
-    }
-
-    template <typename ArgType> void BindComponent(Node node, ArgType&& component)
-    {
-        using CType = typename std::remove_cvref<ArgType>::type;
-        ComponentID const component_id = Component<CType>();
-
-        if (components.count(component_id) == 0)
-            components.emplace(component_id, ComponentStorage{
-                {}, dstk::BlockVector{ sizeof(CType), 256 }, dstk::BlockVector{ sizeof(uint64_t), 2048 }
-            });
-
-        ComponentStorage& storage = components.at(component_id);
-        ComponentTag component_tag = storage.indices.Reserve();
-        storage.data.Expand(storage.indices.RequiredSize());
-        storage.bindings.Expand(storage.indices.RequiredSize());
-
-        new (storage.data[component_tag]) CType(std::forward<ArgType>(component));
-        *(uint64_t*)storage.bindings[component_tag] = node;
-
-        nodes[node].push_back({ component_id, component_tag });
-    }
-
-    template <typename CType> CType* ComponentLookup(Node n) {
-        return (CType*)((Registry const*)this)->ComponentLookup<CType>(n);
-    }
-
-    template <typename CType> CType const* ComponentLookup(Node n) const {
-        ComponentID const component_id = Component<CType>();
-
-        std::vector<ComponentBinding> const& bindings = nodes.at(n);
-        auto binding_it = std::find_if(
-            bindings.begin(), bindings.end(),
-            [](ComponentBinding const& binding){
-                return binding.type == Component<CType>();
-            });
-        if (binding_it == bindings.end())
-            return nullptr;
-
-        ComponentStorage const& storage = components.at(component_id);
-        return (CType const*)storage.data[binding_it->tag];
-    }
-};
-
 struct DispatchGraph
 {
-    using Handle = dstk::FreeList::Index;
-
-    struct Node {
-        Handle handle;
-        vkrg::layout::_::NodeTag node_tag = vkrg::layout::_::NodeTag_None;
-        std::unique_ptr<struct DispatchGraph> subgraph;
-        std::unique_ptr<vkrg::layout::_::DispatchPass> pass_desc;
-        std::unique_ptr<vkrg::layout::DispatchStage> stage_desc;
-    };
-
-    struct Edge {
-        Handle source;
-        Handle target;
-        vkrg::layout::_::BindingPoint source_point;
-        vkrg::layout::_::BindingPoint target_point;
-    };
-
-    Edge& MakeEdge(std::string const& source, std::string const& target) {
-        Handle source_handle = name_lookup[source];
-        Handle target_handle = name_lookup[target];
-
-        Handle handle = handle_pool.Reserve();
-        edges_in[target_handle].push_back(handle);
-        edges_out[source_handle].push_back(handle);
-        Edge& output = edges[handle];
-        output.source = source_handle;
-        output.target = target_handle;
-        return output;
-    }
-
-    Node& operator[](std::string const& name) {
-        Handle handle = ~0ull;
-        if (name_lookup.count(name) == 0) {
-            handle = handle_pool.Reserve();
-            name_lookup.emplace(name, handle);
-            Node& output = nodes[handle];
-            output.handle = handle;
-            return output;
-        }
-        else
-            return nodes[name_lookup.at(name)];
-    }
-
-    std::unordered_map<std::string, Handle> name_lookup;
-    std::unordered_map<Handle, std::vector<Handle>> edges_in;
-    std::unordered_map<Handle, std::vector<Handle>> edges_out;
-    std::unordered_map<Handle, Node> nodes;
-    std::unordered_map<Handle, Edge> edges;
-    dstk::FreeList handle_pool;
-};
-
-#if 0
-struct DispatchGraph
-{
-    DispatchGraph(Registry* registry_)
+    DispatchGraph(dstk::Registry* registry_ = nullptr)
         : registry{ registry_ }
     {}
     DispatchGraph(DispatchGraph const&) = default;
@@ -775,49 +641,146 @@ struct DispatchGraph
     DispatchGraph& operator=(DispatchGraph&&) = default;
 
     struct EdgeDesc {
-        Registry::Node source;
-        Registry::Node target;
+        dstk::Registry::Node source;
+        dstk::Registry::Node target;
     };
 
-    Registry::Node MakeNode(std::string const& name = "") {
-        Registry::Node node = registry->MakeNode();
-        if (name != "" && name_lookup.count(name) == 0)
-            name_lookup.emplace(name, node);
+    struct NodeView {
+        operator dstk::Registry::Node() const { return node; }
+        NodeView operator[](std::string const& name) const {
+            return (*graph->registry->ComponentLookup<DispatchGraph>(node))[name];
+        }
+        NodeView operator[](char const* name) {
+            return this->operator[](std::string{ name });
+        }
+        DispatchGraph const* graph;
+        dstk::Registry::Node node;
+    };
+
+    DispatchGraph& MakeSubgraph(std::string const& parent_node) {
+        dstk::Registry::Node node = this->operator[](parent_node);
+        DispatchGraph output{ registry };
+        output.parent_node = node;
+        registry->BindComponent(node, output);
+        return *registry->ComponentLookup<DispatchGraph>(node);
+    }
+
+    dstk::Registry::Node MakeNode(std::string const& name = "") {
+        dstk::Registry::Node node = registry->MakeNode();
+        if (name != "" && !name_lookup.contains(name))
+            name_lookup.emplace(node, name);
+        registry->BindComponent(node, this);
         return node;
     }
 
-    Registry::Node MakeEdge(Registry::Node source, Registry::Node target) {
-        Registry::Node edge = registry->handle_pool.Reserve();
-        edges_in[target].push_back(edge);
-        edges_out[source].push_back(edge);
-        registry->BindComponent(edge, EdgeDesc{ source, target });
+    dstk::Registry::Node MakeEdge(std::string const& source, std::string const& target) {
+        dstk::Registry::Node source_node = name_lookup[source];
+        dstk::Registry::Node target_node = name_lookup[target];
+
+        dstk::Registry::Node edge = registry->handle_pool.Reserve();
+        edges_in[target_node].push_back(edge);
+        edges_out[source_node].push_back(edge);
+        registry->BindComponent(edge, EdgeDesc{ source_node, target_node });
         return edge;
     }
 
-    Registry::Node operator[](std::string const& name) {
-        Registry::Node node = ~(Registry::Node)0;
-        if (name_lookup.count(name) == 0) {
-            node = registry->MakeNode();
-            name_lookup.emplace(name, node);
+    DispatchGraph const& Subgraph(std::string const& name) const {
+        return *registry->ComponentLookup<DispatchGraph>((*this)[name]);
+    }
+
+    std::vector<dstk::Registry::Node> Inputs() const {
+        std::vector<dstk::Registry::Node> result = {};
+        for (auto const& pair : name_lookup.pairs)
+        {
+            if (edges_in.count(pair.first) == 0
+                || edges_in.at(pair.first).empty())
+                result.push_back(pair.first);
         }
+        return result;
+    }
+
+    std::vector<dstk::Registry::Node> Outputs() const {
+        std::vector<dstk::Registry::Node> result = {};
+        for (auto const& pair : name_lookup.pairs)
+        {
+            if (edges_out.count(pair.first) == 0
+                || edges_out.at(pair.first).empty())
+                result.push_back(pair.first);
+        }
+        return result;
+    }
+
+    NodeView operator[](char const* name) {
+        return this->operator[](std::string{ name });
+    }
+
+    NodeView operator[](char const* name) const {
+        return this->operator[](std::string{ name });
+    }
+
+    NodeView operator[](std::string const& name) {
+        dstk::Registry::Node node = ~(dstk::Registry::Node)0;
+        if (!name_lookup.contains(name))
+            node = MakeNode(name);
         else
-            node = name_lookup.at(name);
-        return node;
+            node = name_lookup[name];
+        return NodeView{ this, node };
     }
 
-    Registry::Node operator[](std::string const& name) const {
-        if (name_lookup.count(name) == 0)
-            return ~(Registry::Node)0;
-        return name_lookup.at(name);
+    NodeView operator[](std::string const& name) const {
+        if (!name_lookup.contains(name))
+            return NodeView{ this, ~(dstk::Registry::Node)0 };
+        return NodeView{ this, name_lookup[name] };
     }
 
-    Registry* registry;
+    void DepthFirstTraversal(std::function<void(std::vector<vkrg::layout::_::DispatchGraph const*> const&, dstk::Registry::Node)> const& callback) const {
+        std::vector<dstk::Registry::Node> node_stack = Inputs();
+        std::vector<vkrg::layout::_::DispatchGraph const*> graph_stack{ this };
 
-    std::unordered_map<Registry::Node, std::vector<Registry::Node>> edges_in;
-    std::unordered_map<Registry::Node, std::vector<Registry::Node>> edges_out;
-    std::unordered_map<std::string, Registry::Node> name_lookup;
+        while (!node_stack.empty())
+        {
+            dstk::Registry::Node current_node = node_stack.back();
+            vkrg::layout::_::DispatchGraph const* current_graph = graph_stack.back();
+            vkrg::layout::_::DispatchGraph const* dispatch_graph = registry->ComponentLookup<vkrg::layout::_::DispatchGraph>(current_node);
+
+            while (!current_graph->name_lookup.contains(current_node))
+            {
+                graph_stack.pop_back();
+                current_graph = graph_stack.back();
+                dispatch_graph = nullptr;
+            }
+
+            callback(graph_stack, current_node);
+
+            if (dispatch_graph)
+            {
+                std::vector<dstk::Registry::Node> graph_inputs = dispatch_graph->Inputs();
+                node_stack.insert(node_stack.end(), graph_inputs.begin(), graph_inputs.end());
+                graph_stack.push_back(dispatch_graph);
+            }
+            else
+            {
+                node_stack.pop_back();
+                if (current_graph->edges_out.count(current_node))
+                {
+                    for (dstk::Registry::Node edge : current_graph->edges_out.at(current_node))
+                    {
+                        vkrg::layout::_::DispatchGraph::EdgeDesc const* edge_desc =
+                            registry->ComponentLookup<vkrg::layout::_::DispatchGraph::EdgeDesc>(edge);
+                        node_stack.push_back(edge_desc->target);
+                    }
+                }
+            }
+        }
+    }
+
+    dstk::Registry* registry;
+
+    dstk::Registry::Node parent_node = dstk::FreeList::kInvalidIndex;
+    std::unordered_map<dstk::Registry::Node, std::vector<dstk::Registry::Node>> edges_in;
+    std::unordered_map<dstk::Registry::Node, std::vector<dstk::Registry::Node>> edges_out;
+    dstk::BijectiveMap<dstk::Registry::Node, std::string> name_lookup;
 };
-#endif
 
 } // namespace _
 
@@ -825,6 +788,8 @@ struct DispatchGraph
 
 namespace bind
 {
+
+using PushConstantStorage = std::vector<std::unique_ptr<uint8_t[]>>;
 
 struct ShaderResource {
     uint32_t descriptor_count;
@@ -913,6 +878,20 @@ struct PNextEntry {
 
 using PNextMap = std::unordered_map<std::string, std::vector<PNextEntry>>;
 
+namespace _ {
+
+struct ShaderResources {
+    std::vector<VkDescriptorImageInfo> images;
+    std::vector<VkDescriptorBufferInfo> buffers;
+};
+
+struct ShaderBinding {
+    ::vkrg::layout::_::BindingPoint target;
+    ShaderResources resources;
+};
+
+} // namespace _
+
 } // namespace bind
 
 namespace runtime
@@ -956,7 +935,10 @@ struct DispatchNodeDynamic {
 
 struct DispatchContext {
     vktk::Context* vulkan;
-    layout::DispatchGraph const* graph;
+    //layout::DispatchGraph const* graph;
+
+    std::unique_ptr<dstk::Registry> registry{ new dstk::Registry{} };
+    vkrg::layout::_::DispatchGraph _graph{ registry.get() };
 
     std::vector<DispatchNodeStatic> nodes_static;
     std::vector<DispatchNodeFramebuffer> nodes_framebuffer;
@@ -972,45 +954,48 @@ struct DispatchContext {
     void ResetDynamicRuntime(bind::PNextMap const& _pNext_map = {});
     void Dispatch(vktk::CommandBuffer& _command_buffer) const;
 
-    void UpdateDynamicInvocationCount(layout::DispatchNode const* _node,
-                                      uint32_t _stage_index,
+    std::vector<vktk::Context::RenderPassAttachment> RenderPassDescription(
+        dstk::Registry::Node _node,
+        VkFormat const* _swapchain_format = nullptr) const;
+
+    vkrg::layout::BindingPointSync BindingPointSyncRequirements(
+        dstk::Registry::Node _node,
+        vkrg::layout::EdgeType _type,
+        vkrg::layout::_::BindingPoint const& _binding_point) const;
+
+    void UpdateDynamicInvocationCount(dstk::Registry::Node _node,
                                       uint32_t _invocation_count);
 
-    void ReserveInvocations(layout::DispatchNode const* _node,
-                            uint32_t _stage_index,
-                            uint32_t _invocation_count,
-                            bind::PNextMap const& _pNext_map = {});
-
-    void BindBarrier(layout::DispatchNode const* _node,
-                     uint32_t _stage_index,
+    void BindBarrier(dstk::Registry::Node _node,
                      bind::ResourceBarrier const& _barrier);
-    void ClearStageBarriers(layout::DispatchNode const* _node,
-                            uint32_t _stage_index);
+    void ClearStageBarriers(dstk::Registry::Node _node);
 
-    void BindSwapchain(layout::DispatchNode const* _node,
+    void BindSwapchain(dstk::Registry::Node _node,
                        vktk::Swapchain const& _swapchain);
-    void BindAttachments(layout::DispatchNode const* _node,
+    void BindAttachments(dstk::Registry::Node _node,
                          numtk::vec2u const& _size,
                          std::vector<VkImageView> const& _attachments);
-    void BindFramebufferArea(layout::DispatchNode const* _node,
+    void BindFramebufferArea(dstk::Registry::Node _node,
                              bind::FramebufferArea const& _area);
-    void BindGraphicsCommand(layout::DispatchNode const* _node,
-                             uint32_t _stage_index,
+    void BindGraphicsCommand(dstk::Registry::Node _node,
                              uint32_t _invoc_index,
                              bind::GraphicsCommand const& _command);
 
-    void BindVertexInput(layout::BindingPoint const& _location,
+    void BindVertexInput(dstk::Registry::Node _node,
+                         layout::_::BindingPoint const& _location,
                          uint32_t _invoc_index,
                          bind::VertexInput const& _vertex_input);
-    void BindIndexInput(layout::DispatchNode const* _node,
-                        uint32_t _stage_index,
+    void BindIndexInput(dstk::Registry::Node _node,
                         uint32_t _invoc_index,
                         bind::IndexInput const& _index_input);
-    void* BindPushConstants(layout::BindingPoint const& _location,
+    void* BindPushConstants(dstk::Registry::Node _node,
+                            layout::_::BindingPoint const& _location,
                             uint32_t _invoc_index);
-    VkWriteDescriptorSet BindShaderResource(layout::BindingPoint const& _location,
+
+    VkWriteDescriptorSet BindShaderResource(dstk::Registry::Node _node,
+                                            layout::_::BindingPoint const& _location,
                                             uint32_t _invoc_index,
-                                            bind::ShaderResource const& _resources);
+                                            bind::_::ShaderResources const& _resources);
 };
 
 } // namespace runtime
