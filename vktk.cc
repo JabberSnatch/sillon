@@ -1611,8 +1611,10 @@ Buffer Context::CreateBuffer(uint32_t _size,
     command_buffer.Submit(submit_info);
 
     ScheduleRoutine(staging_fence, [staging](Context& _context) {
+#if 0
         std::cout << "[ScheduledRoutine] staging buffer destroyed "
                   << std::hex << staging.buffer << std::dec << std::endl;
+#endif
         _context.DestroyBuffer(staging);
     });
     ScheduleFenceDestroy(staging_fence);
@@ -1764,8 +1766,10 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
               << std::hex << staging.buffer << std::dec << std::endl;
 #endif
     ScheduleRoutine(staging_fence, [staging](Context& _context) {
+#if 0
         std::cout << "[ScheduledRoutine] staging buffer destroyed "
                   << std::hex << staging.buffer << std::dec << std::endl;
+#endif
         _context.DestroyBuffer(staging);
     });
 
