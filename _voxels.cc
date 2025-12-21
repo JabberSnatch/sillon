@@ -1528,6 +1528,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
         if (gui_record->frames.size())
         {
+#if 0
             _state->gui_glyph_indices = _vulkan->CreateBuffer(
                 sizeof(uint32_t) * 6,
                 VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
@@ -1535,6 +1536,25 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                     *(std::array<uint32_t, 6>*)buffer = std::array<uint32_t, 6>{
                         0, 2, 1,  0, 3, 2
                     };
+                },
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+#endif
+            _state->gui_glyph_indices = _vulkan->CreateBuffer(
+                sizeof(uint32_t) * 6 * gui_record->glyphs.size(),
+                VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                [gui_record](void* buffer) {
+                    uint32_t* indices = (uint32_t*)buffer;
+                    for (uint32_t glyph_index = 0u; glyph_index < (uint32_t)gui_record->glyphs.size(); ++glyph_index)
+                    {
+                        uint32_t index_offset = glyph_index*4;
+                        uint32_t index_base = glyph_index*6;
+                        indices[index_base + 0] = 0 + index_offset;
+                        indices[index_base + 1] = 2 + index_offset;
+                        indices[index_base + 2] = 1 + index_offset;
+                        indices[index_base + 3] = 0 + index_offset;
+                        indices[index_base + 4] = 3 + index_offset;
+                        indices[index_base + 5] = 2 + index_offset;
+                    }
                 },
                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
@@ -1680,7 +1700,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
             _state->sparse_runtime.UpdateDynamicInvocationCount(
                 _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
-                gui_record->glyphs.size());
+                1);
             _state->sparse_runtime.ClearStageBarriers(
                 _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"]);
 
@@ -1717,6 +1737,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                 }
             }
 
+#if 0
             std::vector<VkWriteDescriptorSet> bindings{};
             std::vector<VkDescriptorImageInfo> image_info(gui_record->glyphs.size());
             for (uint32_t index = 0u; index < (uint32_t)gui_record->glyphs.size(); ++index)
@@ -1771,6 +1792,57 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                     );
             }
             vkUpdateDescriptorSets(_vulkan->device, bindings.size(), bindings.data(), 0u, nullptr);
+#else
+            {
+                _state->sparse_runtime.BindGraphicsCommand(
+                    _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
+                    0, {
+                        vkrg::bind::DispatchCommand_Draw, (uint32_t)gui_record->glyphs.size()*6, 1
+                    });
+
+                _state->sparse_runtime.BindVertexInput(
+                    _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
+                    { .type = vkrg::layout::_::BindingType_VertexInput,
+                      .vertex_input_index = 0 },
+                    0,
+                    { _state->gui_glyph_vertices, 0 }
+                    );
+
+                _state->sparse_runtime.BindVertexInput(
+                    _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
+                    { .type = vkrg::layout::_::BindingType_VertexInput,
+                      .vertex_input_index = 1 },
+                    0,
+                    { _state->gui_glyph_vertices, (uint32_t)gui_record->glyphs.size() * sizeof(numtk::vec2f) * 4 }
+                    );
+
+                _state->sparse_runtime.BindIndexInput(
+                    _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
+                    0,
+                    { _state->gui_glyph_indices, 0 }
+                    );
+
+                VkDescriptorImageInfo image_info{
+                    _state->gui_glyph_sampler,
+                    _state->gui_font_texture.view,
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                };
+
+                VkWriteDescriptorSet binding =
+                    _state->sparse_runtime.BindShaderResource(
+                        _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
+                        vkrg::layout::_::BindingPoint{
+                            .type = vkrg::layout::_::BindingType_Shader,
+                            .shader = { 0, 0 }
+                        },
+                        0,
+                        vkrg::bind::_::ShaderResources{
+                            .images = { image_info }
+                        });
+
+                vkUpdateDescriptorSets(_vulkan->device, 1, &binding, 0u, nullptr);
+            }
+#endif
 
             _state->sparse_runtime.BindBarrier(
                 _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"], {
