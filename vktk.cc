@@ -1546,12 +1546,12 @@ void DynamicDescriptorPool::FreeDescriptorSet(VkDescriptorSet _set)
             sets[index].erase(_set);
             --set_counts[index];
             --total_set_count;
-            first_free_pool = index;
+            if (index < first_free_pool)
+                first_free_pool = index;
+            vkFreeDescriptorSets(context->device, pools[index], 1, &_set);
             break;
         }
     }
-
-    vkFreeDescriptorSets(context->device, pools[first_free_pool], 1, &_set);
 }
 
 Buffer Context::CreateBuffer(uint32_t _size,
@@ -3003,6 +3003,8 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                     } break;
                     default: break;
                     }
+
+                    registry->ComponentRangeErase<bind::_::ShaderBinding>(node);
                 }
             });
 
@@ -3512,7 +3514,7 @@ DispatchContext::BindSwapchain(dstk::Registry::Node _node,
                                       { _swapchain.views[index*2], _swapchain.views[index*2 + 1] })
             );
     }
-    registry->BindComponent(_node, framebuffers);
+    registry->ComponentRequest<std::vector<VkFramebuffer>>(_node) = framebuffers;
 
 #if 0
     uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
@@ -3560,7 +3562,7 @@ void
 DispatchContext::BindFramebufferArea(dstk::Registry::Node _node,
                                      bind::FramebufferArea const& _area)
 {
-    registry->BindComponent(_node, _area);
+    registry->ComponentRequest<bind::FramebufferArea>(_node) = _area;
 
 #if 0
     uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
@@ -3577,7 +3579,7 @@ DispatchContext::BindGraphicsCommand(dstk::Registry::Node _node,
                                      uint32_t _invoc_index,
                                      bind::GraphicsCommand const& _command)
 {
-    registry->BindComponent(_node, _invoc_index, _command);
+    registry->ComponentRequest<bind::GraphicsCommand>(_node, _invoc_index) = _command;
 
 #if 0
     uint32_t node_index = (uint32_t)(_node - graph->nodes.data());
@@ -3729,25 +3731,25 @@ DispatchContext::BindShaderResource(dstk::Registry::Node _node,
     layout::StageBindingGroup const& binding_group = stage.binding_groups[_location.shader.group_index];
     layout::StageBinding const& binding = binding_group.bindings[_location.shader.binding_index];
 
-    bind::_::ShaderBinding* shader_binding =
-        registry->BindComponent(_node, _invoc_index, bind::_::ShaderBinding{ _location, _resources });
+    bind::_::ShaderBinding& shader_binding =
+        *registry->BindComponent(_node, _invoc_index, bind::_::ShaderBinding{ _location, _resources });
 
     uint32_t descriptor_count = 0u;
-    if (!shader_binding->resources.images.empty())
-        descriptor_count = shader_binding->resources.images.size();
-    if (!shader_binding->resources.buffers.empty())
-        descriptor_count = shader_binding->resources.buffers.size();
+    if (!shader_binding.resources.images.empty())
+        descriptor_count = shader_binding.resources.images.size();
+    if (!shader_binding.resources.buffers.empty())
+        descriptor_count = shader_binding.resources.buffers.size();
 
     VkWriteDescriptorSet desc_write = {};
     desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     desc_write.pNext = nullptr;
     desc_write.dstSet = group_runtime.sets[_invoc_index];
-    desc_write.dstBinding = shader_binding->target.shader.binding_index;
+    desc_write.dstBinding = shader_binding.target.shader.binding_index;
     desc_write.dstArrayElement = 0u;
     desc_write.descriptorCount = descriptor_count;
     desc_write.descriptorType = binding.type;
-    desc_write.pImageInfo = shader_binding->resources.images.data();
-    desc_write.pBufferInfo = shader_binding->resources.buffers.data();
+    desc_write.pImageInfo = shader_binding.resources.images.data();
+    desc_write.pBufferInfo = shader_binding.resources.buffers.data();
     desc_write.pTexelBufferView = nullptr;
 
     bind::DispatchStage& stage_bindings = registry->ComponentRequest<bind::DispatchStage>(_node);
@@ -3757,7 +3759,7 @@ DispatchContext::BindShaderResource(dstk::Registry::Node _node,
     case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
     case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
         for (uint32_t desc_index = 0u; desc_index < descriptor_count; ++desc_index)
-            stage_bindings.buffer_barriers[shader_binding->resources.buffers[desc_index].buffer].second = bind::AccessInfo{
+            stage_bindings.buffer_barriers[shader_binding.resources.buffers[desc_index].buffer].second = bind::AccessInfo{
                 binding.stages,
                 VK_ACCESS_UNIFORM_READ_BIT
             };
@@ -3766,7 +3768,7 @@ DispatchContext::BindShaderResource(dstk::Registry::Node _node,
     case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
     case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
         for (uint32_t desc_index = 0u; desc_index < descriptor_count; ++desc_index)
-            stage_bindings.buffer_barriers[shader_binding->resources.buffers[desc_index].buffer].second = bind::AccessInfo{
+            stage_bindings.buffer_barriers[shader_binding.resources.buffers[desc_index].buffer].second = bind::AccessInfo{
                 binding.stages,
                 VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT
             };
