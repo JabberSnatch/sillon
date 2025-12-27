@@ -927,6 +927,7 @@ struct StageBindingGroupDynamic {
 struct DispatchStageDynamic {
     uint32_t invocation_count;
     std::vector<StageBindingGroupDynamic> binding_groups;
+    std::vector<uint32_t> invoc_count_stack;
 };
 
 struct DispatchNodeDynamic {
@@ -975,12 +976,31 @@ struct DispatchContext {
     void BindAttachments(dstk::Registry::Node _node,
                          numtk::vec2u const& _size,
                          std::vector<VkImageView> const& _attachments);
+
     void BindFramebufferArea(dstk::Registry::Node _node,
                              bind::FramebufferArea const& _area);
+
+    void BindGraphicsCommand(dstk::Registry::Node _node,
+                             std::vector<uint32_t> const& _invoc_indices,
+                             bind::GraphicsCommand const& _command);
+    void BindVertexInput(dstk::Registry::Node _node,
+                         layout::_::BindingPoint const& _location,
+                         std::vector<uint32_t> const& _invoc_indices,
+                         bind::VertexInput const& _vertex_input);
+    void BindIndexInput(dstk::Registry::Node _node,
+                        std::vector<uint32_t> const& _invoc_indices,
+                        bind::IndexInput const& _index_input);
+    void* BindPushConstants(dstk::Registry::Node _node,
+                            layout::_::BindingPoint const& _location,
+                            std::vector<uint32_t> const& _invoc_indices);
+    VkWriteDescriptorSet BindShaderResource(dstk::Registry::Node _node,
+                                            layout::_::BindingPoint const& _location,
+                                            std::vector<uint32_t> const& _invoc_indices,
+                                            bind::_::ShaderResources const& _resources);
+
     void BindGraphicsCommand(dstk::Registry::Node _node,
                              uint32_t _invoc_index,
                              bind::GraphicsCommand const& _command);
-
     void BindVertexInput(dstk::Registry::Node _node,
                          layout::_::BindingPoint const& _location,
                          uint32_t _invoc_index,
@@ -991,7 +1011,6 @@ struct DispatchContext {
     void* BindPushConstants(dstk::Registry::Node _node,
                             layout::_::BindingPoint const& _location,
                             uint32_t _invoc_index);
-
     VkWriteDescriptorSet BindShaderResource(dstk::Registry::Node _node,
                                             layout::_::BindingPoint const& _location,
                                             uint32_t _invoc_index,
