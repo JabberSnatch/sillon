@@ -2566,6 +2566,8 @@ DispatchContext::ResetDynamicRuntime(bind::PNextMap const& _pNext_map)
             auto* stage_static = registry->ComponentLookup<DispatchStageStatic>(node);
             DispatchStageDynamic stage_dynamic = {};
             stage_dynamic.invocation_count = dispatch_stage->invocation_count;
+            stage_dynamic.invoc_count_stack.resize(graph_stack.size());
+            stage_dynamic.invoc_count_stack[0] = dispatch_stage->invocation_count;
 
             std::vector<bind::PNextEntry> stage_pnexts = {};
             if (_pNext_map.count(node_name))
@@ -2932,6 +2934,62 @@ DispatchContext::UpdateDynamicInvocationCount(dstk::Registry::Node _node,
     if (stage_layout)
     {
         DispatchStageDynamic& stage_dynamic = *registry->ComponentLookup<DispatchStageDynamic>(_node);
+        if (stage_dynamic.invoc_count_stack[0] == _invocation_count)
+            return;
+
+        DispatchStageStatic& stage_static = *registry->ComponentLookup<DispatchStageStatic>(_node);
+
+        std::vector<uint32_t> old_count_stack = stage_dynamic.invoc_count_stack;
+        stage_dynamic.invoc_count_stack[0] = _invocation_count;
+        std::vector<uint32_t> const& new_count_stack = stage_dynamic.invoc_count_stack;
+
+        uint32_t old_count = std::accumulate(
+            old_count_stack.begin(), old_count_stack.end(), 1u,
+            [](uint32_t lhs, uint32_t rhs) { return lhs * std::max(1, rhs); });
+        uint32_t new_count = std::accumulate(
+            new_count_stack.begin(), new_count_stack.end(), 1u,
+            [](uint32_t lhs, uint32_t rhs) { return lhs * std::max(1, rhs); });
+
+        for (uint32_t group_index = 0u; group_index < (uint32_t)stage_layout->binding_groups.size(); ++group_index)
+        {
+            StageBindingGroupDynamic& group_dynamic = stage_dynamic.binding_groups[group_index];
+            StageBindingGroupStatic& group_static = stage_static.binding_groups[group_index];
+
+            if (old_count > new_count)
+            {
+                group_dynamic.sets.reserve(new_count);
+                for (uint32_t index = stage_dynamic.invocation_count; index < new_count; ++index)
+                    group_dynamic.sets.push_back(group_static.pool.AllocateDescriptorSet());
+            }
+            else
+            {
+                for (uint32_t index = new_count; index < stage_dynamic.invocation_count; ++index)
+                    group_static.pool.FreeDescriptorSet(group_dynamic.sets[index]);
+                group_dynamic.sets.resize(new_count);
+            }
+        }
+    }
+
+    layout::_::DispatchGraph const* subgraph = registry->ComponentLookup<layout::_::DispatchGraph>(_node);
+    if (subgraph)
+    {
+        subgraph->DepthFirstTraversal([this, _invocation_count]
+                                      (std::vector<layout::_::DispatchGraph const*> const& graph_stack,
+                                       dstk::Registry::Node node) {
+            layout::DispatchStage const* stage_layout = registry->ComponentLookup<layout::DispatchStage>(node);
+            if (!stage_layout)
+                return;
+
+            DispatchStageDynamic& stage_dynamic = *registry->ComponentLookup<DispatchStageDynamic>(node);
+            stage_dynamic.invoc_count_stack[graph_stack.size()] = _invocation_count;
+        });
+    }
+
+#if 0
+    layout::DispatchStage const* stage_layout = registry->ComponentLookup<layout::DispatchStage>(_node);
+    if (stage_layout)
+    {
+        DispatchStageDynamic& stage_dynamic = *registry->ComponentLookup<DispatchStageDynamic>(_node);
         DispatchStageStatic& stage_static = *registry->ComponentLookup<DispatchStageStatic>(_node);
 
         uint32_t requested_count = stage_layout->invocation_count + _invocation_count;
@@ -2975,6 +3033,7 @@ DispatchContext::UpdateDynamicInvocationCount(dstk::Registry::Node _node,
         });
         return;
     }
+#endif
 }
 
 void
