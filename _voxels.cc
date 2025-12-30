@@ -1712,7 +1712,8 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
             {
                 _state->sparse_runtime.BindGraphicsCommand(
                     _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
-                    { index, 0 },
+                    //{ index, 0 },
+                    index,
                     {
                         vkrg::bind::DispatchCommand_Draw, 6*9, 1
                     });
@@ -1722,7 +1723,8 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                         _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
                         { .type = vkrg::layout::_::BindingType_VertexInput,
                           .vertex_input_index = 0 },
-                        { index, 0 },
+                        //{ index, 0 },
+                        index,
                         { _state->gui_frames_vertices, index * sizeof(numtk::vec2f) * 16 }
                         );
 
@@ -1730,13 +1732,15 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                         _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
                         { .type = vkrg::layout::_::BindingType_VertexInput,
                           .vertex_input_index = 1 },
-                        { index, 0 },
+                        //{ index, 0 },
+                        index,
                         { _state->gui_frame_uv, 0 }
                         );
 
                     _state->sparse_runtime.BindIndexInput(
                         _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
-                        { index, 0 },
+                        //{ index, 0 },
+                        index,
                         { _state->gui_frame_indices, 0 }
                         );
                 }

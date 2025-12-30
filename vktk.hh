@@ -980,6 +980,10 @@ struct DispatchContext {
     void BindFramebufferArea(dstk::Registry::Node _node,
                              bind::FramebufferArea const& _area);
 
+    static uint32_t ComputeBindingIndex(std::vector<uint32_t> const& _invoc_count_stack,
+                                        std::vector<uint32_t> const& _invoc_indices);
+
+#if 1
     void BindGraphicsCommand(dstk::Registry::Node _node,
                              std::vector<uint32_t> const& _invoc_indices,
                              bind::GraphicsCommand const& _command);
@@ -997,6 +1001,7 @@ struct DispatchContext {
                                             layout::_::BindingPoint const& _location,
                                             std::vector<uint32_t> const& _invoc_indices,
                                             bind::_::ShaderResources const& _resources);
+#endif
 
     void BindGraphicsCommand(dstk::Registry::Node _node,
                              uint32_t _invoc_index,

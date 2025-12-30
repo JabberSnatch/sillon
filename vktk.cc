@@ -2930,6 +2930,57 @@ void
 DispatchContext::UpdateDynamicInvocationCount(dstk::Registry::Node _node,
                                               uint32_t _invocation_count)
 {
+    static auto const update_descriptor_allocs = [](layout::DispatchStage const* stage_layout,
+                                                    DispatchStageDynamic& stage_dynamic,
+                                                    DispatchStageStatic& stage_static,
+                                                    uint32_t invoc_count,
+                                                    uint32_t stack_index) {
+        std::vector<uint32_t> old_count_stack = stage_dynamic.invoc_count_stack;
+        stage_dynamic.invoc_count_stack[stack_index] = invoc_count;
+        std::vector<uint32_t> const& new_count_stack = stage_dynamic.invoc_count_stack;
+
+        uint32_t old_max = 0u;
+        uint32_t old_count = std::accumulate(
+            old_count_stack.begin(), old_count_stack.end(), 1u,
+            [&old_max](uint32_t lhs, uint32_t rhs) {
+                old_max = std::max(old_max, rhs);
+                return lhs * std::max(1u, rhs); }
+        );
+        if (!old_max)
+            old_count = 0;
+
+        uint32_t new_max = 0u;
+        uint32_t new_count = std::accumulate(
+            new_count_stack.begin(), new_count_stack.end(), 1u,
+            [&new_max](uint32_t lhs, uint32_t rhs) {
+                new_max = std::max(new_max, rhs);
+                return lhs * std::max(1u, rhs); }
+        );
+        if (!new_max)
+            new_count = 0;
+
+        for (uint32_t group_index = 0u;
+             group_index < (uint32_t)stage_layout->binding_groups.size();
+             ++group_index)
+        {
+            StageBindingGroupDynamic& group_dynamic = stage_dynamic.binding_groups[group_index];
+            StageBindingGroupStatic& group_static = stage_static.binding_groups[group_index];
+
+            if (new_count > old_count)
+            {
+                group_dynamic.sets.reserve(new_count);
+                for (uint32_t index = old_count; index < new_count; ++index)
+                    group_dynamic.sets.push_back(group_static.pool.AllocateDescriptorSet());
+            }
+            else
+            {
+                for (uint32_t index = new_count; index < old_count; ++index)
+                    group_static.pool.FreeDescriptorSet(group_dynamic.sets[index]);
+                group_dynamic.sets.resize(new_count);
+            }
+        }
+    };
+
     layout::DispatchStage const* stage_layout = registry->ComponentLookup<layout::DispatchStage>(_node);
     if (stage_layout)
     {
@@ -2938,36 +2989,7 @@ DispatchContext::UpdateDynamicInvocationCount(dstk::Registry::Node _node,
             return;
 
         DispatchStageStatic& stage_static = *registry->ComponentLookup<DispatchStageStatic>(_node);
-
-        std::vector<uint32_t> old_count_stack = stage_dynamic.invoc_count_stack;
-        stage_dynamic.invoc_count_stack[0] = _invocation_count;
-        std::vector<uint32_t> const& new_count_stack = stage_dynamic.invoc_count_stack;
-
-        uint32_t old_count = std::accumulate(
-            old_count_stack.begin(), old_count_stack.end(), 1u,
-            [](uint32_t lhs, uint32_t rhs) { return lhs * std::max(1, rhs); });
-        uint32_t new_count = std::accumulate(
-            new_count_stack.begin(), new_count_stack.end(), 1u,
-            [](uint32_t lhs, uint32_t rhs) { return lhs * std::max(1, rhs); });
-
-        for (uint32_t group_index = 0u; group_index < (uint32_t)stage_layout->binding_groups.size(); ++group_index)
-        {
-            StageBindingGroupDynamic& group_dynamic = stage_dynamic.binding_groups[group_index];
-            StageBindingGroupStatic& group_static = stage_static.binding_groups[group_index];
-
-            if (old_count > new_count)
-            {
-                group_dynamic.sets.reserve(new_count);
-                for (uint32_t index = stage_dynamic.invocation_count; index < new_count; ++index)
-                    group_dynamic.sets.push_back(group_static.pool.AllocateDescriptorSet());
-            }
-            else
-            {
-                for (uint32_t index = new_count; index < stage_dynamic.invocation_count; ++index)
-                    group_static.pool.FreeDescriptorSet(group_dynamic.sets[index]);
-                group_dynamic.sets.resize(new_count);
-            }
-        }
+        update_descriptor_allocs(stage_layout, stage_dynamic, stage_static, _invocation_count, 0);
     }
 
     layout::_::DispatchGraph const* subgraph = registry->ComponentLookup<layout::_::DispatchGraph>(_node);
@@ -2981,7 +3003,9 @@ DispatchContext::UpdateDynamicInvocationCount(dstk::Registry::Node _node,
                 return;
 
             DispatchStageDynamic& stage_dynamic = *registry->ComponentLookup<DispatchStageDynamic>(node);
-            stage_dynamic.invoc_count_stack[graph_stack.size()] = _invocation_count;
+            DispatchStageStatic& stage_static = *registry->ComponentLookup<DispatchStageStatic>(node);
+
+            update_descriptor_allocs(stage_layout, stage_dynamic, stage_static, _invocation_count, graph_stack.size());
         });
     }
 
@@ -3092,22 +3116,50 @@ DispatchContext::BindFramebufferArea(dstk::Registry::Node _node,
     registry->ComponentRequest<bind::FramebufferArea>(_node) = _area;
 }
 
+uint32_t
+DispatchContext::ComputeBindingIndex(std::vector<uint32_t> const& _invoc_count_stack,
+                                     std::vector<uint32_t> const& _invoc_indices)
+{
+    uint32_t binding_index = _invoc_indices[0];
+    for (uint32_t index = 1u; index < _invoc_indices.size(); ++index)
+        binding_index += _invoc_indices[index] * _invoc_count_stack[index-1];
+    return binding_index;
+}
+
+void
+DispatchContext::BindGraphicsCommand(dstk::Registry::Node _node,
+                                     std::vector<uint32_t> const& _invoc_indices,
+                                     bind::GraphicsCommand const& _command)
+{
+    DispatchStageDynamic const& stage_dynamic =
+        *registry->ComponentLookup<DispatchStageDynamic>(_node);
+    uint32_t const binding_index = ComputeBindingIndex(stage_dynamic.invoc_count_stack,
+                                                       _invoc_indices);
+
+    registry->ComponentRequest<bind::GraphicsCommand>(_node, binding_index) = _command;
+}
+
 void
 DispatchContext::BindGraphicsCommand(dstk::Registry::Node _node,
                                      uint32_t _invoc_index,
                                      bind::GraphicsCommand const& _command)
 {
-    registry->ComponentRequest<bind::GraphicsCommand>(_node, _invoc_index) = _command;
+    BindGraphicsCommand(_node, std::vector<uint32_t>{ _invoc_index }, _command);
 }
 
 void
 DispatchContext::BindVertexInput(dstk::Registry::Node _node,
                                  layout::_::BindingPoint const& _location,
-                                 uint32_t _invoc_index,
+                                 std::vector<uint32_t> const& _invoc_indices,
                                  bind::VertexInput const& _vertex_input)
 {
+    DispatchStageDynamic const& stage_dynamic =
+        *registry->ComponentLookup<DispatchStageDynamic>(_node);
+    uint32_t const binding_index = ComputeBindingIndex(stage_dynamic.invoc_count_stack,
+                                                       _invoc_indices);
+
     bind::DispatchStage& stage_bindings = registry->ComponentRequest<bind::DispatchStage>(_node);
-    bind::DispatchInvocation& invocation = registry->ComponentRequest<bind::DispatchInvocation>(_node, _invoc_index);
+    bind::DispatchInvocation& invocation = registry->ComponentRequest<bind::DispatchInvocation>(_node, binding_index);
 
     if (invocation.vertex_inputs.size() < _location.vertex_input_index+1)
         invocation.vertex_inputs.resize(_location.vertex_input_index+1);
@@ -3117,6 +3169,15 @@ DispatchContext::BindVertexInput(dstk::Registry::Node _node,
         VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
         VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT
     };
+}
+
+void
+DispatchContext::BindVertexInput(dstk::Registry::Node _node,
+                                 layout::_::BindingPoint const& _location,
+                                 uint32_t _invoc_index,
+                                 bind::VertexInput const& _vertex_input)
+{
+    BindVertexInput(_node, _location, std::vector<uint32_t>{ _invoc_index }, _vertex_input);
 }
 
 void
