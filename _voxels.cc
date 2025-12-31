@@ -1692,9 +1692,11 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                 },
                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
+#if 0
             _state->sparse_runtime.UpdateDynamicInvocationCount(
                 _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"],
                 gui_record->frames.size());
+#endif
 
             _state->sparse_runtime.UpdateDynamicInvocationCount(
                 _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],

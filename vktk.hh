@@ -733,7 +733,60 @@ struct DispatchGraph
         return NodeView{ this, name_lookup[name] };
     }
 
-    void DepthFirstTraversal(std::function<void(std::vector<vkrg::layout::_::DispatchGraph const*> const&, dstk::Registry::Node)> const& callback) const {
+    using TraversalCallbackType =
+        std::function<void(std::vector<vkrg::layout::_::DispatchGraph const*> const&,
+                           dstk::Registry::Node)>;
+    void DepthFirstTraversal(TraversalCallbackType const& callback) const {
+
+        static auto const impl = [](vkrg::layout::_::DispatchGraph const* root,
+                                    auto&& callback,
+                                    auto&& recursion,
+                                    std::vector<vkrg::layout::_::DispatchGraph const*> graph_stack,
+                                    std::vector<uint32_t> invoc_stack)
+            -> void
+        {
+            vkrg::layout::_::DispatchGraph const* current_graph = graph_stack.back();
+            std::vector<dstk::Registry::Node> node_stack = current_graph->Inputs();
+
+            while (!node_stack.empty())
+            {
+                dstk::Registry::Node current_node = node_stack.back();
+                vkrg::layout::_::DispatchGraph const* subgraph = root->registry->ComponentLookup<vkrg::layout::_::DispatchGraph>(current_node);
+
+                callback(graph_stack, current_node);
+
+                if (subgraph)
+                {
+                    uint32_t node_invoc_count =
+                        root->invoc_count.count(current_node)
+                        ? root->invoc_count.at(current_node) : 1u;
+
+                    graph_stack.push_back(subgraph);
+                    for (uint32_t invoc_index = 0u; invoc_index < node_invoc_count; ++invoc_index)
+                    {
+                        invoc_stack.push_back(invoc_index);
+                        recursion(root, callback, recursion, graph_stack, invoc_stack);
+                        invoc_stack.pop_back();
+                    }
+                    graph_stack.pop_back();
+                }
+
+                node_stack.pop_back();
+                if (current_graph->edges_out.count(current_node))
+                {
+                    for (dstk::Registry::Node edge : current_graph->edges_out.at(current_node))
+                    {
+                        vkrg::layout::_::DispatchGraph::EdgeDesc const* edge_desc =
+                            root->registry->ComponentLookup<vkrg::layout::_::DispatchGraph::EdgeDesc>(edge);
+                        node_stack.push_back(edge_desc->target);
+                    }
+                }
+            }
+        };
+
+        impl(this, callback, impl, { this }, { 0u });
+
+#if 0
         std::vector<dstk::Registry::Node> node_stack = Inputs();
         std::vector<vkrg::layout::_::DispatchGraph const*> graph_stack{ this };
 
@@ -749,6 +802,9 @@ struct DispatchGraph
                 current_graph = graph_stack.back();
                 dispatch_graph = nullptr;
             }
+
+            uint32_t node_invoc_count =
+                invoc_count.count(current_node) ? invoc_count.at(current_node) : 1u;
 
             callback(graph_stack, current_node);
 
@@ -772,6 +828,8 @@ struct DispatchGraph
                 }
             }
         }
+#endif
+
     }
 
     dstk::Registry* registry;
@@ -779,6 +837,7 @@ struct DispatchGraph
     dstk::Registry::Node parent_node = dstk::FreeList::kInvalidIndex;
     std::unordered_map<dstk::Registry::Node, std::vector<dstk::Registry::Node>> edges_in;
     std::unordered_map<dstk::Registry::Node, std::vector<dstk::Registry::Node>> edges_out;
+    std::unordered_map<dstk::Registry::Node, uint32_t> invoc_count;
     dstk::BijectiveMap<dstk::Registry::Node, std::string> name_lookup;
 };
 
@@ -983,17 +1042,16 @@ struct DispatchContext {
     static uint32_t ComputeBindingIndex(std::vector<uint32_t> const& _invoc_count_stack,
                                         std::vector<uint32_t> const& _invoc_indices);
 
-#if 1
     void BindGraphicsCommand(dstk::Registry::Node _node,
                              std::vector<uint32_t> const& _invoc_indices,
                              bind::GraphicsCommand const& _command);
+    void BindIndexInput(dstk::Registry::Node _node,
+                        std::vector<uint32_t> const& _invoc_indices,
+                        bind::IndexInput const& _index_input);
     void BindVertexInput(dstk::Registry::Node _node,
                          layout::_::BindingPoint const& _location,
                          std::vector<uint32_t> const& _invoc_indices,
                          bind::VertexInput const& _vertex_input);
-    void BindIndexInput(dstk::Registry::Node _node,
-                        std::vector<uint32_t> const& _invoc_indices,
-                        bind::IndexInput const& _index_input);
     void* BindPushConstants(dstk::Registry::Node _node,
                             layout::_::BindingPoint const& _location,
                             std::vector<uint32_t> const& _invoc_indices);
@@ -1001,18 +1059,17 @@ struct DispatchContext {
                                             layout::_::BindingPoint const& _location,
                                             std::vector<uint32_t> const& _invoc_indices,
                                             bind::_::ShaderResources const& _resources);
-#endif
 
     void BindGraphicsCommand(dstk::Registry::Node _node,
                              uint32_t _invoc_index,
                              bind::GraphicsCommand const& _command);
+    void BindIndexInput(dstk::Registry::Node _node,
+                        uint32_t _invoc_index,
+                        bind::IndexInput const& _index_input);
     void BindVertexInput(dstk::Registry::Node _node,
                          layout::_::BindingPoint const& _location,
                          uint32_t _invoc_index,
                          bind::VertexInput const& _vertex_input);
-    void BindIndexInput(dstk::Registry::Node _node,
-                        uint32_t _invoc_index,
-                        bind::IndexInput const& _index_input);
     void* BindPushConstants(dstk::Registry::Node _node,
                             layout::_::BindingPoint const& _location,
                             uint32_t _invoc_index);

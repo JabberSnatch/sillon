@@ -2563,6 +2563,12 @@ DispatchContext::ResetDynamicRuntime(bind::PNextMap const& _pNext_map)
 
         if (dispatch_stage)
         {
+            if (dispatch_stage->invocation_count)
+            {
+                layout::_::DispatchGraph* graph = *registry->ComponentLookup<layout::_::DispatchGraph*>(node);
+                graph->invoc_count[node] = dispatch_stage->invocation_count;
+            }
+
             auto* stage_static = registry->ComponentLookup<DispatchStageStatic>(node);
             DispatchStageDynamic stage_dynamic = {};
             stage_dynamic.invocation_count = dispatch_stage->invocation_count;
@@ -2684,7 +2690,7 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
 
             dispatch_graph->DepthFirstTraversal(
                 [this, &_command_buffer, dispatch_pass](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
-                                                       dstk::Registry::Node node) {
+                                                        dstk::Registry::Node node) {
                 auto const* dispatch_stage = registry->ComponentLookup<layout::DispatchStage>(node);
                 auto const* stage_bindings = registry->ComponentLookup<bind::DispatchStage>(node);
                 auto const* pipeline = registry->ComponentLookup<VkPipeline>(node);
@@ -2981,6 +2987,9 @@ DispatchContext::UpdateDynamicInvocationCount(dstk::Registry::Node _node,
         }
     };
 
+    layout::_::DispatchGraph* graph = *registry->ComponentLookup<layout::_::DispatchGraph*>(_node);
+    graph->invoc_count[_node] = _invocation_count;
+
     layout::DispatchStage const* stage_layout = registry->ComponentLookup<layout::DispatchStage>(_node);
     if (stage_layout)
     {
@@ -3008,56 +3017,6 @@ DispatchContext::UpdateDynamicInvocationCount(dstk::Registry::Node _node,
             update_descriptor_allocs(stage_layout, stage_dynamic, stage_static, _invocation_count, graph_stack.size());
         });
     }
-
-#if 0
-    layout::DispatchStage const* stage_layout = registry->ComponentLookup<layout::DispatchStage>(_node);
-    if (stage_layout)
-    {
-        DispatchStageDynamic& stage_dynamic = *registry->ComponentLookup<DispatchStageDynamic>(_node);
-        DispatchStageStatic& stage_static = *registry->ComponentLookup<DispatchStageStatic>(_node);
-
-        uint32_t requested_count = stage_layout->invocation_count + _invocation_count;
-        if (requested_count == stage_dynamic.invocation_count)
-            return;
-
-        for (uint32_t group_index = 0u; group_index < (uint32_t)stage_layout->binding_groups.size(); ++group_index)
-        {
-            StageBindingGroupDynamic& group_dynamic = stage_dynamic.binding_groups[group_index];
-            StageBindingGroupStatic& group_static = stage_static.binding_groups[group_index];
-
-            if (requested_count > stage_dynamic.invocation_count)
-            {
-                group_dynamic.sets.reserve(requested_count);
-                for (uint32_t index = stage_dynamic.invocation_count; index < requested_count; ++index)
-                    group_dynamic.sets.push_back(group_static.pool.AllocateDescriptorSet());
-            }
-            else
-            {
-                for (uint32_t index = requested_count; index < stage_dynamic.invocation_count; ++index)
-                    group_static.pool.FreeDescriptorSet(group_dynamic.sets[index]);
-            }
-        }
-
-        stage_dynamic.invocation_count = requested_count;
-
-        return;
-    }
-
-    layout::_::DispatchGraph const* subgraph_ptr = registry->ComponentLookup<layout::_::DispatchGraph>(_node);
-    if (subgraph_ptr)
-    {
-        subgraph_ptr->DepthFirstTraversal([this](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
-                                                 dstk::Registry::Node node) {
-            layout::DispatchStage const* stage_layout = registry->ComponentLookup<layout::DispatchStage>(node);
-            if (stage_layout)
-            {
-                DispatchStageDynamic& stage_dynamic = *registry->ComponentLookup<DispatchStageDynamic>(node);
-                DispatchStageStatic& stage_static = *registry->ComponentLookup<DispatchStageStatic>(node);
-            }
-        });
-        return;
-    }
-#endif
 }
 
 void
@@ -3148,6 +3107,33 @@ DispatchContext::BindGraphicsCommand(dstk::Registry::Node _node,
 }
 
 void
+DispatchContext::BindIndexInput(dstk::Registry::Node _node,
+                                std::vector<uint32_t> const& _invoc_indices,
+                                bind::IndexInput const& _index_input)
+{
+    DispatchStageDynamic const& stage_dynamic =
+        *registry->ComponentLookup<DispatchStageDynamic>(_node);
+    uint32_t const binding_index = ComputeBindingIndex(stage_dynamic.invoc_count_stack,
+                                                       _invoc_indices);
+
+    bind::DispatchStage& stage_bindings = registry->ComponentRequest<bind::DispatchStage>(_node);
+    bind::DispatchInvocation& invocation = registry->ComponentRequest<bind::DispatchInvocation>(_node, binding_index);
+    invocation.index_input = _index_input;
+    stage_bindings.buffer_barriers[_index_input.buffer].second = bind::AccessInfo{
+        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
+        VK_ACCESS_INDEX_READ_BIT
+    };
+}
+
+void
+DispatchContext::BindIndexInput(dstk::Registry::Node _node,
+                                uint32_t _invoc_index,
+                                bind::IndexInput const& _index_input)
+{
+    BindIndexInput(_node, std::vector<uint32_t>{ _invoc_index }, _index_input);
+}
+
+void
 DispatchContext::BindVertexInput(dstk::Registry::Node _node,
                                  layout::_::BindingPoint const& _location,
                                  std::vector<uint32_t> const& _invoc_indices,
@@ -3180,18 +3166,23 @@ DispatchContext::BindVertexInput(dstk::Registry::Node _node,
     BindVertexInput(_node, _location, std::vector<uint32_t>{ _invoc_index }, _vertex_input);
 }
 
-void
-DispatchContext::BindIndexInput(dstk::Registry::Node _node,
-                                uint32_t _invoc_index,
-                                bind::IndexInput const& _index_input)
+void*
+DispatchContext::BindPushConstants(dstk::Registry::Node _node,
+                                   layout::_::BindingPoint const& _location,
+                                   std::vector<uint32_t> const& _invoc_indices)
 {
-    bind::DispatchStage& stage_bindings = registry->ComponentRequest<bind::DispatchStage>(_node);
-    bind::DispatchInvocation& invocation = registry->ComponentRequest<bind::DispatchInvocation>(_node, _invoc_index);
-    invocation.index_input = _index_input;
-    stage_bindings.buffer_barriers[_index_input.buffer].second = bind::AccessInfo{
-        VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
-        VK_ACCESS_INDEX_READ_BIT
-    };
+    DispatchStageDynamic const& stage_dynamic =
+        *registry->ComponentLookup<DispatchStageDynamic>(_node);
+    uint32_t const binding_index = ComputeBindingIndex(stage_dynamic.invoc_count_stack,
+                                                       _invoc_indices);
+
+    layout::DispatchStage const& stage = *registry->ComponentLookup<layout::DispatchStage>(_node);
+    layout::PushConstantRange const& range = stage.push_constants[_location.push_constant_range];
+    bind::PushConstantStorage& storage = registry->ComponentRequest<bind::PushConstantStorage>(_node, binding_index);
+    if (storage.size() < _location.push_constant_range+1)
+        storage.resize(_location.push_constant_range+1);
+    storage[_location.push_constant_range].reset(new uint8_t[range.size]);
+    return storage[_location.push_constant_range].get();
 }
 
 void*
@@ -3199,22 +3190,19 @@ DispatchContext::BindPushConstants(dstk::Registry::Node _node,
                                    layout::_::BindingPoint const& _location,
                                    uint32_t _invoc_index)
 {
-    layout::DispatchStage const& stage = *registry->ComponentLookup<layout::DispatchStage>(_node);
-    layout::PushConstantRange const& range = stage.push_constants[_location.push_constant_range];
-    bind::PushConstantStorage& storage = registry->ComponentRequest<bind::PushConstantStorage>(_node, _invoc_index);
-    if (storage.size() < _location.push_constant_range+1)
-        storage.resize(_location.push_constant_range+1);
-    storage[_location.push_constant_range].reset(new uint8_t[range.size]);
-    return storage[_location.push_constant_range].get();
+    return BindPushConstants(_node, _location, std::vector<uint32_t>{ _invoc_index });
 }
 
 VkWriteDescriptorSet
 DispatchContext::BindShaderResource(dstk::Registry::Node _node,
                                     layout::_::BindingPoint const& _location,
-                                    uint32_t _invoc_index,
+                                    std::vector<uint32_t> const& _invoc_indices,
                                     bind::_::ShaderResources const& _resources)
 {
     DispatchStageDynamic const& stage_dynamic = *registry->ComponentLookup<DispatchStageDynamic>(_node);
+    uint32_t const binding_index = ComputeBindingIndex(stage_dynamic.invoc_count_stack,
+                                                       _invoc_indices);
+
     StageBindingGroupDynamic const& group_runtime = stage_dynamic.binding_groups[_location.shader.group_index];
 
     layout::DispatchStage const& stage = *registry->ComponentLookup<layout::DispatchStage>(_node);
@@ -3222,7 +3210,7 @@ DispatchContext::BindShaderResource(dstk::Registry::Node _node,
     layout::StageBinding const& binding = binding_group.bindings[_location.shader.binding_index];
 
     bind::_::ShaderBinding& shader_binding =
-        *registry->BindComponent(_node, _invoc_index, bind::_::ShaderBinding{ _location, _resources });
+        *registry->BindComponent(_node, binding_index, bind::_::ShaderBinding{ _location, _resources });
 
     uint32_t descriptor_count = 0u;
     if (!shader_binding.resources.images.empty())
@@ -3233,7 +3221,7 @@ DispatchContext::BindShaderResource(dstk::Registry::Node _node,
     VkWriteDescriptorSet desc_write = {};
     desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     desc_write.pNext = nullptr;
-    desc_write.dstSet = group_runtime.sets[_invoc_index];
+    desc_write.dstSet = group_runtime.sets[binding_index];
     desc_write.dstBinding = shader_binding.target.shader.binding_index;
     desc_write.dstArrayElement = 0u;
     desc_write.descriptorCount = descriptor_count;
@@ -3268,6 +3256,15 @@ DispatchContext::BindShaderResource(dstk::Registry::Node _node,
     }
 
     return desc_write;
+}
+
+VkWriteDescriptorSet
+DispatchContext::BindShaderResource(dstk::Registry::Node _node,
+                                    layout::_::BindingPoint const& _location,
+                                    uint32_t _invoc_index,
+                                    bind::_::ShaderResources const& _resources)
+{
+    return BindShaderResource(_node, _location, std::vector<uint32_t>{ _invoc_index }, _resources);
 }
 
 } // namespace runtime
