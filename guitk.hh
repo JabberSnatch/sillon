@@ -21,10 +21,16 @@ struct GlyphInfo
     uint32_t index;
 };
 
+struct FrameData
+{
+    numtk::bounds2u bounds;
+    std::pair<uint32_t, uint32_t> glyph_range;
+};
+
 struct WidgetStates
 {
     Frame current_frame;
-    std::vector<numtk::bounds2u> frames;
+    std::vector<FrameData> frames;
     std::vector<GlyphInfo> glyphs;
     bool mouse_over;
 };
@@ -92,12 +98,16 @@ WidgetStates const* EndRecord(Context context_)
     {
         Frame frame = context_->frame_order[index];
         FrameInfo const& frame_info = context_->registered_frames[frame];
-        states.frames.push_back(frame_info.bounds);
+
+        FrameData frame_data = {};
+        frame_data.bounds = frame_info.bounds;
+        frame_data.glyph_range.first = states.glyphs.size();
+        frame_data.glyph_range.second = frame_info.glyphs.size();
+        states.frames.push_back(frame_data);
 
         for (GlyphInfo const& glyph : frame_info.glyphs)
             states.glyphs.push_back(glyph);
     }
-
     context_->record_open = false;
     context_->last_record = std::move(context_->current_record);
     return &context_->last_record;
