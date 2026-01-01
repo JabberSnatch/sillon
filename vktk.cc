@@ -2688,8 +2688,9 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
             rp_begin_info.pClearValues = clear_values.data();
             vkCmdBeginRenderPass(_command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
-            dispatch_graph->DepthFirstTraversal(
-                [this, &_command_buffer, dispatch_pass](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
+            dispatch_graph->DepthFirstInvocation(
+                [this, &_command_buffer, dispatch_pass](vkrg::layout::_::DispatchGraph::GraphStack const& graph_stack,
+                                                        vkrg::layout::_::DispatchGraph::InvocStack const& invoc_stack,
                                                         dstk::Registry::Node node) {
                 auto const* dispatch_stage = registry->ComponentLookup<layout::DispatchStage>(node);
                 auto const* stage_bindings = registry->ComponentLookup<bind::DispatchStage>(node);
@@ -2703,15 +2704,26 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
 
                 vkCmdBindPipeline(_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, *pipeline);
 
+                vkrg::layout::_::DispatchGraph::InvocStack invoc_indices = invoc_stack;
+                invoc_indices.push_back(0);
+
+                uint32_t invoc_count = std::max(stage_dynamic->invoc_count_stack.back(), 1u);
                 for (uint32_t invoc_index = 0u;
-                     invoc_index < stage_dynamic->invocation_count;
-                     ++invoc_index) {
+                     invoc_index < invoc_count;
+                     ++invoc_index)
+                {
+                    invoc_indices.back() = invoc_index;
+                    uint32_t binding_index = ComputeBindingIndex(
+                        stage_dynamic->invoc_count_stack,
+                        invoc_indices
+                    );
 
                     for (uint32_t group_index = 0u;
                          group_index < (uint32_t)dispatch_stage->binding_groups.size();
                          ++group_index)
                     {
-                        VkDescriptorSet descset = stage_dynamic->binding_groups[group_index].sets[invoc_index];
+                        VkDescriptorSet descset =
+                            stage_dynamic->binding_groups[group_index].sets[binding_index];
                         vkCmdBindDescriptorSets(_command_buffer,
                                                 VK_PIPELINE_BIND_POINT_GRAPHICS,
                                                 stage_static->pipeline_layout,
@@ -2725,7 +2737,7 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                          ++range_index)
                     {
                         layout::PushConstantRange const& range = dispatch_stage->push_constants[range_index];
-                        void* memory = registry->ComponentRequest<bind::PushConstantStorage>(node, invoc_index)[range_index].get();
+                        void* memory = registry->ComponentRequest<bind::PushConstantStorage>(node, binding_index)[range_index].get();
                         vkCmdPushConstants(_command_buffer,
                                            stage_static->pipeline_layout,
                                            range.stages,
@@ -2734,7 +2746,7 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                                            memory);
                     }
 
-                    auto const* invocation = registry->ComponentLookup<bind::DispatchInvocation>(node, invoc_index);
+                    auto const* invocation = registry->ComponentLookup<bind::DispatchInvocation>(node, binding_index);
                     bool indexed_draw = false;
                     if (invocation)
                     {
@@ -2758,7 +2770,7 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                                                  VK_INDEX_TYPE_UINT32);
                     }
 
-                    auto const& graphics_command = *registry->ComponentLookup<bind::GraphicsCommand>(node, invoc_index);
+                    auto const& graphics_command = *registry->ComponentLookup<bind::GraphicsCommand>(node, binding_index);
 
                     switch (graphics_command.command)
                     {

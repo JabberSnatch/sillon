@@ -1692,7 +1692,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                 },
                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-#if 0
+#if 1
             _state->sparse_runtime.UpdateDynamicInvocationCount(
                 _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"],
                 gui_record->frames.size());
@@ -1700,7 +1700,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
             _state->sparse_runtime.UpdateDynamicInvocationCount(
                 _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
-                gui_record->frames.size());
+                1);//gui_record->frames.size());
             _state->sparse_runtime.ClearStageBarriers(
                 _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"]);
 
@@ -1746,8 +1746,61 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                         { _state->gui_frame_indices, 0 }
                         );
                 }
+
+                {
+                    _state->sparse_runtime.BindGraphicsCommand(
+                        _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
+                        index,
+                        {
+                            vkrg::bind::DispatchCommand_Draw,
+                            (uint32_t)gui_record->glyphs.size()*6, 1
+                        });
+
+                    _state->sparse_runtime.BindVertexInput(
+                        _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
+                        { .type = vkrg::layout::_::BindingType_VertexInput,
+                          .vertex_input_index = 0 },
+                        index,
+                        { _state->gui_glyph_vertices, 0 }
+                    );
+
+                    _state->sparse_runtime.BindVertexInput(
+                        _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
+                        { .type = vkrg::layout::_::BindingType_VertexInput,
+                          .vertex_input_index = 1 },
+                        index,
+                        { _state->gui_glyph_vertices, (uint32_t)gui_record->glyphs.size() * sizeof(numtk::vec2f) * 4 }
+                    );
+
+                    _state->sparse_runtime.BindIndexInput(
+                        _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
+                        index,
+                        { _state->gui_glyph_indices, 0 }
+                    );
+
+                    VkDescriptorImageInfo image_info{
+                        _state->gui_glyph_sampler,
+                        _state->gui_font_texture.view,
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                    };
+
+                    VkWriteDescriptorSet binding =
+                        _state->sparse_runtime.BindShaderResource(
+                            _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
+                            vkrg::layout::_::BindingPoint{
+                                .type = vkrg::layout::_::BindingType_Shader,
+                                .shader = { 0, 0 }
+                            },
+                            index,
+                            vkrg::bind::_::ShaderResources{
+                                .images = { image_info }
+                            });
+
+                    vkUpdateDescriptorSets(_vulkan->device, 1, &binding, 0u, nullptr);
+                }
             }
 
+#if 0
             {
                 _state->sparse_runtime.BindGraphicsCommand(
                     _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
@@ -1797,6 +1850,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
                 vkUpdateDescriptorSets(_vulkan->device, 1, &binding, 0u, nullptr);
             }
+#endif
 
             _state->sparse_runtime.BindBarrier(
                 _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"], {
