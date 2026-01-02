@@ -102,6 +102,10 @@ struct voxel_state_t
 
     float time = 0.f;
 
+    guitk::Frame framerate_frame;
+    float framerate_average = 0.f;
+    std::string framerate_label;
+
     //TurntableCamera camera;
     FlightCamera camera;
 
@@ -1510,8 +1514,19 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
     voxel_state_t* _state = (voxel_state_t*)_pstate;
 
     {
+        if (!(_state->frame_index % 10))
+        {
+            _state->framerate_label = std::to_string(_state->framerate_average);
+            _state->framerate_average = 0.f;
+        }
+        _state->framerate_average += _input->time_delta / 10.f;
+
         guitk::BeginRecord(_state->gui_context, _input, _past_input);
-#if 1
+        guitk::BeginFrame(_state->gui_context, _state->framerate_frame);
+        guitk::Label(_state->gui_context, _state->framerate_label.c_str());
+        guitk::EndFrame(_state->gui_context);
+
+#if 0
         static std::vector<guitk::Frame> frames(4);
         for (uint32_t i = 0; i < 4; ++i)
         {
