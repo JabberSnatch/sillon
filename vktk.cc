@@ -2707,12 +2707,12 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                 vkrg::layout::_::DispatchGraph::InvocStack invoc_indices = invoc_stack;
                 invoc_indices.push_back(0);
 
-                uint32_t invoc_count = std::max(stage_dynamic->invoc_count_stack.back(), 1u);
+                uint32_t invoc_count = std::max(stage_dynamic->invoc_count_stack.front(), 1u);
                 for (uint32_t invoc_index = 0u;
                      invoc_index < invoc_count;
                      ++invoc_index)
                 {
-                    invoc_indices.back() = invoc_index;
+                    invoc_indices.front() = invoc_index;
                     uint32_t binding_index = ComputeBindingIndex(
                         stage_dynamic->invoc_count_stack,
                         invoc_indices

@@ -15,16 +15,26 @@ static constexpr Handle_t kNullHandle = 0u;
 using Context = Context_t*;
 using Frame = Handle_t;
 
+enum GlyphPage
+{
+    GlyphPage_Font = 0,
+    GlyphPage_Symbols = 1,
+    GlyphPage_COUNT
+};
+
 struct GlyphInfo
 {
     numtk::bounds2u bounds;
-    uint32_t index;
+    numtk::bounds2f uv;
+    GlyphPage glyph_page;
+    //uint32_t index;
 };
 
 struct FrameData
 {
     numtk::bounds2u bounds;
-    std::pair<uint32_t, uint32_t> glyph_range;
+    std::array<std::pair<uint32_t, uint32_t>, GlyphPage_COUNT> glyph_range;
+    //std::pair<uint32_t, uint32_t> glyph_range;
 };
 
 struct WidgetStates
@@ -45,8 +55,17 @@ void BeginFrame(Context, Frame&);
 void EndFrame(Context);
 
 void Label(Context, std::string const& label_);
+void Checkbox(Context, bool* state_, std::string const& label_);
 
 uint64_t const* FontData();
+uint64_t const* SymbolsData();
+
+enum SymbolTag
+{
+    SymbolTag_CheckboxClear = 0,
+    SymbolTag_CheckboxTicked = 1,
+    SymbolTag_COUNT
+};
 
 } // namespace guitk
 
@@ -59,7 +78,7 @@ struct FrameInfo
     static inline numtk::vec2u const kOffsetIncrement{ 20, 20 };
     numtk::bounds2u bounds;
 
-    std::vector<GlyphInfo> glyphs;
+    std::array<std::vector<GlyphInfo>, GlyphPage_COUNT> glyphs;
     numtk::vec2u next_row;
 };
 
@@ -78,6 +97,8 @@ struct Context_t
 
     Handle_t next_id = 1u;
 };
+
+void _PushText(FrameInfo& frame_info_, std::string const& string_, numtk::vec2u& glyph_max_);
 
 Context CreateContext() { return new Context_t{}; }
 void DeleteContext(Context context_) { delete context_; }
@@ -101,12 +122,18 @@ WidgetStates const* EndRecord(Context context_)
 
         FrameData frame_data = {};
         frame_data.bounds = frame_info.bounds;
-        frame_data.glyph_range.first = states.glyphs.size();
-        frame_data.glyph_range.second = frame_info.glyphs.size();
-        states.frames.push_back(frame_data);
 
-        for (GlyphInfo const& glyph : frame_info.glyphs)
-            states.glyphs.push_back(glyph);
+        for (uint32_t page_index = 0u; page_index < GlyphPage_COUNT; ++page_index)
+        {
+            auto& glyph_range = frame_data.glyph_range[page_index];
+            glyph_range.first = states.glyphs.size();
+            glyph_range.second = frame_info.glyphs[page_index].size();
+
+            for (GlyphInfo const& glyph : frame_info.glyphs[page_index])
+                states.glyphs.push_back(glyph);
+        }
+
+        states.frames.push_back(frame_data);
     }
     context_->record_open = false;
     context_->last_record = std::move(context_->current_record);
@@ -122,15 +149,16 @@ void BeginFrame(Context context_, Frame& frame_) {
     if (!context_->registered_frames.contains(frame_))
     {
         frame_ = context_->next_id++;
-        context_->registered_frames.insert(frame_,
-                                           FrameInfo{
-                                               {
-                                                   FrameInfo::kOffsetIncrement * (context_->frame_order.size() + 1),
-                                                   FrameInfo::kEmptySize
-                                               },
-                                               {},
-                                               { 15, 15 }
-                                           });
+        context_->registered_frames.insert(
+            frame_,
+            FrameInfo{
+                {
+                    FrameInfo::kOffsetIncrement * (context_->frame_order.size() + 1),
+                    FrameInfo::kEmptySize
+                },
+                {},
+                { 15, 15 }
+            });
         context_->frame_order.push_back(frame_);
     }
 
@@ -164,7 +192,8 @@ void BeginFrame(Context context_, Frame& frame_) {
     if (iotk::MouseRelease(iotk::kLeftBtn, *context_->input, *context_->past_input))
         context_->grabbed_frame = 0;
 
-    frame_info.glyphs.clear();
+    for (uint32_t page_index = 0u; page_index < GlyphPage_COUNT; ++page_index)
+        frame_info.glyphs[page_index].clear();
     frame_info.next_row = numtk::vec2u{ 15, 15 };
 
     states.current_frame = frame_;
@@ -193,24 +222,70 @@ void Label(Context context_, std::string const& label_)
 
     numtk::vec2u glyph_max = numtk::vec2u{ 0, 0 };
     FrameInfo& frame_info = context_->registered_frames[states.current_frame];
-    for (uint32_t char_index = 0u; char_index < (uint32_t)label_.size(); ++char_index)
-    {
-        char character = label_[char_index];
-        if (character == ' ')
-            continue;
-        uint32_t glyph_index = GetGlyphIndex(character);
-        numtk::bounds2u glyph_bounds{
-            frame_info.bounds.min + frame_info.next_row + numtk::vec2u{ char_index * 14, 0 },
-            { 12, 20 }
-        };
-
-        frame_info.glyphs.push_back(GlyphInfo{ glyph_bounds, glyph_index });
-
-        glyph_max = numtk::max(glyph_max, glyph_bounds.max());
-    }
+    _PushText(frame_info, label_, glyph_max);
 
     frame_info.bounds = frame_info.bounds.Expand(glyph_max + numtk::vec2u{ 15, 15 });
     frame_info.next_row += numtk::vec2u{ 0, 22 };
+}
+
+void Checkbox(Context context_, bool* state_, std::string const& label_)
+{
+    WidgetStates& states = context_->current_record;
+
+    if (states.current_frame == kNullHandle)
+        return;
+
+    numtk::vec2u glyph_max = numtk::vec2u{ 0, 0 };
+    FrameInfo& frame_info = context_->registered_frames[states.current_frame];
+
+    {
+        numtk::bounds2u box_bounds {
+            frame_info.bounds.min + frame_info.next_row + numtk::vec2u{ 0, 2 },
+            { 16, 16 }
+        };
+
+        if (box_bounds.Contains(*(numtk::vec2u*)context_->input->cursor)
+            && iotk::MouseRelease(iotk::kLeftBtn, *context_->input, *context_->past_input))
+            *state_ = !(*state_);
+
+        numtk::bounds2f box_uv{ !(*state_) ? numtk::vec2f{ 0.f, 0.f } : numtk::vec2f{ 0.5f, 0.f }, { 0.5f, 1.f } };
+
+        frame_info.glyphs[GlyphPage_Symbols].push_back(
+            GlyphInfo{ box_bounds, box_uv, GlyphPage_Symbols });
+    }
+
+    frame_info.next_row += numtk::vec2u{ 20, 0 };
+    _PushText(frame_info, label_, glyph_max);
+
+    frame_info.bounds = frame_info.bounds.Expand(glyph_max + numtk::vec2u{ 15, 15 });
+    frame_info.next_row += numtk::vec2u{ -20u, 22u };
+}
+
+void _PushText(FrameInfo& frame_info_, std::string const& string_, numtk::vec2u& glyph_max_)
+{
+    for (uint32_t char_index = 0u; char_index < (uint32_t)string_.size(); ++char_index)
+    {
+        char character = string_[char_index];
+        if (character == ' ')
+            continue;
+
+        uint32_t glyph_index = GetGlyphIndex(character);
+        numtk::bounds2u glyph_bounds{
+            frame_info_.bounds.min + frame_info_.next_row + numtk::vec2u{ char_index * 14, 0 },
+            { 12, 20 }
+        };
+
+        float glyph_x = (float)(glyph_index % 16);
+        float glyph_y = (float)(glyph_index / 16);
+        numtk::vec2f uvmin = numtk::vec2f{ glyph_x * 6.f, glyph_y * 10.f }
+            / numtk::vec2f{ 96.f, 60.f };
+        numtk::vec2f extent{ 6.f/96.f, 10.f/60.f };
+
+        frame_info_.glyphs[GlyphPage_Font].push_back(
+            GlyphInfo{ glyph_bounds, { uvmin, extent }, GlyphPage_Font });
+
+        glyph_max_ = numtk::max(glyph_max_, glyph_bounds.max());
+    }
 }
 
 uint64_t const* FontData()
@@ -243,6 +318,15 @@ uint64_t const* FontData()
     };
 
     return kFontData;
+}
+
+uint64_t const* SymbolsData()
+{
+    static constexpr uint64_t kSymbolsData[SymbolTag_COUNT] = {
+        0xff818181818181ffull, 0xff81bdbdbdbd81ffull,
+    };
+
+    return kSymbolsData;
 }
 
 } // namespace guitk

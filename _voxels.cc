@@ -96,6 +96,7 @@ struct voxel_state_t
     vktk::Buffer gui_frame_uv;
     guitk::WidgetStates const* current_gui_record;
     vktk::Texture gui_font_texture;
+    vktk::Texture gui_symbols_texture;
     vktk::Buffer gui_glyph_indices;
     vktk::Buffer gui_glyph_vertices;
     VkSampler gui_glyph_sampler;
@@ -105,6 +106,7 @@ struct voxel_state_t
     guitk::Frame framerate_frame;
     float framerate_average = 0.f;
     std::string framerate_label;
+    bool enable_indirect_light = true;
 
     //TurntableCamera camera;
     FlightCamera camera;
@@ -1368,6 +1370,35 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                 }
             }
         );
+
+        _state->gui_symbols_texture = _vulkan->CreateTexture(
+            8*guitk::SymbolTag_COUNT, 8, 1,
+            VK_IMAGE_TYPE_2D,
+            VK_FORMAT_R8_UINT,
+            VK_IMAGE_USAGE_SAMPLED_BIT,
+            [](void* buffer) {
+                uint64_t const* symbols_data = guitk::SymbolsData();
+                uint8_t* texture_buffer = (uint8_t*)buffer;
+                for (uint32_t index = 0; index < guitk::SymbolTag_COUNT; ++index)
+                {
+                    uint64_t glyph = symbols_data[index];
+                    for (uint32_t dot_y = 0; dot_y < 8; ++dot_y)
+                    {
+                        for (uint32_t dot_x = 0; dot_x < 8; ++dot_x)
+                        {
+                            uint32_t dot_index = dot_x + dot_y*8;
+                            bool dot_value = ((glyph >> dot_index) & 1) != 0;
+
+                            uint32_t texel_x = index*8 + dot_x;
+                            uint32_t texel_y = dot_y;
+                            texture_buffer[texel_x + texel_y*guitk::SymbolTag_COUNT*8] = dot_value
+                                ? '\255'
+                                : '\0';
+                        }
+                    }
+                }
+            }
+        );
     }
 
     vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
@@ -1524,6 +1555,12 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         guitk::BeginRecord(_state->gui_context, _input, _past_input);
         guitk::BeginFrame(_state->gui_context, _state->framerate_frame);
         guitk::Label(_state->gui_context, _state->framerate_label.c_str());
+        guitk::Checkbox(_state->gui_context, &_state->enable_indirect_light, "Indirect Lighting");
+        for (uint32_t i = 0; i < 4; ++i)
+        {
+            static bool storage[4];
+            guitk::Checkbox(_state->gui_context, &storage[i], std::string("checkbox") + std::to_string(i));
+        }
         guitk::EndFrame(_state->gui_context);
 
 #if 0
@@ -1554,18 +1591,25 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                          ++frame_index)
                     {
                         guitk::FrameData const& frame = gui_record->frames[frame_index];
-                        for (uint32_t glyph_index = 0u;
-                             glyph_index < frame.glyph_range.second;
-                             ++glyph_index)
+                        for (uint32_t page_index = 0u;
+                             page_index < guitk::GlyphPage_COUNT;
+                             ++page_index)
                         {
-                            uint32_t index_offset = glyph_index*4;
-                            uint32_t index_base = (glyph_index + frame.glyph_range.first)*6;
-                            indices[index_base + 0] = 0 + index_offset;
-                            indices[index_base + 1] = 2 + index_offset;
-                            indices[index_base + 2] = 1 + index_offset;
-                            indices[index_base + 3] = 0 + index_offset;
-                            indices[index_base + 4] = 3 + index_offset;
-                            indices[index_base + 5] = 2 + index_offset;
+                            for (uint32_t glyph_index = 0u;
+                                 glyph_index < frame.glyph_range[page_index].second;
+                                 ++glyph_index)
+                            {
+                                uint32_t index_offset = glyph_index*4;
+                                uint32_t index_base =
+                                    (glyph_index
+                                     + frame.glyph_range[page_index].first)*6;
+                                indices[index_base + 0] = 0 + index_offset;
+                                indices[index_base + 1] = 2 + index_offset;
+                                indices[index_base + 2] = 1 + index_offset;
+                                indices[index_base + 3] = 0 + index_offset;
+                                indices[index_base + 4] = 3 + index_offset;
+                                indices[index_base + 5] = 2 + index_offset;
+                            }
                         }
                     }
                 },
@@ -1592,10 +1636,8 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                             (float)(glyph.bounds.min.y()+glyph.bounds.extent.y())
                         };
 
-                        float glyph_x = (float)(glyph.index % 16);
-                        float glyph_y = (float)(glyph.index / 16);
-                        numtk::vec2f min = numtk::vec2f{ glyph_x * 6.f, glyph_y * 10.f } / numtk::vec2f{ 96.f, 60.f };
-                        numtk::vec2f max = numtk::vec2f{ (glyph_x + 1.f) * 6.f, (glyph_y + 1.f) * 10.f } / numtk::vec2f{ 96.f, 60.f };
+                        numtk::vec2f const& min = glyph.uv.min;
+                        numtk::vec2f max = glyph.uv.max();
                         uvs[glyph_index * 4 + 0] = numtk::vec2f{ min.x(), max.y() };
                         uvs[glyph_index * 4 + 1] = max;
                         uvs[glyph_index * 4 + 2] = numtk::vec2f{ max.x(), min.y() };
@@ -1717,7 +1759,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
             _state->sparse_runtime.UpdateDynamicInvocationCount(
                 _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
-                1);
+                2);
             _state->sparse_runtime.ClearStageBarriers(
                 _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"]);
 
@@ -1756,40 +1798,45 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                         );
                 }
 
+                dstk::Registry::Node glyphs_node =
+                    _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"];
+
                 {
                     _state->sparse_runtime.BindGraphicsCommand(
-                        _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
-                        index,
+                        glyphs_node,
+                        { 0, index },
                         {
                             vkrg::bind::DispatchCommand_Draw,
-                            (uint32_t)frame.glyph_range.second*6, 1
+                            (uint32_t)frame.glyph_range[guitk::GlyphPage_Font].second*6, 1
                         });
 
-                    uint32_t glyph_vertex_offset = frame.glyph_range.first*sizeof(numtk::vec2f)*4;
+                    uint32_t glyph_vertex_offset =
+                        frame.glyph_range[guitk::GlyphPage_Font].first*sizeof(numtk::vec2f)*4;
                     _state->sparse_runtime.BindVertexInput(
-                        _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
+                        glyphs_node,
                         { .type = vkrg::layout::_::BindingType_VertexInput,
                           .vertex_input_index = 0 },
-                        index,
+                        { 0, index },
                         { _state->gui_glyph_vertices,
                           glyph_vertex_offset }
                     );
 
                     _state->sparse_runtime.BindVertexInput(
-                        _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
+                        glyphs_node,
                         { .type = vkrg::layout::_::BindingType_VertexInput,
                           .vertex_input_index = 1 },
-                        index,
+                        { 0, index },
                         { _state->gui_glyph_vertices,
                           (uint32_t)gui_record->glyphs.size()*sizeof(numtk::vec2f)*4
                           + glyph_vertex_offset }
                     );
 
                     _state->sparse_runtime.BindIndexInput(
-                        _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
-                        index,
+                        glyphs_node,
+                        { 0, index },
                         { _state->gui_glyph_indices,
-                          (uint32_t)frame.glyph_range.first*sizeof(uint32_t)*6 }
+                          (uint32_t)frame.glyph_range[guitk::GlyphPage_Font].first
+                          *sizeof(uint32_t)*6 }
                     );
 
                     VkDescriptorImageInfo image_info{
@@ -1800,12 +1847,71 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
                     VkWriteDescriptorSet binding =
                         _state->sparse_runtime.BindShaderResource(
-                            _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
+                            glyphs_node,
                             vkrg::layout::_::BindingPoint{
                                 .type = vkrg::layout::_::BindingType_Shader,
                                 .shader = { 0, 0 }
                             },
-                            index,
+                            { 0, index },
+                            vkrg::bind::_::ShaderResources{
+                                .images = { image_info }
+                            });
+
+                    vkUpdateDescriptorSets(_vulkan->device, 1, &binding, 0u, nullptr);
+                }
+
+                {
+                    _state->sparse_runtime.BindGraphicsCommand(
+                        glyphs_node,
+                        { 1, index },
+                        {
+                            vkrg::bind::DispatchCommand_Draw,
+                            (uint32_t)frame.glyph_range[guitk::GlyphPage_Symbols].second*6, 1
+                        });
+
+                    uint32_t glyph_vertex_offset =
+                        frame.glyph_range[guitk::GlyphPage_Symbols].first*sizeof(numtk::vec2f)*4;
+                    _state->sparse_runtime.BindVertexInput(
+                        glyphs_node,
+                        { .type = vkrg::layout::_::BindingType_VertexInput,
+                          .vertex_input_index = 0 },
+                        { 1, index },
+                        { _state->gui_glyph_vertices,
+                          glyph_vertex_offset }
+                    );
+
+                    _state->sparse_runtime.BindVertexInput(
+                        glyphs_node,
+                        { .type = vkrg::layout::_::BindingType_VertexInput,
+                          .vertex_input_index = 1 },
+                        { 1, index },
+                        { _state->gui_glyph_vertices,
+                          (uint32_t)gui_record->glyphs.size()*sizeof(numtk::vec2f)*4
+                          + glyph_vertex_offset }
+                    );
+
+                    _state->sparse_runtime.BindIndexInput(
+                        glyphs_node,
+                        { 1, index },
+                        { _state->gui_glyph_indices,
+                          (uint32_t)frame.glyph_range[guitk::GlyphPage_Symbols].first
+                          *sizeof(uint32_t)*6 }
+                    );
+
+                    VkDescriptorImageInfo image_info{
+                        _state->gui_glyph_sampler,
+                        _state->gui_symbols_texture.view,
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                    };
+
+                    VkWriteDescriptorSet binding =
+                        _state->sparse_runtime.BindShaderResource(
+                            glyphs_node,
+                            vkrg::layout::_::BindingPoint{
+                                .type = vkrg::layout::_::BindingType_Shader,
+                                .shader = { 0, 0 }
+                            },
+                            { 1, index },
                             vkrg::bind::_::ShaderResources{
                                 .images = { image_info }
                             });
@@ -2734,9 +2840,9 @@ vkrg::layout::DispatchStage GUIGlyphsDispatchStageInfo()
           { "#version 450",
             "layout(location = 0) in vec2 iFS_uv;"
             "layout(location = 0) out vec4 color;"
-            "layout(set = 0, binding = 0) uniform usampler2D font_atlas;"
+            "layout(set = 0, binding = 0) uniform usampler2D glyph_atlas;"
             "void main() {"
-            "uint glyph_pixel = texture(font_atlas, iFS_uv).x;"
+            "uint glyph_pixel = texture(glyph_atlas, iFS_uv).x;"
             "if (glyph_pixel == 0) discard;"
             "color = vec4(1.0);"
             "}"
