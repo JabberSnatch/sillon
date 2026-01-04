@@ -2695,6 +2695,7 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                 auto const* dispatch_stage = registry->ComponentLookup<layout::DispatchStage>(node);
                 auto const* stage_bindings = registry->ComponentLookup<bind::DispatchStage>(node);
                 auto const* pipeline = registry->ComponentLookup<VkPipeline>(node);
+
                 if (!dispatch_stage || !stage_bindings || !pipeline)
                     return;
 
@@ -2717,6 +2718,10 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                         stage_dynamic->invoc_count_stack,
                         invoc_indices
                     );
+
+                    auto const* graphics_command = registry->ComponentLookup<bind::GraphicsCommand>(node, binding_index);
+                    if (!graphics_command)
+                        continue;
 
                     for (uint32_t group_index = 0u;
                          group_index < (uint32_t)dispatch_stage->binding_groups.size();
@@ -2770,21 +2775,19 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                                                  VK_INDEX_TYPE_UINT32);
                     }
 
-                    auto const& graphics_command = *registry->ComponentLookup<bind::GraphicsCommand>(node, binding_index);
-
-                    switch (graphics_command.command)
+                    switch (graphics_command->command)
                     {
                     case bind::DispatchCommand_Draw:
                     {
                         if (!indexed_draw)
                             vkCmdDraw(_command_buffer,
-                                      graphics_command.vertex_count,
-                                      graphics_command.instance_count,
+                                      graphics_command->vertex_count,
+                                      graphics_command->instance_count,
                                       0, 0);
                         else
                             vkCmdDrawIndexed(_command_buffer,
-                                             graphics_command.vertex_count,
-                                             graphics_command.instance_count,
+                                             graphics_command->vertex_count,
+                                             graphics_command->instance_count,
                                              0, 0, 0);
                     } break;
                     default: break;

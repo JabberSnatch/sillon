@@ -147,7 +147,6 @@ struct voxel_state_t
     voxtk::BinaryRegion initial_region;
     voxtk::BinaryRegion voxel_region{ { 512u, 512u, 512u } };
     VoxelRegionPackage region_package;
-    uint32_t display_mode = 0;
 };
 
 struct MatrixBlock
@@ -1575,11 +1574,13 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         guitk::BeginFrame(_state->gui_context, _state->framerate_frame);
         guitk::Label(_state->gui_context, _state->framerate_label.c_str());
         guitk::Checkbox(_state->gui_context, &_state->enable_indirect_light, "Indirect Lighting");
+#if 0
         for (uint32_t i = 0; i < 4; ++i)
         {
             static bool storage[4];
             guitk::Checkbox(_state->gui_context, &storage[i], std::string("checkbox") + std::to_string(i));
         }
+#endif
         guitk::EndFrame(_state->gui_context);
 
 #if 0
@@ -1820,6 +1821,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                 dstk::Registry::Node glyphs_node =
                     _state->sparse_runtime._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"];
 
+                if (frame.glyph_range[guitk::GlyphPage_Font].second)
                 {
                     _state->sparse_runtime.BindGraphicsCommand(
                         glyphs_node,
@@ -1879,6 +1881,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                     vkUpdateDescriptorSets(_vulkan->device, 1, &binding, 0u, nullptr);
                 }
 
+                if (frame.glyph_range[guitk::GlyphPage_Symbols].second)
                 {
                     _state->sparse_runtime.BindGraphicsCommand(
                         glyphs_node,
@@ -2009,9 +2012,6 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         _state->region_package.display_depth = std::min(_state->region_package.display_depth+1, _state->region_package.stack_depth);
     if (_input->key_down['o'] && !_past_input->key_down['o'])
         _state->region_package.display_depth = std::max(_state->region_package.display_depth-1, 0);
-
-    if (!_input->key_down['l'] && _past_input->key_down['l'])
-        _state->display_mode = ((_state->display_mode+1) % 2);
 
     numtk::vec3i stencil_delta{ 0, 0, 0 };
     int32_t shift_factor = 1;
@@ -2296,7 +2296,7 @@ void Draw(void* _pstate,
                     .push_constant_range = 0
                 }, 0);
         push_constants->light_dir = sun_dir;
-        push_constants->display_mode = (float)_state->display_mode;
+        push_constants->display_mode = _state->enable_indirect_light ? 1.f : 0.f;
         push_constants->node_size = (float)_state->region_package.node_size;
         push_constants->stack_depth = std::max(_state->region_package.display_depth-1, 0);
 
