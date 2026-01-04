@@ -244,11 +244,19 @@ void Checkbox(Context context_, bool* state_, std::string const& label_)
             { 16, 16 }
         };
 
-        if (box_bounds.Contains(*(numtk::vec2u*)context_->input->cursor)
+        bool hover = box_bounds.Contains(*(numtk::vec2u*)context_->input->cursor);
+        float uv_y = hover ? 0.5f : 0.0f;
+
+        if (hover
             && iotk::MouseRelease(iotk::kLeftBtn, *context_->input, *context_->past_input))
             *state_ = !(*state_);
 
-        numtk::bounds2f box_uv{ !(*state_) ? numtk::vec2f{ 0.f, 0.f } : numtk::vec2f{ 0.5f, 0.f }, { 0.5f, 1.f } };
+        numtk::bounds2f box_uv{
+            !(*state_)
+            ? numtk::vec2f{ 0.f, uv_y }
+            : numtk::vec2f{ 0.5f, uv_y },
+            { 0.5f, .5f }
+        };
 
         frame_info.glyphs[GlyphPage_Symbols].push_back(
             GlyphInfo{ box_bounds, box_uv, GlyphPage_Symbols });

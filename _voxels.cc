@@ -1372,7 +1372,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         );
 
         _state->gui_symbols_texture = _vulkan->CreateTexture(
-            8*guitk::SymbolTag_COUNT, 8, 1,
+            8*guitk::SymbolTag_COUNT, 8*2, 1,
             VK_IMAGE_TYPE_2D,
             VK_FORMAT_R8_UINT,
             VK_IMAGE_USAGE_SAMPLED_BIT,
@@ -1391,6 +1391,25 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
                             uint32_t texel_x = index*8 + dot_x;
                             uint32_t texel_y = dot_y;
+                            texture_buffer[texel_x + texel_y*guitk::SymbolTag_COUNT*8] = dot_value
+                                ? '\255'
+                                : '\0';
+                        }
+                    }
+                }
+
+                for (uint32_t index = 0; index < guitk::SymbolTag_COUNT; ++index)
+                {
+                    uint64_t glyph = symbols_data[index];
+                    for (uint32_t dot_y = 0; dot_y < 8; ++dot_y)
+                    {
+                        for (uint32_t dot_x = 0; dot_x < 8; ++dot_x)
+                        {
+                            uint32_t dot_index = dot_x + dot_y*8;
+                            bool dot_value = ((glyph >> dot_index) & 1) == 0;
+
+                            uint32_t texel_x = index*8 + dot_x;
+                            uint32_t texel_y = 8 + dot_y;
                             texture_buffer[texel_x + texel_y*guitk::SymbolTag_COUNT*8] = dot_value
                                 ? '\255'
                                 : '\0';
