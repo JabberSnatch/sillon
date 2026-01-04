@@ -2281,32 +2281,35 @@ void Draw(void* _pstate,
         push_constants->node_size = (float)_state->region_package.node_size;
         push_constants->stack_depth = std::max(_state->region_package.display_depth-1, 0);
 
+        numtk::vec2f swapchain_size{ (float)_swapchain.size.width, (float)_swapchain.size.height };
         for (uint32_t index = 0u; index < (uint32_t)_state->current_gui_record->frames.size(); ++index)
         {
-            numtk::vec2f* gui_push_constants =
+            numtk::vec2f* frame_constants =
                 (numtk::vec2f*)_state->sparse_runtime.BindPushConstants(
                     gui_frames_node,
                     {
                         .type = vkrg::layout::_::BindingType_PushConstantRange,
                         .push_constant_range = 0
                     }, index);
-            gui_push_constants[0] = { (float)_swapchain.size.width, (float)_swapchain.size.height };
-            gui_push_constants[1] = _state->current_gui_record->frames[index].bounds.min.cast<float>();
-            gui_push_constants[2] = _state->current_gui_record->frames[index].bounds.extent.cast<float>();
-        }
+            frame_constants[0] = swapchain_size;
 
-        for (uint32_t index = 0u; index < (uint32_t)_state->current_gui_record->glyphs.size(); ++index)
-        {
-            numtk::vec2f* gui_push_constants =
+            numtk::vec2f* font_constants =
                 (numtk::vec2f*)_state->sparse_runtime.BindPushConstants(
                     gui_glyphs_node,
                     {
                         .type = vkrg::layout::_::BindingType_PushConstantRange,
                         .push_constant_range = 0
-                    }, index);
-            gui_push_constants[0] = { (float)_swapchain.size.width, (float)_swapchain.size.height };
-            gui_push_constants[1] = numtk::vec2f{};
-            gui_push_constants[2] = numtk::vec2f{};
+                    }, { 0, index });
+            font_constants[0] = swapchain_size;
+
+            numtk::vec2f* symbols_constants =
+                (numtk::vec2f*)_state->sparse_runtime.BindPushConstants(
+                    gui_glyphs_node,
+                    {
+                        .type = vkrg::layout::_::BindingType_PushConstantRange,
+                        .push_constant_range = 0
+                    }, { 1, index });
+            symbols_constants[0] = swapchain_size;
         }
 
         _state->sparse_runtime.BindFramebufferArea(
@@ -2772,7 +2775,7 @@ vkrg::layout::DispatchStage GUIFramesDispatchStageInfo()
             "layout(location = 0) in vec2 iVS_point;"
             "layout(location = 1) in vec2 iVS_uv;"
             "layout(location = 0) out vec2 iFS_point;"
-            "layout(push_constant, std430) uniform PushConstants { vec2 viewport_size; vec2 frame_offset; vec2 frame_size; };"
+            "layout(push_constant, std430) uniform PushConstants { vec2 viewport_size; };"
             "void main() {"
             "gl_Position = vec4((iVS_point / viewport_size) * vec2(2.0) - vec2(1.0), 0.0, 1.0);"
             "iFS_point = iVS_uv;"
@@ -2784,7 +2787,7 @@ vkrg::layout::DispatchStage GUIFramesDispatchStageInfo()
           { "#version 450",
             "layout(location = 0) in vec2 iFS_point;"
             "layout(location = 0) out vec4 color;"
-            "layout(push_constant, std430) uniform PushConstants { vec2 viewport_size; vec2 frame_offset; vec2 frame_size; };"
+            "layout(push_constant, std430) uniform PushConstants { vec2 viewport_size; };"
 
             "void main() {"
             "vec2 frame_coords = iFS_point - vec2(0.5);"
@@ -2799,7 +2802,7 @@ vkrg::layout::DispatchStage GUIFramesDispatchStageInfo()
     output.invocation_count = 0;
 
     output.push_constants = std::vector<vkrg::layout::PushConstantRange>{
-        { VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(numtk::vec2f) * 3 }
+        { VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(numtk::vec2f) }
     };
 
     output.graphics.state_overrides = std::vector<vktk::Context::StateOverride>{
@@ -2828,7 +2831,7 @@ vkrg::layout::DispatchStage GUIGlyphsDispatchStageInfo()
             "layout(location = 0) in vec2 iVS_point;"
             "layout(location = 1) in vec2 iVS_uv;"
             "layout(location = 0) out vec2 iFS_uv;"
-            "layout(push_constant, std430) uniform PushConstants { vec2 viewport_size; vec2 frame_offset; vec2 frame_size; };"
+            "layout(push_constant, std430) uniform PushConstants { vec2 viewport_size; };"
             "void main() {"
             "gl_Position = vec4((iVS_point / viewport_size) * vec2(2.0) - vec2(1.0), 0.0, 1.0);"
             "iFS_uv = iVS_uv;"
@@ -2852,7 +2855,7 @@ vkrg::layout::DispatchStage GUIGlyphsDispatchStageInfo()
 
     output.invocation_count = 0;
     output.push_constants = std::vector<vkrg::layout::PushConstantRange>{
-        { VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(numtk::vec2f) * 3 }
+        { VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(numtk::vec2f) }
     };
     output.binding_groups.push_back(vkrg::layout::StageBindingGroup{
         {
