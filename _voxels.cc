@@ -106,7 +106,7 @@ struct voxel_state_t
     guitk::Frame framerate_frame;
     float framerate_average = 0.f;
     std::string framerate_label;
-    bool enable_indirect_light = true;
+    bool enable_indirect_light = false;
 
     //TurntableCamera camera;
     FlightCamera camera;

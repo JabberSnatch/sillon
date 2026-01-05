@@ -755,17 +755,17 @@ struct DispatchGraph
             vkrg::layout::_::DispatchGraph const* current_graph = graph_stack.back();
             vkrg::layout::_::DispatchGraph const* dispatch_graph = registry->ComponentLookup<vkrg::layout::_::DispatchGraph>(current_node);
 
+            bool skip_callback = false;
             while (!current_graph->name_lookup.contains(current_node))
             {
                 graph_stack.pop_back();
                 current_graph = graph_stack.back();
                 dispatch_graph = nullptr;
+                skip_callback = true;
             }
 
-            uint32_t node_invoc_count =
-                invoc_count.count(current_node) ? invoc_count.at(current_node) : 1u;
-
-            callback(graph_stack, current_node);
+            if (!skip_callback)
+                callback(graph_stack, current_node);
 
             if (dispatch_graph)
             {
