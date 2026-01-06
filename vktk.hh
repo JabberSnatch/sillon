@@ -20,7 +20,7 @@
 #define CHECKCALL(func, ...)                                            \
     {                                                                   \
         VkResult const vkr = func(__VA_ARGS__);                         \
-        if (vkr != VK_SUCCESS)                                          \
+        if (vkr < VK_SUCCESS)                                           \
             std::cout << #func " " << vktk::VkResultToStr(vkr) << std::endl; \
     }
 
@@ -29,7 +29,7 @@
 #define CHECKCALL(func, ...)                                            \
     {                                                                   \
         VkResult const vkr = func(__VA_ARGS__);                         \
-        if (vkr != VK_SUCCESS)                                          \
+        if (vkr < VK_SUCCESS)                                           \
         {                                                               \
             std::cout << #func " " << vktk::VkResultToStr(vkr) << std::endl; \
             assert(false);                                              \

@@ -1984,7 +1984,6 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         }
     }
 
-    std::cout << _input->time_delta << std::endl;
     _state->time += _input->time_delta;
 
     if (_input->key_down[iotk::eKey::kEscape])
