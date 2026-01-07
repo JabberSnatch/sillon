@@ -1004,7 +1004,6 @@ struct DispatchNodeDynamic {
 
 struct DispatchContext {
     vktk::Context* vulkan;
-    //layout::DispatchGraph const* graph;
 
     std::unique_ptr<dstk::Registry> registry{ new dstk::Registry{} };
     vkrg::layout::_::DispatchGraph _graph{ registry.get() };
