@@ -107,10 +107,6 @@ struct voxel_state_t
     guitk::Context gui_context;
     guitk::WidgetStates const* current_gui_record;
 
-    vktk::Texture gui_font_texture;
-    vktk::Texture gui_symbols_texture;
-    VkSampler gui_glyph_sampler;
-
     float time = 0.f;
 
     guitk::Frame framerate_frame;
@@ -1327,102 +1323,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
     _state->sparse_runtime.ConstantResources(_state->sparse_runtime);
 
-    {
-        VkSamplerCreateInfo sampler_create{};
-        sampler_create.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        sampler_create.pNext = nullptr;
-        sampler_create.flags = 0u;
-        sampler_create.magFilter = VK_FILTER_NEAREST;
-        sampler_create.minFilter = VK_FILTER_NEAREST;
-        sampler_create.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-        sampler_create.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        sampler_create.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        sampler_create.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        sampler_create.minLod = 0.0;
-        sampler_create.maxLod = 0.0;
-        CHECKCALL(vkCreateSampler, _vulkan->device,
-                  &sampler_create, nullptr, &_state->gui_glyph_sampler);
-
-        _state->gui_font_texture = _vulkan->CreateTexture(
-            96, 60, 1,
-            VK_IMAGE_TYPE_2D,
-            VK_FORMAT_R8_UINT,
-            VK_IMAGE_USAGE_SAMPLED_BIT,
-            [](void* buffer) {
-                uint64_t const* font_data = guitk::FontData();
-                uint8_t* texture_buffer = (uint8_t*)buffer;
-                for (uint32_t index = 0; index < 95; ++index)
-                {
-                    uint32_t glyph_x = index % 16;
-                    uint32_t glyph_y = index / 16;
-                    uint64_t glyph = font_data[index];
-                    for (uint32_t dot_y = 0; dot_y < 10; ++dot_y)
-                    {
-                        for (uint32_t dot_x = 0; dot_x < 6; ++dot_x)
-                        {
-                            uint32_t dot_index = (5 - dot_x) + dot_y * 6;
-                            bool dot_value = ((glyph >> dot_index) & 1) != 0;
-
-                            uint32_t texel_x = glyph_x * 6 + dot_x;
-                            uint32_t texel_y = glyph_y * 10 + dot_y;
-                            texture_buffer[texel_x + texel_y*96] = dot_value
-                                ? '\255'
-                                : '\0';
-                        }
-                    }
-                }
-            }
-        );
-
-        _state->gui_symbols_texture = _vulkan->CreateTexture(
-            8*guitk::SymbolTag_COUNT, 8*2, 1,
-            VK_IMAGE_TYPE_2D,
-            VK_FORMAT_R8_UINT,
-            VK_IMAGE_USAGE_SAMPLED_BIT,
-            [](void* buffer) {
-                uint64_t const* symbols_data = guitk::SymbolsData();
-                uint8_t* texture_buffer = (uint8_t*)buffer;
-                for (uint32_t index = 0; index < guitk::SymbolTag_COUNT; ++index)
-                {
-                    uint64_t glyph = symbols_data[index];
-                    for (uint32_t dot_y = 0; dot_y < 8; ++dot_y)
-                    {
-                        for (uint32_t dot_x = 0; dot_x < 8; ++dot_x)
-                        {
-                            uint32_t dot_index = dot_x + dot_y*8;
-                            bool dot_value = ((glyph >> dot_index) & 1) != 0;
-
-                            uint32_t texel_x = index*8 + dot_x;
-                            uint32_t texel_y = dot_y;
-                            texture_buffer[texel_x + texel_y*guitk::SymbolTag_COUNT*8] = dot_value
-                                ? '\255'
-                                : '\0';
-                        }
-                    }
-                }
-
-                for (uint32_t index = 0; index < guitk::SymbolTag_COUNT; ++index)
-                {
-                    uint64_t glyph = symbols_data[index];
-                    for (uint32_t dot_y = 0; dot_y < 8; ++dot_y)
-                    {
-                        for (uint32_t dot_x = 0; dot_x < 8; ++dot_x)
-                        {
-                            uint32_t dot_index = dot_x + dot_y*8;
-                            bool dot_value = ((glyph >> dot_index) & 1) == 0;
-
-                            uint32_t texel_x = index*8 + dot_x;
-                            uint32_t texel_y = 8 + dot_y;
-                            texture_buffer[texel_x + texel_y*guitk::SymbolTag_COUNT*8] = dot_value
-                                ? '\255'
-                                : '\0';
-                        }
-                    }
-                }
-            }
-        );
-    }
-
     vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
     command_buffer.Begin();
 
@@ -1960,7 +1860,6 @@ void Shutdown(void* _pstate,
     for (uint32_t index = 0; index < _state->section_textures.size(); ++index)
         _vulkan->DestroyTexture(_state->section_textures[index]);
 
-    vkDestroySampler(_vulkan->device, _state->gui_glyph_sampler, nullptr);
     guitk::DeleteContext(_state->gui_context);
 }
 
@@ -2714,15 +2613,15 @@ struct SparsePipelinePayload
     vktk::Buffer gui_glyph_indices;
     vktk::Buffer gui_glyph_vertices;
 
-#if 0
     vktk::Texture gui_font_texture;
     vktk::Texture gui_symbols_texture;
     VkSampler gui_glyph_sampler;
-#endif
 
+#if 0
     vktk::Buffer matrix_buffer;
     VkSampler sampler;
     VoxelRegionPackage region_package;
+#endif
 };
 
 dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Context* _vulkan)
@@ -2735,8 +2634,104 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
 
     output.ConstantResources = [](dispatch_runtime_t& _rt)
     {
+        SparsePipelinePayload& payload = *(SparsePipelinePayload*)_rt.payload;
+
         _rt.context.GenerateStaticRuntime();
         SparseRegionUpdateBindings(_rt.state, _rt.context);
+
+        VkSamplerCreateInfo sampler_create{};
+        sampler_create.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        sampler_create.pNext = nullptr;
+        sampler_create.flags = 0u;
+        sampler_create.magFilter = VK_FILTER_NEAREST;
+        sampler_create.minFilter = VK_FILTER_NEAREST;
+        sampler_create.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        sampler_create.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sampler_create.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sampler_create.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sampler_create.minLod = 0.0;
+        sampler_create.maxLod = 0.0;
+        CHECKCALL(vkCreateSampler, _rt.context.vulkan->device,
+                  &sampler_create, nullptr, &payload.gui_glyph_sampler);
+
+        payload.gui_font_texture = _rt.context.vulkan->CreateTexture(
+            96, 60, 1,
+            VK_IMAGE_TYPE_2D,
+            VK_FORMAT_R8_UINT,
+            VK_IMAGE_USAGE_SAMPLED_BIT,
+            [](void* buffer) {
+                uint64_t const* font_data = guitk::FontData();
+                uint8_t* texture_buffer = (uint8_t*)buffer;
+                for (uint32_t index = 0; index < 95; ++index)
+                {
+                    uint32_t glyph_x = index % 16;
+                    uint32_t glyph_y = index / 16;
+                    uint64_t glyph = font_data[index];
+                    for (uint32_t dot_y = 0; dot_y < 10; ++dot_y)
+                    {
+                        for (uint32_t dot_x = 0; dot_x < 6; ++dot_x)
+                        {
+                            uint32_t dot_index = (5 - dot_x) + dot_y * 6;
+                            bool dot_value = ((glyph >> dot_index) & 1) != 0;
+
+                            uint32_t texel_x = glyph_x * 6 + dot_x;
+                            uint32_t texel_y = glyph_y * 10 + dot_y;
+                            texture_buffer[texel_x + texel_y*96] = dot_value
+                                ? '\255'
+                                : '\0';
+                        }
+                    }
+                }
+            }
+        );
+
+        payload.gui_symbols_texture = _rt.context.vulkan->CreateTexture(
+            8*guitk::SymbolTag_COUNT, 8*2, 1,
+            VK_IMAGE_TYPE_2D,
+            VK_FORMAT_R8_UINT,
+            VK_IMAGE_USAGE_SAMPLED_BIT,
+            [](void* buffer) {
+                uint64_t const* symbols_data = guitk::SymbolsData();
+                uint8_t* texture_buffer = (uint8_t*)buffer;
+                for (uint32_t index = 0; index < guitk::SymbolTag_COUNT; ++index)
+                {
+                    uint64_t glyph = symbols_data[index];
+                    for (uint32_t dot_y = 0; dot_y < 8; ++dot_y)
+                    {
+                        for (uint32_t dot_x = 0; dot_x < 8; ++dot_x)
+                        {
+                            uint32_t dot_index = dot_x + dot_y*8;
+                            bool dot_value = ((glyph >> dot_index) & 1) != 0;
+
+                            uint32_t texel_x = index*8 + dot_x;
+                            uint32_t texel_y = dot_y;
+                            texture_buffer[texel_x + texel_y*guitk::SymbolTag_COUNT*8] = dot_value
+                                ? '\255'
+                                : '\0';
+                        }
+                    }
+                }
+
+                for (uint32_t index = 0; index < guitk::SymbolTag_COUNT; ++index)
+                {
+                    uint64_t glyph = symbols_data[index];
+                    for (uint32_t dot_y = 0; dot_y < 8; ++dot_y)
+                    {
+                        for (uint32_t dot_x = 0; dot_x < 8; ++dot_x)
+                        {
+                            uint32_t dot_index = dot_x + dot_y*8;
+                            bool dot_value = ((glyph >> dot_index) & 1) == 0;
+
+                            uint32_t texel_x = index*8 + dot_x;
+                            uint32_t texel_y = 8 + dot_y;
+                            texture_buffer[texel_x + texel_y*guitk::SymbolTag_COUNT*8] = dot_value
+                                ? '\255'
+                                : '\0';
+                        }
+                    }
+                }
+            }
+        );
     };
 
     output.RenderResources = [](dispatch_runtime_t& _rt,
@@ -3018,8 +3013,8 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
                 );
 
                 VkDescriptorImageInfo image_info{
-                    _rt.state->gui_glyph_sampler,
-                    _rt.state->gui_font_texture.view,
+                    payload.gui_glyph_sampler,
+                    payload.gui_font_texture.view,
                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
                 };
 
@@ -3078,8 +3073,8 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
                 );
 
                 VkDescriptorImageInfo image_info{
-                    _rt.state->gui_glyph_sampler,
-                    _rt.state->gui_symbols_texture.view,
+                    payload.gui_glyph_sampler,
+                    payload.gui_symbols_texture.view,
                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
                 };
 
