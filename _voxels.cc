@@ -92,27 +92,23 @@ struct dispatch_runtime_t
 {
     vkrg::runtime::DispatchContext context;
     struct voxel_state_t const* state;
+    void* payload;
+    void (*PayloadDtor)(dispatch_runtime_t&, void*);
 
     void (*ConstantResources)(dispatch_runtime_t&);
     void (*RenderResources)(dispatch_runtime_t&, vktk::Swapchain const&);
     void (*Update)(dispatch_runtime_t&);
     void (*Dispatch)(dispatch_runtime_t&, vktk::CommandBuffer&, vktk::Swapchain const&);
-
-    numtk::bounds2u (*FrameScissor)(dispatch_runtime_t&);
-    numtk::bounds2f (*FrameViewport)(dispatch_runtime_t&);
+    void (*PostSubmit)(dispatch_runtime_t&, VkFence);
 };
 
 struct voxel_state_t
 {
     guitk::Context gui_context;
-    vktk::Buffer gui_frame_indices;
-    vktk::Buffer gui_frames_vertices;
-    vktk::Buffer gui_frame_uv;
     guitk::WidgetStates const* current_gui_record;
+
     vktk::Texture gui_font_texture;
     vktk::Texture gui_symbols_texture;
-    vktk::Buffer gui_glyph_indices;
-    vktk::Buffer gui_glyph_vertices;
     VkSampler gui_glyph_sampler;
 
     float time = 0.f;
@@ -1604,176 +1600,6 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         guitk::WidgetStates const* gui_record = guitk::EndRecord(_state->gui_context);
         _state->current_gui_record = gui_record;
 
-        if (gui_record->frames.size())
-        {
-            _state->gui_glyph_indices = _vulkan->CreateBuffer(
-                sizeof(uint32_t) * 6 * gui_record->glyphs.size(),
-                VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                [gui_record](void* buffer) {
-                    uint32_t* indices = (uint32_t*)buffer;
-
-                    for (uint32_t frame_index = 0u;
-                         frame_index < (uint32_t)gui_record->frames.size();
-                         ++frame_index)
-                    {
-                        guitk::FrameData const& frame = gui_record->frames[frame_index];
-                        for (uint32_t page_index = 0u;
-                             page_index < guitk::GlyphPage_COUNT;
-                             ++page_index)
-                        {
-                            for (uint32_t glyph_index = 0u;
-                                 glyph_index < frame.glyph_range[page_index].second;
-                                 ++glyph_index)
-                            {
-                                uint32_t index_offset = glyph_index*4;
-                                uint32_t index_base =
-                                    (glyph_index
-                                     + frame.glyph_range[page_index].first)*6;
-                                indices[index_base + 0] = 0 + index_offset;
-                                indices[index_base + 1] = 2 + index_offset;
-                                indices[index_base + 2] = 1 + index_offset;
-                                indices[index_base + 3] = 0 + index_offset;
-                                indices[index_base + 4] = 3 + index_offset;
-                                indices[index_base + 5] = 2 + index_offset;
-                            }
-                        }
-                    }
-                },
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-            _state->gui_glyph_vertices = _vulkan->CreateBuffer(
-                sizeof(numtk::vec2f) * 2 * 4 * gui_record->glyphs.size(),
-                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                [gui_record](void* buffer){
-                    numtk::vec2f* vertices = (numtk::vec2f*)buffer;
-                    numtk::vec2f* uvs = vertices + 4 * gui_record->glyphs.size();
-
-                    for (uint32_t glyph_index = 0u; glyph_index < (uint32_t)gui_record->glyphs.size(); ++glyph_index)
-                    {
-                        guitk::GlyphInfo const& glyph = gui_record->glyphs[glyph_index];
-                        vertices[glyph_index * 4 + 0] = glyph.bounds.min.cast<float>();
-                        vertices[glyph_index * 4 + 1] = numtk::vec2f{
-                            (float)(glyph.bounds.min.x()+glyph.bounds.extent.x()),
-                            (float)glyph.bounds.min.y()
-                        };
-                        vertices[glyph_index * 4 + 2] = glyph.bounds.max().cast<float>();
-                        vertices[glyph_index * 4 + 3] = numtk::vec2f{
-                            (float)glyph.bounds.min.x(),
-                            (float)(glyph.bounds.min.y()+glyph.bounds.extent.y())
-                        };
-
-                        numtk::vec2f const& min = glyph.uv.min;
-                        numtk::vec2f max = glyph.uv.max();
-                        uvs[glyph_index * 4 + 0] = numtk::vec2f{ min.x(), max.y() };
-                        uvs[glyph_index * 4 + 1] = max;
-                        uvs[glyph_index * 4 + 2] = numtk::vec2f{ max.x(), min.y() };
-                        uvs[glyph_index * 4 + 3] = min;
-                    }
-                },
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-            _state->gui_frame_indices = _vulkan->CreateBuffer(
-                sizeof(uint32_t) * 6 * 9,
-                VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                [](void* buffer) {
-                    static std::vector<uint32_t> const indices = {
-                        0, 2, 1,  1, 2, 3,
-                        4, 6, 5,  5, 6, 7,
-                        8, 10, 9,  9, 10, 11,
-                        12, 14, 13,  13, 14, 15,
-
-                        3, 7, 1,  1, 7, 6,
-                        7, 11, 5,  5, 11, 10,
-                        11, 15, 9,  9, 15, 14,
-                        15, 3, 13,  13, 3, 2,
-
-                        7, 3, 11,  11, 3, 15
-                    };
-
-                    uint32_t* index_data = (uint32_t*)buffer;
-                    std::copy(indices.begin(), indices.end(), index_data);
-                },
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-            _state->gui_frames_vertices = _vulkan->CreateBuffer(
-                sizeof(numtk::vec2f) * 16 * gui_record->frames.size(),
-                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                [gui_record](void* buffer){
-                    static float const kBorderSize = 10.f;
-                    static numtk::vec2f const kBorderOffsets[] = {
-                        { kBorderSize, 0 },
-                        { 0, kBorderSize },
-                        { kBorderSize, kBorderSize },
-                        { -kBorderSize, kBorderSize }
-                    };
-
-                    numtk::vec2f* vertices = (numtk::vec2f*)buffer;
-                    for (uint32_t frame_index = 0u; frame_index < gui_record->frames.size(); ++frame_index)
-                    {
-                        numtk::bounds2u const& frame = gui_record->frames[frame_index].bounds;
-                        numtk::vec2f* base = &vertices[frame_index*16];
-                        base[0] = frame.min.cast<float>();
-                        base[1] = base[0] + kBorderOffsets[0];
-                        base[2] = base[0] + kBorderOffsets[1];
-                        base[3] = base[0] + kBorderOffsets[2];
-
-                        base[4] = numtk::vec2f{
-                            (float)(frame.min.x()+frame.extent.x()),
-                            (float)frame.min.y() };
-                        base[5] = base[4] + kBorderOffsets[1];
-                        base[6] = base[4] - kBorderOffsets[0];
-                        base[7] = base[4] + kBorderOffsets[3];
-
-                        base[8] = frame.max().cast<float>();
-                        base[9] = base[8] - kBorderOffsets[0];
-                        base[10] = base[8] - kBorderOffsets[1];
-                        base[11] = base[8] - kBorderOffsets[2];
-
-                        base[12] = numtk::vec2f{
-                            (float)frame.min.x(),
-                            (float)(frame.min.y()+frame.extent.y()) };
-                        base[13] = base[12] - kBorderOffsets[1];
-                        base[14] = base[12] + kBorderOffsets[0];
-                        base[15] = base[12] - kBorderOffsets[3];
-                    }
-                },
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-            _state->gui_frame_uv = _vulkan->CreateBuffer(
-                sizeof(numtk::vec2f) * 16,
-                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                [](void* buffer){
-                    static numtk::vec2f const kBorderOffsets[] = {
-                        { 0.5f, 0.f },
-                        { 0.f, 0.5f },
-                        { 0.5f, 0.5f },
-                        { -0.5f, 0.5f }
-                    };
-
-                    numtk::vec2f* vertices = (numtk::vec2f*)buffer;
-                    vertices[0] = numtk::vec2f{ 0.f, 0.f };
-                    vertices[1] = vertices[0] + kBorderOffsets[0];
-                    vertices[2] = vertices[0] + kBorderOffsets[1];
-                    vertices[3] = vertices[0] + kBorderOffsets[2];
-
-                    vertices[4] = numtk::vec2f{ 1.f, 0.f };
-                    vertices[5] = vertices[4] + kBorderOffsets[1];
-                    vertices[6] = vertices[4] - kBorderOffsets[0];
-                    vertices[7] = vertices[4] + kBorderOffsets[3];
-
-                    vertices[8] = numtk::vec2f{ 1.f, 1.f };
-                    vertices[9] = vertices[8] - kBorderOffsets[0];
-                    vertices[10] = vertices[8] - kBorderOffsets[1];
-                    vertices[11] = vertices[8] - kBorderOffsets[2];
-
-                    vertices[12] = numtk::vec2f{ 0.f, 1.f };
-                    vertices[13] = vertices[12] - kBorderOffsets[1];
-                    vertices[14] = vertices[12] + kBorderOffsets[0];
-                    vertices[15] = vertices[12] - kBorderOffsets[3];
-                },
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        }
-
         _state->sparse_runtime.Update(_state->sparse_runtime);
     }
 
@@ -2082,17 +1908,7 @@ void Draw(void* _pstate,
     command_buffer.Submit(nullptr, &_acquire_semaphore, &wait_dst_stage, 1u,
                           &_state->last_submit);
 
-    _vulkan->ScheduleRoutine(_state->last_submit, [index_buffer = _state->gui_frame_indices
-                                                   , vertex_buffer = _state->gui_frames_vertices
-                                                   , uv_buffer = _state->gui_frame_uv
-                                                   , glyph_indices = _state->gui_glyph_indices
-                                                   , glyph_vertices = _state->gui_glyph_vertices](vktk::Context& _vulkan) {
-        _vulkan.DestroyBuffer(index_buffer);
-        _vulkan.DestroyBuffer(vertex_buffer);
-        _vulkan.DestroyBuffer(uv_buffer);
-        _vulkan.DestroyBuffer(glyph_indices);
-        _vulkan.DestroyBuffer(glyph_vertices);
-    });
+    _state->sparse_runtime.PostSubmit(_state->sparse_runtime, _state->last_submit);
 
     _vulkan->ScheduleFenceDestroy(_state->last_submit);
 
@@ -2890,12 +2706,32 @@ dispatch_runtime_t DenseRenderingPipeline(voxel_state_t const* _state, vktk::Con
     output.Dispatch = nullptr;
 }
 
+struct SparsePipelinePayload
+{
+    vktk::Buffer gui_frame_indices;
+    vktk::Buffer gui_frames_vertices;
+    vktk::Buffer gui_frame_uv;
+    vktk::Buffer gui_glyph_indices;
+    vktk::Buffer gui_glyph_vertices;
+
+#if 0
+    vktk::Texture gui_font_texture;
+    vktk::Texture gui_symbols_texture;
+    VkSampler gui_glyph_sampler;
+#endif
+
+    vktk::Buffer matrix_buffer;
+    VkSampler sampler;
+    VoxelRegionPackage region_package;
+};
+
 dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Context* _vulkan)
 {
     dispatch_runtime_t output = {};
     output.context = SparseRegionRenderGraph();
     output.context.vulkan = _vulkan;
     output.state = _state;
+    output.payload = new SparsePipelinePayload{};
 
     output.ConstantResources = [](dispatch_runtime_t& _rt)
     {
@@ -2914,9 +2750,11 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
 
     output.Update = [](dispatch_runtime_t& _rt)
     {
+        guitk::WidgetStates const* gui_record = _rt.state->current_gui_record;
+
         _rt.context.UpdateDynamicInvocationCount(
             _rt.context._graph["FramebufferDispatch"]["GUISubpass"],
-            _rt.state->current_gui_record->frames.size());
+            gui_record->frames.size());
 
         _rt.context.UpdateDynamicInvocationCount(
             _rt.context._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
@@ -2930,12 +2768,181 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
         _rt.context.ClearStageBarriers(
             _rt.context._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"]);
 
-        if (_rt.state->current_gui_record->frames.empty())
+        if (gui_record->frames.empty())
             return;
 
-        for (uint32_t index = 0u; index < (uint32_t)_rt.state->current_gui_record->frames.size(); ++index)
+        SparsePipelinePayload& payload = *(SparsePipelinePayload*)_rt.payload;
+
+        payload.gui_glyph_indices = _rt.context.vulkan->CreateBuffer(
+            sizeof(uint32_t) * 6 * gui_record->glyphs.size(),
+            VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+            [gui_record](void* buffer) {
+                uint32_t* indices = (uint32_t*)buffer;
+
+                for (uint32_t frame_index = 0u;
+                     frame_index < (uint32_t)gui_record->frames.size();
+                     ++frame_index)
+                {
+                    guitk::FrameData const& frame = gui_record->frames[frame_index];
+                    for (uint32_t page_index = 0u;
+                         page_index < guitk::GlyphPage_COUNT;
+                         ++page_index)
+                    {
+                        for (uint32_t glyph_index = 0u;
+                             glyph_index < frame.glyph_range[page_index].second;
+                             ++glyph_index)
+                        {
+                            uint32_t index_offset = glyph_index*4;
+                            uint32_t index_base =
+                                (glyph_index
+                                 + frame.glyph_range[page_index].first)*6;
+                            indices[index_base + 0] = 0 + index_offset;
+                            indices[index_base + 1] = 2 + index_offset;
+                            indices[index_base + 2] = 1 + index_offset;
+                            indices[index_base + 3] = 0 + index_offset;
+                            indices[index_base + 4] = 3 + index_offset;
+                            indices[index_base + 5] = 2 + index_offset;
+                        }
+                    }
+                }
+            },
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        payload.gui_glyph_vertices = _rt.context.vulkan->CreateBuffer(
+            sizeof(numtk::vec2f) * 2 * 4 * gui_record->glyphs.size(),
+            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            [gui_record](void* buffer){
+                numtk::vec2f* vertices = (numtk::vec2f*)buffer;
+                numtk::vec2f* uvs = vertices + 4 * gui_record->glyphs.size();
+
+                for (uint32_t glyph_index = 0u; glyph_index < (uint32_t)gui_record->glyphs.size(); ++glyph_index)
+                {
+                    guitk::GlyphInfo const& glyph = gui_record->glyphs[glyph_index];
+                    vertices[glyph_index * 4 + 0] = glyph.bounds.min.cast<float>();
+                    vertices[glyph_index * 4 + 1] = numtk::vec2f{
+                        (float)(glyph.bounds.min.x()+glyph.bounds.extent.x()),
+                        (float)glyph.bounds.min.y()
+                    };
+                    vertices[glyph_index * 4 + 2] = glyph.bounds.max().cast<float>();
+                    vertices[glyph_index * 4 + 3] = numtk::vec2f{
+                        (float)glyph.bounds.min.x(),
+                        (float)(glyph.bounds.min.y()+glyph.bounds.extent.y())
+                    };
+
+                    numtk::vec2f const& min = glyph.uv.min;
+                    numtk::vec2f max = glyph.uv.max();
+                    uvs[glyph_index * 4 + 0] = numtk::vec2f{ min.x(), max.y() };
+                    uvs[glyph_index * 4 + 1] = max;
+                    uvs[glyph_index * 4 + 2] = numtk::vec2f{ max.x(), min.y() };
+                    uvs[glyph_index * 4 + 3] = min;
+                }
+            },
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        payload.gui_frame_indices = _rt.context.vulkan->CreateBuffer(
+            sizeof(uint32_t) * 6 * 9,
+            VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+            [](void* buffer) {
+                static std::vector<uint32_t> const indices = {
+                    0, 2, 1,  1, 2, 3,
+                    4, 6, 5,  5, 6, 7,
+                    8, 10, 9,  9, 10, 11,
+                    12, 14, 13,  13, 14, 15,
+
+                    3, 7, 1,  1, 7, 6,
+                    7, 11, 5,  5, 11, 10,
+                    11, 15, 9,  9, 15, 14,
+                    15, 3, 13,  13, 3, 2,
+
+                    7, 3, 11,  11, 3, 15
+                };
+
+                uint32_t* index_data = (uint32_t*)buffer;
+                std::copy(indices.begin(), indices.end(), index_data);
+            },
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        payload.gui_frames_vertices = _rt.context.vulkan->CreateBuffer(
+            sizeof(numtk::vec2f) * 16 * gui_record->frames.size(),
+            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            [gui_record](void* buffer){
+                static float const kBorderSize = 10.f;
+                static numtk::vec2f const kBorderOffsets[] = {
+                    { kBorderSize, 0 },
+                    { 0, kBorderSize },
+                    { kBorderSize, kBorderSize },
+                    { -kBorderSize, kBorderSize }
+                };
+
+                numtk::vec2f* vertices = (numtk::vec2f*)buffer;
+                for (uint32_t frame_index = 0u; frame_index < gui_record->frames.size(); ++frame_index)
+                {
+                    numtk::bounds2u const& frame = gui_record->frames[frame_index].bounds;
+                    numtk::vec2f* base = &vertices[frame_index*16];
+                    base[0] = frame.min.cast<float>();
+                    base[1] = base[0] + kBorderOffsets[0];
+                    base[2] = base[0] + kBorderOffsets[1];
+                    base[3] = base[0] + kBorderOffsets[2];
+
+                    base[4] = numtk::vec2f{
+                        (float)(frame.min.x()+frame.extent.x()),
+                        (float)frame.min.y() };
+                    base[5] = base[4] + kBorderOffsets[1];
+                    base[6] = base[4] - kBorderOffsets[0];
+                    base[7] = base[4] + kBorderOffsets[3];
+
+                    base[8] = frame.max().cast<float>();
+                    base[9] = base[8] - kBorderOffsets[0];
+                    base[10] = base[8] - kBorderOffsets[1];
+                    base[11] = base[8] - kBorderOffsets[2];
+
+                    base[12] = numtk::vec2f{
+                        (float)frame.min.x(),
+                        (float)(frame.min.y()+frame.extent.y()) };
+                    base[13] = base[12] - kBorderOffsets[1];
+                    base[14] = base[12] + kBorderOffsets[0];
+                    base[15] = base[12] - kBorderOffsets[3];
+                }
+            },
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        payload.gui_frame_uv = _rt.context.vulkan->CreateBuffer(
+            sizeof(numtk::vec2f) * 16,
+            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            [](void* buffer){
+                static numtk::vec2f const kBorderOffsets[] = {
+                    { 0.5f, 0.f },
+                    { 0.f, 0.5f },
+                    { 0.5f, 0.5f },
+                    { -0.5f, 0.5f }
+                };
+
+                numtk::vec2f* vertices = (numtk::vec2f*)buffer;
+                vertices[0] = numtk::vec2f{ 0.f, 0.f };
+                vertices[1] = vertices[0] + kBorderOffsets[0];
+                vertices[2] = vertices[0] + kBorderOffsets[1];
+                vertices[3] = vertices[0] + kBorderOffsets[2];
+
+                vertices[4] = numtk::vec2f{ 1.f, 0.f };
+                vertices[5] = vertices[4] + kBorderOffsets[1];
+                vertices[6] = vertices[4] - kBorderOffsets[0];
+                vertices[7] = vertices[4] + kBorderOffsets[3];
+
+                vertices[8] = numtk::vec2f{ 1.f, 1.f };
+                vertices[9] = vertices[8] - kBorderOffsets[0];
+                vertices[10] = vertices[8] - kBorderOffsets[1];
+                vertices[11] = vertices[8] - kBorderOffsets[2];
+
+                vertices[12] = numtk::vec2f{ 0.f, 1.f };
+                vertices[13] = vertices[12] - kBorderOffsets[1];
+                vertices[14] = vertices[12] + kBorderOffsets[0];
+                vertices[15] = vertices[12] - kBorderOffsets[3];
+            },
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        for (uint32_t index = 0u; index < (uint32_t)gui_record->frames.size(); ++index)
         {
-            guitk::FrameData const& frame = _rt.state->current_gui_record->frames[index];
+            guitk::FrameData const& frame = gui_record->frames[index];
 
             _rt.context.BindGraphicsCommand(
                 _rt.context._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
@@ -2950,7 +2957,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
                     { .type = vkrg::layout::_::BindingType_VertexInput,
                       .vertex_input_index = 0 },
                     index,
-                    { _rt.state->gui_frames_vertices, index * sizeof(numtk::vec2f) * 16 }
+                    { payload.gui_frames_vertices, index * sizeof(numtk::vec2f) * 16 }
                 );
 
                 _rt.context.BindVertexInput(
@@ -2958,13 +2965,13 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
                     { .type = vkrg::layout::_::BindingType_VertexInput,
                       .vertex_input_index = 1 },
                     index,
-                    { _rt.state->gui_frame_uv, 0 }
+                    { payload.gui_frame_uv, 0 }
                 );
 
                 _rt.context.BindIndexInput(
                     _rt.context._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
                     index,
-                    { _rt.state->gui_frame_indices, 0 }
+                    { payload.gui_frame_indices, 0 }
                 );
             }
 
@@ -2988,7 +2995,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
                     { .type = vkrg::layout::_::BindingType_VertexInput,
                       .vertex_input_index = 0 },
                     { 0, index },
-                    { _rt.state->gui_glyph_vertices,
+                    { payload.gui_glyph_vertices,
                       glyph_vertex_offset }
                 );
 
@@ -2997,15 +3004,15 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
                     { .type = vkrg::layout::_::BindingType_VertexInput,
                       .vertex_input_index = 1 },
                     { 0, index },
-                    { _rt.state->gui_glyph_vertices,
-                      (uint32_t)_rt.state->current_gui_record->glyphs.size()*sizeof(numtk::vec2f)*4
+                    { payload.gui_glyph_vertices,
+                      (uint32_t)gui_record->glyphs.size()*sizeof(numtk::vec2f)*4
                       + glyph_vertex_offset }
                 );
 
                 _rt.context.BindIndexInput(
                     glyphs_node,
                     { 0, index },
-                    { _rt.state->gui_glyph_indices,
+                    { payload.gui_glyph_indices,
                       (uint32_t)frame.glyph_range[guitk::GlyphPage_Font].first
                       *sizeof(uint32_t)*6 }
                 );
@@ -3048,7 +3055,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
                     { .type = vkrg::layout::_::BindingType_VertexInput,
                       .vertex_input_index = 0 },
                     { 1, index },
-                    { _rt.state->gui_glyph_vertices,
+                    { payload.gui_glyph_vertices,
                       glyph_vertex_offset }
                 );
 
@@ -3057,15 +3064,15 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
                     { .type = vkrg::layout::_::BindingType_VertexInput,
                       .vertex_input_index = 1 },
                     { 1, index },
-                    { _rt.state->gui_glyph_vertices,
-                      (uint32_t)_rt.state->current_gui_record->glyphs.size()*sizeof(numtk::vec2f)*4
+                    { payload.gui_glyph_vertices,
+                      (uint32_t)gui_record->glyphs.size()*sizeof(numtk::vec2f)*4
                       + glyph_vertex_offset }
                 );
 
                 _rt.context.BindIndexInput(
                     glyphs_node,
                     { 1, index },
-                    { _rt.state->gui_glyph_indices,
+                    { payload.gui_glyph_indices,
                       (uint32_t)frame.glyph_range[guitk::GlyphPage_Symbols].first
                       *sizeof(uint32_t)*6 }
                 );
@@ -3097,7 +3104,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
                 .type = vkrg::bind::BufferResource,
                 .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
                 .access = VK_ACCESS_TRANSFER_WRITE_BIT,
-                .buffer = _rt.state->gui_frames_vertices
+                .buffer = payload.gui_frames_vertices
             });
 
         _rt.context.BindBarrier(
@@ -3105,7 +3112,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
                 .type = vkrg::bind::BufferResource,
                 .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
                 .access = VK_ACCESS_TRANSFER_WRITE_BIT,
-                .buffer = _rt.state->gui_frame_indices
+                .buffer = payload.gui_frame_indices
             });
 
         _rt.context.BindBarrier(
@@ -3113,7 +3120,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
                 .type = vkrg::bind::BufferResource,
                 .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
                 .access = VK_ACCESS_TRANSFER_WRITE_BIT,
-                .buffer = _rt.state->gui_frame_uv
+                .buffer = payload.gui_frame_uv
             });
 
         _rt.context.BindBarrier(
@@ -3121,7 +3128,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
                 .type = vkrg::bind::BufferResource,
                 .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
                 .access = VK_ACCESS_TRANSFER_WRITE_BIT,
-                .buffer = _rt.state->gui_glyph_vertices
+                .buffer = payload.gui_glyph_vertices
             });
 
         _rt.context.BindBarrier(
@@ -3129,7 +3136,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
                 .type = vkrg::bind::BufferResource,
                 .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
                 .access = VK_ACCESS_TRANSFER_WRITE_BIT,
-                .buffer = _rt.state->gui_glyph_indices
+                .buffer = payload.gui_glyph_indices
             });
     };
 
@@ -3216,6 +3223,24 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
             });
 
         _rt.context.Dispatch(_command_buffer);
+    };
+
+    output.PostSubmit = [](dispatch_runtime_t& _rt, VkFence _last_submit)
+    {
+        SparsePipelinePayload& payload = *(SparsePipelinePayload*)_rt.payload;
+        _rt.context.vulkan->ScheduleRoutine(
+            _last_submit,
+            [index_buffer = payload.gui_frame_indices
+             , vertex_buffer = payload.gui_frames_vertices
+             , uv_buffer = payload.gui_frame_uv
+             , glyph_indices = payload.gui_glyph_indices
+             , glyph_vertices = payload.gui_glyph_vertices](vktk::Context& _vulkan) {
+                _vulkan.DestroyBuffer(index_buffer);
+                _vulkan.DestroyBuffer(vertex_buffer);
+                _vulkan.DestroyBuffer(uv_buffer);
+                _vulkan.DestroyBuffer(glyph_indices);
+                _vulkan.DestroyBuffer(glyph_vertices);
+            });
     };
 
     return output;
