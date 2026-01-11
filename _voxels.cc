@@ -91,7 +91,7 @@ struct dispatch_runtime_t
     vkrg::runtime::DispatchContext context;
     struct voxel_state_t const* state;
     void* payload;
-    void (*PayloadDtor)(dispatch_runtime_t&, void*);
+    void (*DestroyPayload)(dispatch_runtime_t&);
 
     void (*ConstantResources)(dispatch_runtime_t&);
     void (*RenderResources)(dispatch_runtime_t&, vktk::Swapchain const&);
@@ -1758,6 +1758,8 @@ void Shutdown(void* _pstate,
     for (uint32_t index = 0; index < _state->section_textures.size(); ++index)
         _vulkan->DestroyTexture(_state->section_textures[index]);
 
+    _state->sparse_runtime.DestroyPayload(_state->sparse_runtime);
+
     guitk::DeleteContext(_state->gui_context);
 }
 
@@ -2519,110 +2521,6 @@ struct SparsePipelinePayload
     vktk::Buffer staging_buffer;
 };
 
-void SparseRegionUpdateBindings(dispatch_runtime_t& _rt)
-{
-    SparsePipelinePayload& payload = *(SparsePipelinePayload*)_rt.payload;
-
-    {
-        vkrg::bind::PNextMap pNext_map = {};
-
-        static uint32_t desc_counts[2] = { 0u, 0u };
-        desc_counts[0] = (uint32_t)_rt.state->region_package.masks.size();
-        desc_counts[1] = (uint32_t)_rt.state->region_package.offsets.size();
-
-        static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_allocs[2];
-        desc_count_allocs[0] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
-        desc_count_allocs[1] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
-
-        desc_count_allocs[0].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
-        desc_count_allocs[0].pNext = nullptr;
-        desc_count_allocs[0].descriptorSetCount = 1;
-        desc_count_allocs[0].pDescriptorCounts = &desc_counts[0];
-
-        desc_count_allocs[1].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
-        desc_count_allocs[1].pNext = nullptr;
-        desc_count_allocs[1].descriptorSetCount = 1;
-        desc_count_allocs[1].pDescriptorCounts = &desc_counts[1];
-
-        pNext_map.emplace("SparseRegionSubpass", std::vector<vkrg::bind::PNextEntry>{
-            { 1, (void*)&desc_count_allocs[0] },
-            { 2, (void*)&desc_count_allocs[1] }
-        });
-
-        _rt.context.ResetDynamicRuntime(pNext_map);
-    }
-
-    dstk::Registry::Node sparse_region_node = _rt.context._graph.Subgraph("FramebufferDispatch")["SparseRegionSubpass"];
-
-    std::vector<VkDescriptorImageInfo> nodes_info{};
-    std::vector<VkDescriptorImageInfo> offsets_info{};
-
-    for (vktk::Texture const& node : _rt.state->region_package.masks)
-    {
-        VkDescriptorImageInfo region_image_info{};
-        region_image_info.sampler = payload.nearest_sampler;
-        region_image_info.imageView = node.view;
-        region_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        nodes_info.push_back(region_image_info);
-    }
-
-    for (vktk::Texture const& offsets : _rt.state->region_package.offsets)
-    {
-        VkDescriptorImageInfo offsets_image_info{};
-        offsets_image_info.sampler = payload.nearest_sampler;
-        offsets_image_info.imageView = offsets.view;
-        offsets_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        offsets_info.push_back(offsets_image_info);
-    }
-
-    VkDescriptorBufferInfo matrix_buffer_info = {};
-    matrix_buffer_info.buffer = payload.matrix_buffer;
-    matrix_buffer_info.offset = 0;
-    matrix_buffer_info.range = sizeof(MatrixBlock);
-
-    std::vector<VkWriteDescriptorSet> desc_writes = {};
-    desc_writes.push_back(
-        _rt.context.BindShaderResource(
-            sparse_region_node,
-            vkrg::layout::_::BindingPoint{
-                .type = vkrg::layout::_::BindingType_Shader,
-                .shader = { 0, 0 }
-            },
-            0,
-            vkrg::bind::_::ShaderResources{
-                .buffers = { matrix_buffer_info }
-            })
-        );
-
-    desc_writes.push_back(
-        _rt.context.BindShaderResource(
-            sparse_region_node,
-            vkrg::layout::_::BindingPoint{
-                .type = vkrg::layout::_::BindingType_Shader,
-                .shader = { 1, 0 }
-            },
-            0,
-            vkrg::bind::_::ShaderResources{
-                .images = nodes_info
-            })
-        );
-
-    desc_writes.push_back(
-        _rt.context.BindShaderResource(
-            sparse_region_node,
-            vkrg::layout::_::BindingPoint{
-                .type = vkrg::layout::_::BindingType_Shader,
-                .shader = { 2, 0 }
-            },
-            0,
-            vkrg::bind::_::ShaderResources{
-                .images = offsets_info
-            })
-        );
-
-    vkUpdateDescriptorSets(_rt.context.vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
-}
-
 dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Context* _vulkan)
 {
     dispatch_runtime_t output = {};
@@ -2630,6 +2528,17 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
     output.context.vulkan = _vulkan;
     output.state = _state;
     output.payload = new SparsePipelinePayload{};
+
+    output.DestroyPayload = [](dispatch_runtime_t& _rt)
+    {
+        SparsePipelinePayload& payload = *(SparsePipelinePayload*)_rt.payload;
+        _rt.context.vulkan->DestroyTexture(payload.gui_font_texture);
+        _rt.context.vulkan->DestroyTexture(payload.gui_symbols_texture);
+        vkDestroySampler(_rt.context.vulkan->device, payload.nearest_sampler, nullptr);
+        _rt.context.vulkan->DestroyBuffer(payload.matrix_buffer);
+        _rt.context.vulkan->DestroyBuffer(payload.staging_buffer);
+        delete &payload;
+    };
 
     output.ConstantResources = [](dispatch_runtime_t& _rt)
     {
@@ -3326,6 +3235,110 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
     };
 
     return output;
+}
+
+void SparseRegionUpdateBindings(dispatch_runtime_t& _rt)
+{
+    SparsePipelinePayload& payload = *(SparsePipelinePayload*)_rt.payload;
+
+    {
+        vkrg::bind::PNextMap pNext_map = {};
+
+        static uint32_t desc_counts[2] = { 0u, 0u };
+        desc_counts[0] = (uint32_t)_rt.state->region_package.masks.size();
+        desc_counts[1] = (uint32_t)_rt.state->region_package.offsets.size();
+
+        static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_allocs[2];
+        desc_count_allocs[0] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
+        desc_count_allocs[1] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
+
+        desc_count_allocs[0].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+        desc_count_allocs[0].pNext = nullptr;
+        desc_count_allocs[0].descriptorSetCount = 1;
+        desc_count_allocs[0].pDescriptorCounts = &desc_counts[0];
+
+        desc_count_allocs[1].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+        desc_count_allocs[1].pNext = nullptr;
+        desc_count_allocs[1].descriptorSetCount = 1;
+        desc_count_allocs[1].pDescriptorCounts = &desc_counts[1];
+
+        pNext_map.emplace("SparseRegionSubpass", std::vector<vkrg::bind::PNextEntry>{
+            { 1, (void*)&desc_count_allocs[0] },
+            { 2, (void*)&desc_count_allocs[1] }
+        });
+
+        _rt.context.ResetDynamicRuntime(pNext_map);
+    }
+
+    dstk::Registry::Node sparse_region_node = _rt.context._graph.Subgraph("FramebufferDispatch")["SparseRegionSubpass"];
+
+    std::vector<VkDescriptorImageInfo> nodes_info{};
+    std::vector<VkDescriptorImageInfo> offsets_info{};
+
+    for (vktk::Texture const& node : _rt.state->region_package.masks)
+    {
+        VkDescriptorImageInfo region_image_info{};
+        region_image_info.sampler = payload.nearest_sampler;
+        region_image_info.imageView = node.view;
+        region_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        nodes_info.push_back(region_image_info);
+    }
+
+    for (vktk::Texture const& offsets : _rt.state->region_package.offsets)
+    {
+        VkDescriptorImageInfo offsets_image_info{};
+        offsets_image_info.sampler = payload.nearest_sampler;
+        offsets_image_info.imageView = offsets.view;
+        offsets_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        offsets_info.push_back(offsets_image_info);
+    }
+
+    VkDescriptorBufferInfo matrix_buffer_info = {};
+    matrix_buffer_info.buffer = payload.matrix_buffer;
+    matrix_buffer_info.offset = 0;
+    matrix_buffer_info.range = sizeof(MatrixBlock);
+
+    std::vector<VkWriteDescriptorSet> desc_writes = {};
+    desc_writes.push_back(
+        _rt.context.BindShaderResource(
+            sparse_region_node,
+            vkrg::layout::_::BindingPoint{
+                .type = vkrg::layout::_::BindingType_Shader,
+                .shader = { 0, 0 }
+            },
+            0,
+            vkrg::bind::_::ShaderResources{
+                .buffers = { matrix_buffer_info }
+            })
+        );
+
+    desc_writes.push_back(
+        _rt.context.BindShaderResource(
+            sparse_region_node,
+            vkrg::layout::_::BindingPoint{
+                .type = vkrg::layout::_::BindingType_Shader,
+                .shader = { 1, 0 }
+            },
+            0,
+            vkrg::bind::_::ShaderResources{
+                .images = nodes_info
+            })
+        );
+
+    desc_writes.push_back(
+        _rt.context.BindShaderResource(
+            sparse_region_node,
+            vkrg::layout::_::BindingPoint{
+                .type = vkrg::layout::_::BindingType_Shader,
+                .shader = { 2, 0 }
+            },
+            0,
+            vkrg::bind::_::ShaderResources{
+                .images = offsets_info
+            })
+        );
+
+    vkUpdateDescriptorSets(_rt.context.vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
 }
 
 }
