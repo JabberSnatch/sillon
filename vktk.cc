@@ -2175,6 +2175,7 @@ namespace vkrg
 namespace layout
 {
 
+#if 0
 DispatchNode const*
 DispatchGraph::operator[](char const* node_id) const
 {
@@ -2328,6 +2329,7 @@ DispatchGraph::BindingPointSyncRequirements(EdgeType type, BindingPoint const& b
 
     return output;
 }
+#endif
 
 } // namespace layout
 
@@ -2339,51 +2341,67 @@ DispatchContext::ClearStaticRuntime()
 {
     ClearDynamicRuntime();
 
-    for (DispatchNodeStatic& node_runtime : nodes_static)
-    {
-        for (DispatchStageStatic& stage_runtime : node_runtime.stages)
+    graph.DepthFirstTraversal([this](std::vector<layout::_::DispatchGraph const*> const& graph_stack, dstk::Registry::Node node) {
+        auto const* dispatch_stage = graph.registry->ComponentLookup<layout::DispatchStage>(node);
+        if (dispatch_stage)
         {
-            vkDestroyPipelineLayout(vulkan->device, stage_runtime.pipeline_layout, nullptr);
-            stage_runtime.pipeline_layout = VK_NULL_HANDLE;
+            auto* stage_static = graph.registry->ComponentLookup<DispatchStageStatic>(node);
 
-            for (StageBindingGroupStatic& group : stage_runtime.binding_groups)
+            for (uint32_t group_index = 0u;
+                 group_index < (uint32_t)dispatch_stage->binding_groups.size();
+                 ++group_index)
             {
-                //vulkan->DestroyDescriptorPool(group.pool);
-                //group.pool.pool = VK_NULL_HANDLE;
-                //group.pool.layout = VK_NULL_HANDLE;
-                vulkan->DestroyDynamicDescriptorPool(group.pool);
-                group.pool = vktk::DynamicDescriptorPool{};
+                StageBindingGroupStatic& descriptor = stage_static->binding_groups[group_index];
+                vulkan->DestroyDynamicDescriptorPool(descriptor.pool);
             }
+
+            registry->ComponentErase(node, stage_static);
         }
-    }
+    });
 }
 
 void
 DispatchContext::ClearFramebufferRuntime()
 {
-    for (bind::DispatchNode& bindings : nodes_bindings)
-    {
-        for (VkFramebuffer framebuffer : bindings.framebuffers)
-            vkDestroyFramebuffer(vulkan->device, framebuffer, nullptr);
-        bindings.framebuffers.clear();
-    }
+    graph.DepthFirstTraversal([this](std::vector<layout::_::DispatchGraph const*> const& graph_stack, dstk::Registry::Node node) {
+        auto const* dispatch_pass = graph.registry->ComponentLookup<layout::_::DispatchPass>(node);
+        auto const* dispatch_stage = graph.registry->ComponentLookup<layout::DispatchStage>(node);
 
-    for (DispatchNodeFramebuffer& runtime : nodes_framebuffer)
-    {
-        for (VkPipeline pipeline : runtime.stages)
-            vkDestroyPipeline(vulkan->device, pipeline, nullptr);
-        runtime.stages.clear();
+        if (dispatch_pass
+            && dispatch_pass->mode == layout::DispatchMode_Graphics)
+        {
+            auto* render_pass = registry->ComponentLookup<VkRenderPass>(node);
+            if (render_pass)
+            {
+                vkDestroyRenderPass(vulkan->device, *render_pass, nullptr);
+                registry->ComponentErase(node, render_pass);
+            }
 
-        vkDestroyRenderPass(vulkan->device, runtime.graphics.render_pass, nullptr);
-        runtime.graphics.render_pass = VK_NULL_HANDLE;
-    }
-    nodes_framebuffer.clear();
+            auto* framebuffers = registry->ComponentLookup<std::vector<VkFramebuffer>>(node);
+            if (framebuffers)
+            {
+                for (VkFramebuffer framebuffer : *framebuffers)
+                    vkDestroyFramebuffer(vulkan->device, framebuffer, nullptr);
+                registry->ComponentErase(node, framebuffers);
+            }
+        }
+
+        if (dispatch_stage)
+        {
+            auto* pipeline = registry->ComponentLookup<VkPipeline>(node);
+            if (pipeline)
+            {
+                vkDestroyPipeline(vulkan->device, *pipeline, nullptr);
+                registry->ComponentErase(node, pipeline);
+            }
+        }
+    });
 }
 
 void
 DispatchContext::ClearDynamicRuntime()
 {
-    _graph.DepthFirstTraversal(
+    graph.DepthFirstTraversal(
         [this](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
                dstk::Registry::Node node) {
             auto const* dispatch_stage = registry->ComponentLookup<layout::DispatchStage>(node);
@@ -2413,7 +2431,7 @@ DispatchContext::ClearDynamicRuntime()
 void
 DispatchContext::GenerateStaticRuntime()
 {
-    _graph.DepthFirstTraversal([this](std::vector<layout::_::DispatchGraph const*> const& graph_stack, dstk::Registry::Node node) {
+    graph.DepthFirstTraversal([this](std::vector<layout::_::DispatchGraph const*> const& graph_stack, dstk::Registry::Node node) {
         layout::_::DispatchGraph const& graph = *graph_stack.back();
         auto const* dispatch_pass = graph.registry->ComponentLookup<layout::_::DispatchPass>(node);
         auto const* dispatch_graph = graph.registry->ComponentLookup<layout::_::DispatchGraph>(node);
@@ -2478,7 +2496,7 @@ DispatchContext::GenerateStaticRuntime()
 void
 DispatchContext::GenerateFramebufferRuntime(VkFormat const* _swapchain_format)
 {
-    _graph.DepthFirstTraversal([this, _swapchain_format](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
+    graph.DepthFirstTraversal([this, _swapchain_format](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
                                                          dstk::Registry::Node node) {
         layout::_::DispatchGraph const& graph = *graph_stack.back();
         auto const* dispatch_pass = graph.registry->ComponentLookup<layout::_::DispatchPass>(node);
@@ -2555,7 +2573,7 @@ DispatchContext::ResetDynamicRuntime(bind::PNextMap const& _pNext_map)
 {
     ClearDynamicRuntime();
 
-    _graph.DepthFirstTraversal([this, _pNext_map](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
+    graph.DepthFirstTraversal([this, _pNext_map](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
                                                   dstk::Registry::Node node) {
         std::string const& node_name = graph_stack.back()->name_lookup[node];
 
@@ -2622,7 +2640,7 @@ DispatchContext::ResetDynamicRuntime(bind::PNextMap const& _pNext_map)
 void
 DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
 {
-    _graph.DepthFirstTraversal(
+    graph.DepthFirstTraversal(
         [this, &_command_buffer](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
                                  dstk::Registry::Node node) {
         layout::_::DispatchGraph const& graph = *graph_stack.back();
@@ -2807,7 +2825,7 @@ DispatchContext::RenderPassDescription(
     dstk::Registry::Node _node,
     VkFormat const* _swapchain_format) const
 {
-    auto const& dispatch_pass = *_graph.registry->ComponentLookup<layout::_::DispatchPass>(_node);
+    auto const& dispatch_pass = *graph.registry->ComponentLookup<layout::_::DispatchPass>(_node);
 
     std::vector<vktk::Context::RenderPassAttachment> output = {};
 
@@ -2825,7 +2843,7 @@ DispatchContext::RenderPassDescription(
         });
     }
 
-    for (dstk::Registry::Node edge : (_graph.edges_out.count(_node) ? _graph.edges_out.at(_node) : std::vector<dstk::Registry::Node>{}))
+    for (dstk::Registry::Node edge : (graph.edges_out.count(_node) ? graph.edges_out.at(_node) : std::vector<dstk::Registry::Node>{}))
     {
         layout::_::DispatchGraph::EdgeDesc const& edge_desc =
             *registry->ComponentLookup<layout::_::DispatchGraph::EdgeDesc>(edge);
@@ -2843,7 +2861,7 @@ DispatchContext::RenderPassDescription(
             desc.format = *_swapchain_format;
     }
 
-    for (dstk::Registry::Node edge : (_graph.edges_in.count(_node) ? _graph.edges_in.at(_node) : std::vector<dstk::Registry::Node>{}))
+    for (dstk::Registry::Node edge : (graph.edges_in.count(_node) ? graph.edges_in.at(_node) : std::vector<dstk::Registry::Node>{}))
     {
         layout::_::DispatchGraph::EdgeDesc const& edge_desc =
             *registry->ComponentLookup<layout::_::DispatchGraph::EdgeDesc>(edge);

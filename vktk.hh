@@ -443,6 +443,40 @@ namespace vkrg
 namespace layout
 {
 
+union ClearValue {
+    numtk::vec4f color;
+    struct {
+        float depth;
+        uint32_t stencil;
+    } depth_stencil;
+};
+
+struct RenderAttachment {
+    VkImageType type;
+    VkFormat format;
+    ClearValue clear_value;
+};
+
+enum DispatchMode {
+    DispatchMode_Graphics,
+    DispatchMode_Compute,
+};
+
+struct GraphicsNode {
+    std::vector<RenderAttachment> attachments;
+};
+
+enum EdgeType {
+    EdgeType_Image,
+    EdgeType_Buffer,
+};
+
+struct BindingPointSync {
+    VkPipelineStageFlags stage;
+    VkAccessFlags access;
+    VkImageLayout layout;
+};
+
 struct ShaderStage {
     VkShaderStageFlagBits stage;
     std::vector<std::string> source;
@@ -482,28 +516,7 @@ struct DispatchStage {
     GraphicsStage graphics;
 };
 
-enum DispatchMode {
-    DispatchMode_Graphics,
-    DispatchMode_Compute,
-};
-
-union ClearValue {
-    numtk::vec4f color;
-    struct {
-        float depth;
-        uint32_t stencil;
-    } depth_stencil;
-};
-
-struct RenderAttachment {
-    VkImageType type;
-    VkFormat format;
-    ClearValue clear_value;
-};
-
-struct GraphicsNode {
-    std::vector<RenderAttachment> attachments;
-};
+#if 0
 
 struct DispatchNode {
     std::string name;
@@ -560,12 +573,6 @@ struct GraphEdge {
     BindingPoint target;
 };
 
-struct BindingPointSync {
-    VkPipelineStageFlags stage;
-    VkAccessFlags access;
-    VkImageLayout layout;
-};
-
 struct DispatchGraph {
     std::vector<DispatchNode> nodes;
     std::vector<GraphEdge> edges;
@@ -582,6 +589,7 @@ struct DispatchGraph {
 
     static BindingPointSync BindingPointSyncRequirements(EdgeType type, BindingPoint const& binding_point);
 };
+#endif
 
 namespace _ {
 
@@ -1006,12 +1014,7 @@ struct DispatchContext {
     vktk::Context* vulkan;
 
     std::unique_ptr<dstk::Registry> registry{ new dstk::Registry{} };
-    vkrg::layout::_::DispatchGraph _graph{ registry.get() };
-
-    std::vector<DispatchNodeStatic> nodes_static;
-    std::vector<DispatchNodeFramebuffer> nodes_framebuffer;
-    std::vector<DispatchNodeDynamic> nodes_dynamic;
-    std::vector<bind::DispatchNode> nodes_bindings;
+    vkrg::layout::_::DispatchGraph graph{ registry.get() };
 
     void ClearStaticRuntime();
     void ClearFramebufferRuntime();

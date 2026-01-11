@@ -182,9 +182,11 @@ vkrg::layout::DispatchStage ResolveDispatchStageInfo();
 vkrg::layout::DispatchStage GUIFramesDispatchStageInfo();
 vkrg::layout::DispatchStage GUIGlyphsDispatchStageInfo();
 
+#if 0
 vkrg::layout::DispatchNode MainWorldDispatchInfo();
 vkrg::layout::DispatchNode ResolveDispatchInfo();
 vkrg::layout::DispatchNode GUIDispatchInfo();
+#endif
 
 vkrg::runtime::DispatchContext SparseRegionRenderGraph();
 vkrg::runtime::DispatchContext FullFrameRenderGraph();
@@ -1675,6 +1677,7 @@ vkrg::layout::DispatchStage GUIGlyphsDispatchStageInfo()
     return output;
 }
 
+#if 0
 vkrg::layout::DispatchNode MainWorldDispatchInfo()
 {
     vkrg::layout::DispatchNode output{};
@@ -1721,13 +1724,14 @@ vkrg::layout::DispatchNode ResolveDispatchInfo()
 
     return output;
 }
+#endif
 
 vkrg::runtime::DispatchContext SparseRegionRenderGraph()
 {
     vkrg::runtime::DispatchContext context = {};
 
     {
-        vkrg::layout::_::DispatchGraph& graph = context._graph;
+        vkrg::layout::_::DispatchGraph& graph = context.graph;
         dstk::Registry& registry = *context.registry.get();
         {
             registry.BindComponent(graph["FramebufferDispatch"], vkrg::layout::_::DispatchPass{
@@ -1781,7 +1785,7 @@ vkrg::runtime::DispatchContext FullFrameRenderGraph()
     vkrg::runtime::DispatchContext context = {};
 
     {
-        vkrg::layout::_::DispatchGraph& graph = context._graph;
+        vkrg::layout::_::DispatchGraph& graph = context.graph;
         dstk::Registry& registry = *context.registry.get();
         {
             registry.BindComponent(graph["FramebufferDispatch"], vkrg::layout::_::DispatchPass{
@@ -1828,7 +1832,7 @@ vkrg::runtime::DispatchContext PixelCyclingRenderGraph()
     vkrg::runtime::DispatchContext context = {};
 
     {
-        vkrg::layout::_::DispatchGraph& graph = context._graph;
+        vkrg::layout::_::DispatchGraph& graph = context.graph;
         dstk::Registry& registry = *context.registry.get();
         {
             registry.BindComponent(graph["FramebufferDispatch"], vkrg::layout::_::DispatchPass{
@@ -1986,7 +1990,7 @@ dispatch_runtime_t DenseRenderingPipeline(voxel_state_t const* _state, vktk::Con
         region_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
         dstk::Registry::Node main_world_node =
-            _rt.context._graph["FramebufferDispatch"]["RegionPass"];
+            _rt.context.graph["FramebufferDispatch"]["RegionPass"];
 
         for (uint32_t index = 0; index < 64; ++index)
         {
@@ -2087,7 +2091,7 @@ dispatch_runtime_t DenseRenderingPipeline(voxel_state_t const* _state, vktk::Con
     {
         _rt.context.ClearFramebufferRuntime();
         _rt.context.GenerateFramebufferRuntime(&_swapchain.format);
-        _rt.context.BindSwapchain(_rt.context._graph["FramebufferDispatch"], _swapchain);
+        _rt.context.BindSwapchain(_rt.context.graph["FramebufferDispatch"], _swapchain);
     };
 
     output.Dispatch = [](dispatch_runtime_t& _rt,
@@ -2176,12 +2180,12 @@ dispatch_runtime_t DenseRenderingPipeline(voxel_state_t const* _state, vktk::Con
         skybox_params.light_dir = sun_dir;
 
         dstk::Registry::Node main_world_node =
-            _rt.context._graph["FramebufferDispatch"]["RegionPass"];
+            _rt.context.graph["FramebufferDispatch"]["RegionPass"];
         dstk::Registry::Node skybox_node =
-            _rt.context._graph["FramebufferDispatch"]["SkyboxPass"];
+            _rt.context.graph["FramebufferDispatch"]["SkyboxPass"];
 
         _rt.context.BindFramebufferArea(
-            _rt.context._graph["FramebufferDispatch"], {
+            _rt.context.graph["FramebufferDispatch"], {
                 !_rt.state->pixel_cycling_enabled
                 ? _swapchain.index
                 : 0,
@@ -2230,7 +2234,7 @@ dispatch_runtime_t DenseRenderingPipeline(voxel_state_t const* _state, vktk::Con
         if (_rt.state->pixel_cycling_enabled)
         {
             dstk::Registry::Node resolve_node =
-                _rt.context._graph["FramebufferResolve"]["ResolveDispatch"];
+                _rt.context.graph["FramebufferResolve"]["ResolveDispatch"];
 
             vkrg::bind::GraphicsCommand command = {};
             command.command = vkrg::bind::DispatchCommand_Draw;
@@ -2239,7 +2243,7 @@ dispatch_runtime_t DenseRenderingPipeline(voxel_state_t const* _state, vktk::Con
 
             _rt.context.BindGraphicsCommand(resolve_node, 0, command);
             _rt.context.BindFramebufferArea(
-                _rt.context._graph["FramebufferResolve"], {
+                _rt.context.graph["FramebufferResolve"], {
                     _swapchain.index,
                     numtk::bounds2u{
                         { 0, 0 },
@@ -2302,15 +2306,15 @@ dispatch_runtime_t DensePixelCyclingRenderingPipeline(
             );
         }
 
-        dstk::Registry::Node resolve_node = _rt.context._graph["FramebufferResolve"]["ResolvePass"];
+        dstk::Registry::Node resolve_node = _rt.context.graph["FramebufferResolve"]["ResolvePass"];
 
         numtk::vec2u size = { _swapchain.size.width, _swapchain.size.height };
         _rt.context.BindAttachments(
-            _rt.context._graph["FramebufferDispatch"], size,
+            _rt.context.graph["FramebufferDispatch"], size,
             { payload.primary_pass_color.view, payload.primary_pass_depth.view }
         );
 
-        _rt.context.BindSwapchain(_rt.context._graph["FramebufferDispatch"], _swapchain);
+        _rt.context.BindSwapchain(_rt.context.graph["FramebufferDispatch"], _swapchain);
 
         VkDescriptorImageInfo image_info{};
         image_info.sampler = payload.base.nearest_sampler;
@@ -2332,7 +2336,7 @@ dispatch_runtime_t DensePixelCyclingRenderingPipeline(
         numtk::vec2i screen_size{ (int32_t)_swapchain.size.width, (int32_t)_swapchain.size.height };
         numtk::vec2i* push_constants =
             (numtk::vec2i*)_rt.context.BindPushConstants(
-                _rt.context._graph["FramebufferResolve"]["ResolvePass"],
+                _rt.context.graph["FramebufferResolve"]["ResolvePass"],
                 {
                     .type = vkrg::layout::_::BindingType_PushConstantRange,
                     .push_constant_range = 0
@@ -2565,7 +2569,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
     {
         _rt.context.ClearFramebufferRuntime();
         _rt.context.GenerateFramebufferRuntime(&_swapchain.format);
-        _rt.context.BindSwapchain(_rt.context._graph["FramebufferDispatch"],
+        _rt.context.BindSwapchain(_rt.context.graph["FramebufferDispatch"],
                                   _swapchain);
     };
 
@@ -2574,20 +2578,20 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
         guitk::WidgetStates const* gui_record = _rt.state->current_gui_record;
 
         _rt.context.UpdateDynamicInvocationCount(
-            _rt.context._graph["FramebufferDispatch"]["GUISubpass"],
+            _rt.context.graph["FramebufferDispatch"]["GUISubpass"],
             gui_record->frames.size());
 
         _rt.context.UpdateDynamicInvocationCount(
-            _rt.context._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
+            _rt.context.graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
             1);
         _rt.context.ClearStageBarriers(
-            _rt.context._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"]);
+            _rt.context.graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"]);
 
         _rt.context.UpdateDynamicInvocationCount(
-            _rt.context._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
+            _rt.context.graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"],
             2);
         _rt.context.ClearStageBarriers(
-            _rt.context._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"]);
+            _rt.context.graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"]);
 
         if (gui_record->frames.empty())
             return;
@@ -2766,7 +2770,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
             guitk::FrameData const& frame = gui_record->frames[index];
 
             _rt.context.BindGraphicsCommand(
-                _rt.context._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
+                _rt.context.graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
                 index,
                 {
                     vkrg::bind::DispatchCommand_Draw, 6*9, 1
@@ -2774,7 +2778,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
 
 
             _rt.context.BindVertexInput(
-                _rt.context._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
+                _rt.context.graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
                 { .type = vkrg::layout::_::BindingType_VertexInput,
                   .vertex_input_index = 0 },
                 index,
@@ -2782,7 +2786,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
             );
 
             _rt.context.BindVertexInput(
-                _rt.context._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
+                _rt.context.graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
                 { .type = vkrg::layout::_::BindingType_VertexInput,
                   .vertex_input_index = 1 },
                 index,
@@ -2790,13 +2794,13 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
             );
 
             _rt.context.BindIndexInput(
-                _rt.context._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
+                _rt.context.graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
                 index,
                 { payload.gui_frame_indices, 0 }
             );
 
             dstk::Registry::Node glyphs_node =
-                _rt.context._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"];
+                _rt.context.graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"];
 
             if (frame.glyph_range[guitk::GlyphPage_Font].second)
             {
@@ -2920,7 +2924,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
         }
 
         _rt.context.BindBarrier(
-            _rt.context._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"], {
+            _rt.context.graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"], {
                 .type = vkrg::bind::BufferResource,
                 .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
                 .access = VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -2928,7 +2932,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
             });
 
         _rt.context.BindBarrier(
-            _rt.context._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"], {
+            _rt.context.graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"], {
                 .type = vkrg::bind::BufferResource,
                 .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
                 .access = VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -2936,7 +2940,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
             });
 
         _rt.context.BindBarrier(
-            _rt.context._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"], {
+            _rt.context.graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"], {
                 .type = vkrg::bind::BufferResource,
                 .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
                 .access = VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -2944,7 +2948,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
             });
 
         _rt.context.BindBarrier(
-            _rt.context._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"], {
+            _rt.context.graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"], {
                 .type = vkrg::bind::BufferResource,
                 .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
                 .access = VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -2952,7 +2956,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
             });
 
         _rt.context.BindBarrier(
-            _rt.context._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"], {
+            _rt.context.graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"], {
                 .type = vkrg::bind::BufferResource,
                 .stage = VK_PIPELINE_STAGE_TRANSFER_BIT,
                 .access = VK_ACCESS_TRANSFER_WRITE_BIT,
@@ -3014,11 +3018,11 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
         }.normalise();
 
         dstk::Registry::Node sparse_region_node =
-            _rt.context._graph["FramebufferDispatch"]["SparseRegionSubpass"];
+            _rt.context.graph["FramebufferDispatch"]["SparseRegionSubpass"];
         dstk::Registry::Node gui_frames_node =
-            _rt.context._graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"];
+            _rt.context.graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"];
         dstk::Registry::Node gui_glyphs_node =
-            _rt.context._graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"];
+            _rt.context.graph["FramebufferDispatch"]["GUISubpass"]["GUIGlyphs"];
 
         vkrg::bind::GraphicsCommand command = {};
         command.command = vkrg::bind::DispatchCommand_Draw;
@@ -3071,7 +3075,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
         }
 
         _rt.context.BindFramebufferArea(
-            _rt.context._graph["FramebufferDispatch"],
+            _rt.context.graph["FramebufferDispatch"],
             {
                 _swapchain.index,
                 {
@@ -3141,7 +3145,7 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt)
         _rt.context.ResetDynamicRuntime(pNext_map);
     }
 
-    dstk::Registry::Node sparse_region_node = _rt.context._graph.Subgraph("FramebufferDispatch")["SparseRegionSubpass"];
+    dstk::Registry::Node sparse_region_node = _rt.context.graph.Subgraph("FramebufferDispatch")["SparseRegionSubpass"];
 
     std::vector<VkDescriptorImageInfo> nodes_info{};
     std::vector<VkDescriptorImageInfo> offsets_info{};
