@@ -182,12 +182,6 @@ vkrg::layout::DispatchStage ResolveDispatchStageInfo();
 vkrg::layout::DispatchStage GUIFramesDispatchStageInfo();
 vkrg::layout::DispatchStage GUIGlyphsDispatchStageInfo();
 
-#if 0
-vkrg::layout::DispatchNode MainWorldDispatchInfo();
-vkrg::layout::DispatchNode ResolveDispatchInfo();
-vkrg::layout::DispatchNode GUIDispatchInfo();
-#endif
-
 vkrg::runtime::DispatchContext SparseRegionRenderGraph();
 vkrg::runtime::DispatchContext FullFrameRenderGraph();
 vkrg::runtime::DispatchContext PixelCyclingRenderGraph();
@@ -1677,64 +1671,15 @@ vkrg::layout::DispatchStage GUIGlyphsDispatchStageInfo()
     return output;
 }
 
-#if 0
-vkrg::layout::DispatchNode MainWorldDispatchInfo()
-{
-    vkrg::layout::DispatchNode output{};
-    output.name = "MainWorldDispatch";
-    output.mode = vkrg::layout::DispatchMode_Graphics;
-    output.sequence = std::vector<vkrg::layout::DispatchStage>{
-        RegionPassDispatchStageInfo(),
-        SkyboxDispatchStageInfo()
-    };
-
-    output.graphics.attachments = std::vector<vkrg::layout::RenderAttachment>{
-        {
-            VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
-            numtk::vec4f{ 0.f, 1.f, 1.f, 0.f }
-        },
-        {
-            VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
-            vkrg::layout::ClearValue{ 1.f, 0u }
-        }
-    };
-
-    return output;
-}
-
-vkrg::layout::DispatchNode ResolveDispatchInfo()
-{
-    vkrg::layout::DispatchNode output{};
-    output.name = "ResolveDispatch";
-    output.mode = vkrg::layout::DispatchMode_Graphics;
-    output.sequence = std::vector<vkrg::layout::DispatchStage>{
-        ResolveDispatchStageInfo()
-    };
-
-    output.graphics.attachments = std::vector<vkrg::layout::RenderAttachment>{
-        {
-            VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
-            numtk::vec4f{ 0.f, 1.f, 1.f, 0.f }
-        },
-        {
-            VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
-            vkrg::layout::ClearValue{ 1.f, 0u }
-        }
-    };
-
-    return output;
-}
-#endif
-
 vkrg::runtime::DispatchContext SparseRegionRenderGraph()
 {
     vkrg::runtime::DispatchContext context = {};
 
     {
-        vkrg::layout::_::DispatchGraph& graph = context.graph;
+        vkrg::layout::DispatchGraph& graph = context.graph;
         dstk::Registry& registry = *context.registry.get();
         {
-            registry.BindComponent(graph["FramebufferDispatch"], vkrg::layout::_::DispatchPass{
+            registry.BindComponent(graph["FramebufferDispatch"], vkrg::layout::DispatchPass{
                 .mode = vkrg::layout::DispatchMode_Graphics,
                 .graphics = {
                     .attachments = std::vector<vkrg::layout::RenderAttachment>{
@@ -1751,11 +1696,11 @@ vkrg::runtime::DispatchContext SparseRegionRenderGraph()
             });
 
             {
-                vkrg::layout::_::DispatchGraph& subpasses = graph.MakeSubgraph("FramebufferDispatch");
+                vkrg::layout::DispatchGraph& subpasses = graph.MakeSubgraph("FramebufferDispatch");
                 registry.BindComponent(subpasses["SparseRegionSubpass"], SparseRegionDispatchStageInfo());
 
                 {
-                    vkrg::layout::_::DispatchGraph& gui_subpasses = subpasses.MakeSubgraph("GUISubpass");
+                    vkrg::layout::DispatchGraph& gui_subpasses = subpasses.MakeSubgraph("GUISubpass");
                     registry.BindComponent(gui_subpasses["GUIFrames"], GUIFramesDispatchStageInfo());
                     registry.BindComponent(gui_subpasses["GUIGlyphs"], GUIGlyphsDispatchStageInfo());
                     gui_subpasses.MakeEdge("GUIFrames", "GUIGlyphs");
@@ -1764,12 +1709,12 @@ vkrg::runtime::DispatchContext SparseRegionRenderGraph()
                 subpasses.MakeEdge("SparseRegionSubpass", "GUISubpass");
             }
 
-            registry.BindComponent(graph["present"], vkrg::layout::_::NodeTag_Present);
+            registry.BindComponent(graph["present"], vkrg::layout::NodeTag_Present);
             registry.BindComponent(graph.MakeEdge("FramebufferDispatch", "present"),
-                                   vkrg::layout::_::EdgeBindings{
+                                   vkrg::layout::EdgeBindings{
                                        vkrg::layout::EdgeType_Image,
-                                       vkrg::layout::_::BindingPoint{
-                                           .type = vkrg::layout::_::BindingType_Framebuffer,
+                                       vkrg::layout::BindingPoint{
+                                           .type = vkrg::layout::BindingType_Framebuffer,
                                            .attachment_index = 0
                                        },
                                        {}
@@ -1785,10 +1730,10 @@ vkrg::runtime::DispatchContext FullFrameRenderGraph()
     vkrg::runtime::DispatchContext context = {};
 
     {
-        vkrg::layout::_::DispatchGraph& graph = context.graph;
+        vkrg::layout::DispatchGraph& graph = context.graph;
         dstk::Registry& registry = *context.registry.get();
         {
-            registry.BindComponent(graph["FramebufferDispatch"], vkrg::layout::_::DispatchPass{
+            registry.BindComponent(graph["FramebufferDispatch"], vkrg::layout::DispatchPass{
                 .mode = vkrg::layout::DispatchMode_Graphics,
                 .graphics = {
                     .attachments = {
@@ -1805,18 +1750,18 @@ vkrg::runtime::DispatchContext FullFrameRenderGraph()
             });
 
             {
-                vkrg::layout::_::DispatchGraph& subpasses = graph.MakeSubgraph("FramebufferDispatch");
+                vkrg::layout::DispatchGraph& subpasses = graph.MakeSubgraph("FramebufferDispatch");
                 registry.BindComponent(subpasses["RegionPass"], RegionPassDispatchStageInfo());
                 registry.BindComponent(subpasses["SkyboxPass"], SkyboxDispatchStageInfo());
                 subpasses.MakeEdge("RegionPass", "SkyboxPass");
             }
 
-            registry.BindComponent(graph["present"], vkrg::layout::_::NodeTag_Present);
+            registry.BindComponent(graph["present"], vkrg::layout::NodeTag_Present);
             registry.BindComponent(graph.MakeEdge("FramebufferDispatch", "present"),
-                                   vkrg::layout::_::EdgeBindings{
+                                   vkrg::layout::EdgeBindings{
                                        vkrg::layout::EdgeType_Image,
-                                       vkrg::layout::_::BindingPoint{
-                                           .type = vkrg::layout::_::BindingType_Framebuffer,
+                                       vkrg::layout::BindingPoint{
+                                           .type = vkrg::layout::BindingType_Framebuffer,
                                            .attachment_index = 0
                                        },
                                        {}
@@ -1832,10 +1777,10 @@ vkrg::runtime::DispatchContext PixelCyclingRenderGraph()
     vkrg::runtime::DispatchContext context = {};
 
     {
-        vkrg::layout::_::DispatchGraph& graph = context.graph;
+        vkrg::layout::DispatchGraph& graph = context.graph;
         dstk::Registry& registry = *context.registry.get();
         {
-            registry.BindComponent(graph["FramebufferDispatch"], vkrg::layout::_::DispatchPass{
+            registry.BindComponent(graph["FramebufferDispatch"], vkrg::layout::DispatchPass{
                 .mode = vkrg::layout::DispatchMode_Graphics,
                 .graphics = {
                     .attachments = {
@@ -1852,13 +1797,13 @@ vkrg::runtime::DispatchContext PixelCyclingRenderGraph()
             });
 
             {
-                vkrg::layout::_::DispatchGraph& subpasses = graph.MakeSubgraph("FramebufferDispatch");
+                vkrg::layout::DispatchGraph& subpasses = graph.MakeSubgraph("FramebufferDispatch");
                 registry.BindComponent(subpasses["RegionPass"], RegionPassDispatchStageInfo());
                 registry.BindComponent(subpasses["SkyboxPass"], SkyboxDispatchStageInfo());
                 subpasses.MakeEdge("RegionPass", "SkyboxPass");
             }
 
-            registry.BindComponent(graph["FramebufferResolve"], vkrg::layout::_::DispatchPass{
+            registry.BindComponent(graph["FramebufferResolve"], vkrg::layout::DispatchPass{
                 .mode = vkrg::layout::DispatchMode_Graphics,
                 .graphics = {
                     .attachments = {
@@ -1875,30 +1820,30 @@ vkrg::runtime::DispatchContext PixelCyclingRenderGraph()
             });
 
             {
-                vkrg::layout::_::DispatchGraph& subpasses = graph.MakeSubgraph("FramebufferResolve");
+                vkrg::layout::DispatchGraph& subpasses = graph.MakeSubgraph("FramebufferResolve");
                 registry.BindComponent(subpasses["ResolvePass"], ResolveDispatchStageInfo());
             }
 
             registry.BindComponent(graph.MakeEdge("FramebufferDispatch", "FramebufferResolve"),
-                                   vkrg::layout::_::EdgeBindings{
+                                   vkrg::layout::EdgeBindings{
                                        vkrg::layout::EdgeType_Image,
-                                       vkrg::layout::_::BindingPoint{
-                                           .type = vkrg::layout::_::BindingType_Framebuffer,
+                                       vkrg::layout::BindingPoint{
+                                           .type = vkrg::layout::BindingType_Framebuffer,
                                            .attachment_index = 0
                                        },
-                                       vkrg::layout::_::BindingPoint{
-                                           .type = vkrg::layout::_::BindingType_Shader,
+                                       vkrg::layout::BindingPoint{
+                                           .type = vkrg::layout::BindingType_Shader,
                                            .node_override = graph["FramebufferResolve"]["ResolvePass"],
                                            .shader = { 0, 0 }
                                        }
                                    });
 
-            registry.BindComponent(graph["present"], vkrg::layout::_::NodeTag_Present);
+            registry.BindComponent(graph["present"], vkrg::layout::NodeTag_Present);
             registry.BindComponent(graph.MakeEdge("FramebufferResolve", "present"),
-                                   vkrg::layout::_::EdgeBindings{
+                                   vkrg::layout::EdgeBindings{
                                        vkrg::layout::EdgeType_Image,
-                                       vkrg::layout::_::BindingPoint{
-                                           .type = vkrg::layout::_::BindingType_Framebuffer,
+                                       vkrg::layout::BindingPoint{
+                                           .type = vkrg::layout::BindingType_Framebuffer,
                                            .attachment_index = 0
                                        },
                                        {}
@@ -1999,12 +1944,12 @@ dispatch_runtime_t DenseRenderingPipeline(voxel_state_t const* _state, vktk::Con
             VkWriteDescriptorSet region_binding =
                 _rt.context.BindShaderResource(
                     main_world_node,
-                    vkrg::layout::_::BindingPoint{
-                        .type = vkrg::layout::_::BindingType_Shader,
+                    vkrg::layout::BindingPoint{
+                        .type = vkrg::layout::BindingType_Shader,
                         .shader = { 0, 1 }
                     },
                     index,
-                    vkrg::bind::_::ShaderResources{
+                    vkrg::bind::ShaderResources{
                         .images = { region_image_info }
                     });
 
@@ -2015,12 +1960,12 @@ dispatch_runtime_t DenseRenderingPipeline(voxel_state_t const* _state, vktk::Con
             VkWriteDescriptorSet matrix_binding =
                 _rt.context.BindShaderResource(
                     main_world_node,
-                    vkrg::layout::_::BindingPoint{
-                        .type = vkrg::layout::_::BindingType_Shader,
+                    vkrg::layout::BindingPoint{
+                        .type = vkrg::layout::BindingType_Shader,
                         .shader = { 0, 0 }
                     },
                     index,
-                    vkrg::bind::_::ShaderResources{
+                    vkrg::bind::ShaderResources{
                         .buffers = { buffer_info }
                     });
 
@@ -2039,12 +1984,12 @@ dispatch_runtime_t DenseRenderingPipeline(voxel_state_t const* _state, vktk::Con
             VkWriteDescriptorSet section_bindings =
                 _rt.context.BindShaderResource(
                     main_world_node,
-                    vkrg::layout::_::BindingPoint{
-                        .type = vkrg::layout::_::BindingType_Shader,
+                    vkrg::layout::BindingPoint{
+                        .type = vkrg::layout::BindingType_Shader,
                         .shader = { 0, 2 }
                     },
                     index,
-                    vkrg::bind::_::ShaderResources{
+                    vkrg::bind::ShaderResources{
                         .images = section_images_info
                     });
 
@@ -2207,7 +2152,7 @@ dispatch_runtime_t DenseRenderingPipeline(voxel_state_t const* _state, vktk::Con
                     (numtk::vec3f*)_rt.context.BindPushConstants(
                         main_world_node,
                         {
-                            .type = vkrg::layout::_::BindingType_PushConstantRange,
+                            .type = vkrg::layout::BindingType_PushConstantRange,
                             .push_constant_range = 0
                         }, index);
                 *push_constants = sun_dir;
@@ -2225,7 +2170,7 @@ dispatch_runtime_t DenseRenderingPipeline(voxel_state_t const* _state, vktk::Con
                 (SkyboxPushConstants*)_rt.context.BindPushConstants(
                     skybox_node,
                     {
-                        .type = vkrg::layout::_::BindingType_PushConstantRange,
+                        .type = vkrg::layout::BindingType_PushConstantRange,
                         .push_constant_range = 0
                     }, 0);
             *push_constants = skybox_params;
@@ -2322,12 +2267,12 @@ dispatch_runtime_t DensePixelCyclingRenderingPipeline(
         image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         VkWriteDescriptorSet desc_write = _rt.context.BindShaderResource(
             resolve_node,
-            vkrg::layout::_::BindingPoint{
-                .type = vkrg::layout::_::BindingType_Shader,
+            vkrg::layout::BindingPoint{
+                .type = vkrg::layout::BindingType_Shader,
                 .shader = { 0, 0 }
             },
             0,
-            vkrg::bind::_::ShaderResources{
+            vkrg::bind::ShaderResources{
                 .images = { image_info }
             });
 
@@ -2338,7 +2283,7 @@ dispatch_runtime_t DensePixelCyclingRenderingPipeline(
             (numtk::vec2i*)_rt.context.BindPushConstants(
                 _rt.context.graph["FramebufferResolve"]["ResolvePass"],
                 {
-                    .type = vkrg::layout::_::BindingType_PushConstantRange,
+                    .type = vkrg::layout::BindingType_PushConstantRange,
                     .push_constant_range = 0
                 }, 0);
         *push_constants = screen_size;
@@ -2779,7 +2724,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
 
             _rt.context.BindVertexInput(
                 _rt.context.graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
-                { .type = vkrg::layout::_::BindingType_VertexInput,
+                { .type = vkrg::layout::BindingType_VertexInput,
                   .vertex_input_index = 0 },
                 index,
                 { payload.gui_frames_vertices, index * sizeof(numtk::vec2f) * 16 }
@@ -2787,7 +2732,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
 
             _rt.context.BindVertexInput(
                 _rt.context.graph["FramebufferDispatch"]["GUISubpass"]["GUIFrames"],
-                { .type = vkrg::layout::_::BindingType_VertexInput,
+                { .type = vkrg::layout::BindingType_VertexInput,
                   .vertex_input_index = 1 },
                 index,
                 { payload.gui_frame_uv, 0 }
@@ -2816,7 +2761,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
                     frame.glyph_range[guitk::GlyphPage_Font].first*sizeof(numtk::vec2f)*4;
                 _rt.context.BindVertexInput(
                     glyphs_node,
-                    { .type = vkrg::layout::_::BindingType_VertexInput,
+                    { .type = vkrg::layout::BindingType_VertexInput,
                       .vertex_input_index = 0 },
                     { 0, index },
                     { payload.gui_glyph_vertices,
@@ -2825,7 +2770,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
 
                 _rt.context.BindVertexInput(
                     glyphs_node,
-                    { .type = vkrg::layout::_::BindingType_VertexInput,
+                    { .type = vkrg::layout::BindingType_VertexInput,
                       .vertex_input_index = 1 },
                     { 0, index },
                     { payload.gui_glyph_vertices,
@@ -2850,12 +2795,12 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
                 VkWriteDescriptorSet binding =
                     _rt.context.BindShaderResource(
                         glyphs_node,
-                        vkrg::layout::_::BindingPoint{
-                            .type = vkrg::layout::_::BindingType_Shader,
+                        vkrg::layout::BindingPoint{
+                            .type = vkrg::layout::BindingType_Shader,
                             .shader = { 0, 0 }
                         },
                         { 0, index },
-                        vkrg::bind::_::ShaderResources{
+                        vkrg::bind::ShaderResources{
                             .images = { image_info }
                         });
 
@@ -2876,7 +2821,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
                     frame.glyph_range[guitk::GlyphPage_Symbols].first*sizeof(numtk::vec2f)*4;
                 _rt.context.BindVertexInput(
                     glyphs_node,
-                    { .type = vkrg::layout::_::BindingType_VertexInput,
+                    { .type = vkrg::layout::BindingType_VertexInput,
                       .vertex_input_index = 0 },
                     { 1, index },
                     { payload.gui_glyph_vertices,
@@ -2885,7 +2830,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
 
                 _rt.context.BindVertexInput(
                     glyphs_node,
-                    { .type = vkrg::layout::_::BindingType_VertexInput,
+                    { .type = vkrg::layout::BindingType_VertexInput,
                       .vertex_input_index = 1 },
                     { 1, index },
                     { payload.gui_glyph_vertices,
@@ -2910,12 +2855,12 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
                 VkWriteDescriptorSet binding =
                     _rt.context.BindShaderResource(
                         glyphs_node,
-                        vkrg::layout::_::BindingPoint{
-                            .type = vkrg::layout::_::BindingType_Shader,
+                        vkrg::layout::BindingPoint{
+                            .type = vkrg::layout::BindingType_Shader,
                             .shader = { 0, 0 }
                         },
                         { 1, index },
-                        vkrg::bind::_::ShaderResources{
+                        vkrg::bind::ShaderResources{
                             .images = { image_info }
                         });
 
@@ -3034,7 +2979,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
             (SparseRegionPushConstants*)_rt.context.BindPushConstants(
                 sparse_region_node,
                 {
-                    .type = vkrg::layout::_::BindingType_PushConstantRange,
+                    .type = vkrg::layout::BindingType_PushConstantRange,
                     .push_constant_range = 0
                 }, 0);
         push_constants->light_dir = sun_dir;
@@ -3050,7 +2995,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
                 (numtk::vec2f*)_rt.context.BindPushConstants(
                     gui_frames_node,
                     {
-                        .type = vkrg::layout::_::BindingType_PushConstantRange,
+                        .type = vkrg::layout::BindingType_PushConstantRange,
                         .push_constant_range = 0
                     }, index);
             frame_constants[0] = swapchain_size;
@@ -3059,7 +3004,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
                 (numtk::vec2f*)_rt.context.BindPushConstants(
                     gui_glyphs_node,
                     {
-                        .type = vkrg::layout::_::BindingType_PushConstantRange,
+                        .type = vkrg::layout::BindingType_PushConstantRange,
                         .push_constant_range = 0
                     }, { 0, index });
             font_constants[0] = swapchain_size;
@@ -3068,7 +3013,7 @@ dispatch_runtime_t SparseRenderingPipeline(voxel_state_t const* _state, vktk::Co
                 (numtk::vec2f*)_rt.context.BindPushConstants(
                     gui_glyphs_node,
                     {
-                        .type = vkrg::layout::_::BindingType_PushConstantRange,
+                        .type = vkrg::layout::BindingType_PushConstantRange,
                         .push_constant_range = 0
                     }, { 1, index });
             symbols_constants[0] = swapchain_size;
@@ -3177,12 +3122,12 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt)
     desc_writes.push_back(
         _rt.context.BindShaderResource(
             sparse_region_node,
-            vkrg::layout::_::BindingPoint{
-                .type = vkrg::layout::_::BindingType_Shader,
+            vkrg::layout::BindingPoint{
+                .type = vkrg::layout::BindingType_Shader,
                 .shader = { 0, 0 }
             },
             0,
-            vkrg::bind::_::ShaderResources{
+            vkrg::bind::ShaderResources{
                 .buffers = { matrix_buffer_info }
             })
         );
@@ -3190,12 +3135,12 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt)
     desc_writes.push_back(
         _rt.context.BindShaderResource(
             sparse_region_node,
-            vkrg::layout::_::BindingPoint{
-                .type = vkrg::layout::_::BindingType_Shader,
+            vkrg::layout::BindingPoint{
+                .type = vkrg::layout::BindingType_Shader,
                 .shader = { 1, 0 }
             },
             0,
-            vkrg::bind::_::ShaderResources{
+            vkrg::bind::ShaderResources{
                 .images = nodes_info
             })
         );
@@ -3203,12 +3148,12 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt)
     desc_writes.push_back(
         _rt.context.BindShaderResource(
             sparse_region_node,
-            vkrg::layout::_::BindingPoint{
-                .type = vkrg::layout::_::BindingType_Shader,
+            vkrg::layout::BindingPoint{
+                .type = vkrg::layout::BindingType_Shader,
                 .shader = { 2, 0 }
             },
             0,
-            vkrg::bind::_::ShaderResources{
+            vkrg::bind::ShaderResources{
                 .images = offsets_info
             })
         );

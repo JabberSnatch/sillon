@@ -516,92 +516,10 @@ struct DispatchStage {
     GraphicsStage graphics;
 };
 
-#if 0
-
-struct DispatchNode {
-    std::string name;
-    DispatchMode mode;
-    std::vector<DispatchStage> sequence;
-    GraphicsNode graphics;
-};
-
-struct ShaderLocation {
-    uint32_t group_index;
-    uint32_t binding_index;
-};
-
-struct FramebufferLocation {
-    uint32_t attachment_index;
-};
-
-struct PushConstantsLocation {
-    uint32_t range_index;
-};
-
-struct VertexInputLocation {
-    uint32_t binding_index;
-};
-
-enum BindingType {
-    BindingType_Shader,
-    BindingType_Framebuffer,
-    BindingType_PushConstantRange,
-    BindingType_VertexInput,
-    BindingType_Present,
-};
-
-struct BindingPoint {
-    DispatchNode const* node;
-    uint32_t stage_index;
-    BindingType type;
-    union {
-        ShaderLocation shader;
-        FramebufferLocation framebuffer;
-        PushConstantsLocation push_constants;
-        VertexInputLocation vertex_input;
-    };
-};
-
-enum EdgeType {
-    EdgeType_Image,
-    EdgeType_Buffer,
-};
-
-struct GraphEdge {
-    EdgeType type;
-    BindingPoint source;
-    BindingPoint target;
-};
-
-struct DispatchGraph {
-    std::vector<DispatchNode> nodes;
-    std::vector<GraphEdge> edges;
-
-    std::unordered_map<DispatchNode const*, std::vector<uint32_t>> edges_in;
-    std::unordered_map<DispatchNode const*, std::vector<uint32_t>> edges_out;
-
-    DispatchNode const* operator[](char const* node_id) const;
-
-    void InsertEdge(GraphEdge const& edge);
-    std::vector<vktk::Context::RenderPassAttachment> RenderPassDescription(
-        uint32_t _node_index,
-        VkFormat const* _swapchain_format = nullptr) const;
-
-    static BindingPointSync BindingPointSyncRequirements(EdgeType type, BindingPoint const& binding_point);
-};
-#endif
-
-namespace _ {
-
 struct DispatchPass {
     DispatchMode mode;
     GraphicsNode graphics;
 };
-
-} // namespace _
-
-namespace _
-{
 
 enum NodeTag {
     NodeTag_None,
@@ -741,7 +659,7 @@ struct DispatchGraph
         return NodeView{ this, name_lookup[name] };
     }
 
-    using GraphStack = std::vector<vkrg::layout::_::DispatchGraph const*>;
+    using GraphStack = std::vector<vkrg::layout::DispatchGraph const*>;
     using InvocStack = std::vector<uint32_t>;
 
     using TraversalCallbackType =
@@ -755,13 +673,13 @@ struct DispatchGraph
 
     void DepthFirstTraversal(TraversalCallbackType const& callback) const {
         std::vector<dstk::Registry::Node> node_stack = Inputs();
-        std::vector<vkrg::layout::_::DispatchGraph const*> graph_stack{ this };
+        std::vector<vkrg::layout::DispatchGraph const*> graph_stack{ this };
 
         while (!node_stack.empty())
         {
             dstk::Registry::Node current_node = node_stack.back();
-            vkrg::layout::_::DispatchGraph const* current_graph = graph_stack.back();
-            vkrg::layout::_::DispatchGraph const* dispatch_graph = registry->ComponentLookup<vkrg::layout::_::DispatchGraph>(current_node);
+            vkrg::layout::DispatchGraph const* current_graph = graph_stack.back();
+            vkrg::layout::DispatchGraph const* dispatch_graph = registry->ComponentLookup<vkrg::layout::DispatchGraph>(current_node);
 
             bool skip_callback = false;
             while (!current_graph->name_lookup.contains(current_node))
@@ -788,8 +706,8 @@ struct DispatchGraph
                 {
                     for (dstk::Registry::Node edge : current_graph->edges_out.at(current_node))
                     {
-                        vkrg::layout::_::DispatchGraph::EdgeDesc const* edge_desc =
-                            registry->ComponentLookup<vkrg::layout::_::DispatchGraph::EdgeDesc>(edge);
+                        vkrg::layout::DispatchGraph::EdgeDesc const* edge_desc =
+                            registry->ComponentLookup<vkrg::layout::DispatchGraph::EdgeDesc>(edge);
                         node_stack.push_back(edge_desc->target);
                     }
                 }
@@ -799,20 +717,20 @@ struct DispatchGraph
 
     void DepthFirstInvocation(InvocationCallbackType const& callback) const {
 
-        static auto const impl = [](vkrg::layout::_::DispatchGraph const* root,
+        static auto const impl = [](vkrg::layout::DispatchGraph const* root,
                                     auto&& callback,
                                     auto&& recursion,
-                                    std::vector<vkrg::layout::_::DispatchGraph const*> graph_stack,
+                                    std::vector<vkrg::layout::DispatchGraph const*> graph_stack,
                                     std::vector<uint32_t> invoc_stack)
             -> void
         {
-            vkrg::layout::_::DispatchGraph const* current_graph = graph_stack.back();
+            vkrg::layout::DispatchGraph const* current_graph = graph_stack.back();
             std::vector<dstk::Registry::Node> node_stack = current_graph->Inputs();
 
             while (!node_stack.empty())
             {
                 dstk::Registry::Node current_node = node_stack.back();
-                vkrg::layout::_::DispatchGraph const* subgraph = root->registry->ComponentLookup<vkrg::layout::_::DispatchGraph>(current_node);
+                vkrg::layout::DispatchGraph const* subgraph = root->registry->ComponentLookup<vkrg::layout::DispatchGraph>(current_node);
 
                 callback(graph_stack, invoc_stack, current_node);
 
@@ -838,8 +756,8 @@ struct DispatchGraph
                 {
                     for (dstk::Registry::Node edge : current_graph->edges_out.at(current_node))
                     {
-                        vkrg::layout::_::DispatchGraph::EdgeDesc const* edge_desc =
-                            root->registry->ComponentLookup<vkrg::layout::_::DispatchGraph::EdgeDesc>(edge);
+                        vkrg::layout::DispatchGraph::EdgeDesc const* edge_desc =
+                            root->registry->ComponentLookup<vkrg::layout::DispatchGraph::EdgeDesc>(edge);
                         node_stack.push_back(edge_desc->target);
                     }
                 }
@@ -858,31 +776,26 @@ struct DispatchGraph
     dstk::BijectiveMap<dstk::Registry::Node, std::string> name_lookup;
 };
 
-} // namespace _
-
 } // namespace layout
 
 namespace bind
 {
 
-using PushConstantStorage = std::vector<std::unique_ptr<uint8_t[]>>;
-
-struct ShaderResource {
-    uint32_t descriptor_count;
-    union {
-        VkDescriptorImageInfo const* images;
-        VkDescriptorBufferInfo const* buffers;
-    };
+enum DispatchCommand {
+    DispatchCommand_Draw,
+    DispatchCommand_DrawIndexed,
 };
 
-struct VertexInput {
-    VkBuffer buffer;
-    VkDeviceSize offset;
+struct GraphicsCommand {
+    DispatchCommand command;
+    uint32_t vertex_count;
+    uint32_t instance_count;
 };
 
-struct IndexInput {
-    VkBuffer buffer;
-    VkDeviceSize offset;
+struct FramebufferArea {
+    uint32_t framebuffer_index;
+    numtk::bounds2u scissor;
+    numtk::bounds2f viewport;
 };
 
 enum ResourceType {
@@ -900,26 +813,26 @@ struct ResourceBarrier {
     };
 };
 
+struct VertexInput {
+    VkBuffer buffer;
+    VkDeviceSize offset;
+};
+
+struct IndexInput {
+    VkBuffer buffer;
+    VkDeviceSize offset;
+};
+
+struct PNextEntry {
+    uint32_t binding_group_index;
+    void* pnext;
+};
+
+using PNextMap = std::unordered_map<std::string, std::vector<PNextEntry>>;
+
 struct AccessInfo {
     VkPipelineStageFlags stage;
     VkAccessFlags access;
-};
-
-enum DispatchCommand {
-    DispatchCommand_Draw,
-    DispatchCommand_DrawIndexed,
-};
-
-struct GraphicsCommand {
-    DispatchCommand command;
-    uint32_t vertex_count;
-    uint32_t instance_count;
-};
-
-struct FramebufferArea {
-    uint32_t framebuffer_index;
-    numtk::bounds2u scissor;
-    numtk::bounds2f viewport;
 };
 
 struct DispatchInvocation {
@@ -941,20 +854,7 @@ struct DispatchStage {
     DispatchStage(DispatchStage&&) = default;
 };
 
-struct DispatchNode {
-    FramebufferArea area_binding;
-    std::vector<VkFramebuffer> framebuffers;
-    std::vector<DispatchStage> stages;
-};
-
-struct PNextEntry {
-    uint32_t binding_group_index;
-    void* pnext;
-};
-
-using PNextMap = std::unordered_map<std::string, std::vector<PNextEntry>>;
-
-namespace _ {
+using PushConstantStorage = std::vector<std::unique_ptr<uint8_t[]>>;
 
 struct ShaderResources {
     std::vector<VkDescriptorImageInfo> images;
@@ -962,11 +862,9 @@ struct ShaderResources {
 };
 
 struct ShaderBinding {
-    ::vkrg::layout::_::BindingPoint target;
+    ::vkrg::layout::BindingPoint target;
     ShaderResources resources;
 };
-
-} // namespace _
 
 } // namespace bind
 
@@ -974,26 +872,12 @@ namespace runtime
 {
 
 struct StageBindingGroupStatic {
-    //vktk::DescriptorPool pool;
     vktk::DynamicDescriptorPool pool;
 };
 
 struct DispatchStageStatic {
     VkPipelineLayout pipeline_layout;
     std::vector<StageBindingGroupStatic> binding_groups;
-};
-
-struct DispatchNodeStatic {
-    std::vector<DispatchStageStatic> stages;
-};
-
-struct GraphicsNodeFramebuffer {
-    VkRenderPass render_pass;
-};
-
-struct DispatchNodeFramebuffer {
-    std::vector<VkPipeline> stages;
-    GraphicsNodeFramebuffer graphics;
 };
 
 struct StageBindingGroupDynamic {
@@ -1006,15 +890,11 @@ struct DispatchStageDynamic {
     std::vector<uint32_t> invoc_count_stack;
 };
 
-struct DispatchNodeDynamic {
-    std::vector<DispatchStageDynamic> stages;
-};
-
 struct DispatchContext {
     vktk::Context* vulkan;
 
     std::unique_ptr<dstk::Registry> registry{ new dstk::Registry{} };
-    vkrg::layout::_::DispatchGraph graph{ registry.get() };
+    vkrg::layout::DispatchGraph graph{ registry.get() };
 
     void ClearStaticRuntime();
     void ClearFramebufferRuntime();
@@ -1032,7 +912,7 @@ struct DispatchContext {
     vkrg::layout::BindingPointSync BindingPointSyncRequirements(
         dstk::Registry::Node _node,
         vkrg::layout::EdgeType _type,
-        vkrg::layout::_::BindingPoint const& _binding_point) const;
+        vkrg::layout::BindingPoint const& _binding_point) const;
 
     void UpdateDynamicInvocationCount(dstk::Registry::Node _node,
                                       uint32_t _invocation_count);
@@ -1060,16 +940,16 @@ struct DispatchContext {
                         std::vector<uint32_t> const& _invoc_indices,
                         bind::IndexInput const& _index_input);
     void BindVertexInput(dstk::Registry::Node _node,
-                         layout::_::BindingPoint const& _location,
+                         layout::BindingPoint const& _location,
                          std::vector<uint32_t> const& _invoc_indices,
                          bind::VertexInput const& _vertex_input);
     void* BindPushConstants(dstk::Registry::Node _node,
-                            layout::_::BindingPoint const& _location,
+                            layout::BindingPoint const& _location,
                             std::vector<uint32_t> const& _invoc_indices);
     VkWriteDescriptorSet BindShaderResource(dstk::Registry::Node _node,
-                                            layout::_::BindingPoint const& _location,
+                                            layout::BindingPoint const& _location,
                                             std::vector<uint32_t> const& _invoc_indices,
-                                            bind::_::ShaderResources const& _resources);
+                                            bind::ShaderResources const& _resources);
 
     void BindGraphicsCommand(dstk::Registry::Node _node,
                              uint32_t _invoc_index,
@@ -1078,16 +958,16 @@ struct DispatchContext {
                         uint32_t _invoc_index,
                         bind::IndexInput const& _index_input);
     void BindVertexInput(dstk::Registry::Node _node,
-                         layout::_::BindingPoint const& _location,
+                         layout::BindingPoint const& _location,
                          uint32_t _invoc_index,
                          bind::VertexInput const& _vertex_input);
     void* BindPushConstants(dstk::Registry::Node _node,
-                            layout::_::BindingPoint const& _location,
+                            layout::BindingPoint const& _location,
                             uint32_t _invoc_index);
     VkWriteDescriptorSet BindShaderResource(dstk::Registry::Node _node,
-                                            layout::_::BindingPoint const& _location,
+                                            layout::BindingPoint const& _location,
                                             uint32_t _invoc_index,
-                                            bind::_::ShaderResources const& _resources);
+                                            bind::ShaderResources const& _resources);
 };
 
 } // namespace runtime

@@ -2172,167 +2172,6 @@ void* PNextLookup(VkBaseOutStructure* _out_struct, VkStructureType _type)
 namespace vkrg
 {
 
-namespace layout
-{
-
-#if 0
-DispatchNode const*
-DispatchGraph::operator[](char const* node_id) const
-{
-    auto node_it = std::find_if(nodes.begin(), nodes.end(),
-                                [node_id](DispatchNode const& node) {
-                                    return node.name == node_id;
-                                });
-    if (node_it != nodes.end())
-        return &*node_it;
-    return nullptr;
-}
-
-void
-DispatchGraph::InsertEdge(GraphEdge const& edge)
-{
-    uint32_t index = edges.size();
-    edges.push_back(edge);
-    GraphEdge const* pEdge = &edges.back();
-    if (pEdge->source.node)
-        edges_out[pEdge->source.node].push_back(index);
-    if (pEdge->target.node)
-        edges_in[pEdge->target.node].push_back(index);
-}
-
-std::vector<vktk::Context::RenderPassAttachment>
-DispatchGraph::RenderPassDescription(uint32_t _node_index,
-                                     VkFormat const* _swapchain_format) const
-{
-    std::vector<vktk::Context::RenderPassAttachment> output = {};
-
-    DispatchNode const& node = nodes[_node_index];
-    for (uint32_t index = 0u; index < (uint32_t)node.graphics.attachments.size(); ++index)
-    {
-        BindingPoint binding_point = {};
-        binding_point.node = &node;
-        binding_point.stage_index = -1;
-        binding_point.type = BindingType_Framebuffer;
-        binding_point.framebuffer.attachment_index = index;
-        BindingPointSync sync_reqs = BindingPointSyncRequirements(EdgeType_Image,
-                                                                  binding_point);
-
-        output.push_back(vktk::Context::RenderPassAttachment{
-            node.graphics.attachments[index].format,
-            VK_IMAGE_LAYOUT_UNDEFINED,
-            sync_reqs.layout
-        });
-    }
-
-    for (uint32_t edge_index : (edges_out.count(&node) ? edges_out.at(&node) : std::vector<uint32_t>{}))
-    {
-        GraphEdge const& edge = edges[edge_index];
-        if (edge.source.type != BindingType_Framebuffer)
-            continue;
-
-        vktk::Context::RenderPassAttachment& desc = output[edge.source.framebuffer.attachment_index];
-        BindingPointSync sync_reqs = BindingPointSyncRequirements(edge.type, edge.target);
-        desc.finalLayout = sync_reqs.layout;
-
-        if (_swapchain_format && edge.target.type == BindingType_Present)
-            desc.format = *_swapchain_format;
-    }
-
-    for (uint32_t edge_index : (edges_in.count(&node) ? edges_in.at(&node) : std::vector<uint32_t>{}))
-    {
-        GraphEdge const& edge = edges[edge_index];
-        if (edge.target.type != BindingType_Framebuffer)
-            continue;
-
-        vktk::Context::RenderPassAttachment& desc = output[edge.source.framebuffer.attachment_index];
-        BindingPointSync sync_reqs = BindingPointSyncRequirements(edge.type, edge.source);
-        desc.initialLayout = sync_reqs.layout;
-    }
-
-    return output;
-}
-
-BindingPointSync
-DispatchGraph::BindingPointSyncRequirements(EdgeType type, BindingPoint const& binding_point)
-{
-    BindingPointSync output = {};
-    output.access = VK_ACCESS_NONE;
-    output.layout = VK_IMAGE_LAYOUT_UNDEFINED;
-    output.stage = 0;
-
-    if (type == EdgeType_Image)
-    {
-        switch (binding_point.type)
-        {
-
-        case BindingType_Shader:
-        {
-            ShaderLocation const& location = binding_point.shader;
-            DispatchStage const& stage_info =
-                binding_point.node->sequence[binding_point.stage_index];
-            StageBinding const& binding = stage_info
-                .binding_groups[location.group_index]
-                .bindings[location.binding_index];
-
-            switch (binding.type)
-            {
-
-            case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER: {
-                output.access = VK_ACCESS_SHADER_READ_BIT;
-                output.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            } break;
-
-            case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE: {
-                output.access = VK_ACCESS_SHADER_READ_BIT;
-                output.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            } break;
-
-            case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE: {
-                output.access = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-                output.layout = VK_IMAGE_LAYOUT_GENERAL;
-            } break;
-
-            default: break;
-            }
-        } break;
-
-        case BindingType_Framebuffer:
-        {
-            FramebufferLocation const& location = binding_point.framebuffer;
-            RenderAttachment const& attachment_info =
-                binding_point.node->graphics.attachments[location.attachment_index];
-
-            if (attachment_info.format >= VK_FORMAT_D16_UNORM
-                && attachment_info.format < VK_FORMAT_BC1_RGB_UNORM_BLOCK)
-            {
-                output.access = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT
-                    | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-                output.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-            }
-            else
-            {
-                output.access = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT
-                    | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-                output.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-            }
-        } break;
-
-        case BindingType_Present:
-        {
-            output.access = 0;
-            output.layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        } break;
-
-        default: break;
-        }
-    }
-
-    return output;
-}
-#endif
-
-} // namespace layout
-
 namespace runtime
 {
 
@@ -2341,7 +2180,7 @@ DispatchContext::ClearStaticRuntime()
 {
     ClearDynamicRuntime();
 
-    graph.DepthFirstTraversal([this](std::vector<layout::_::DispatchGraph const*> const& graph_stack, dstk::Registry::Node node) {
+    graph.DepthFirstTraversal([this](std::vector<layout::DispatchGraph const*> const& graph_stack, dstk::Registry::Node node) {
         auto const* dispatch_stage = graph.registry->ComponentLookup<layout::DispatchStage>(node);
         if (dispatch_stage)
         {
@@ -2363,8 +2202,8 @@ DispatchContext::ClearStaticRuntime()
 void
 DispatchContext::ClearFramebufferRuntime()
 {
-    graph.DepthFirstTraversal([this](std::vector<layout::_::DispatchGraph const*> const& graph_stack, dstk::Registry::Node node) {
-        auto const* dispatch_pass = graph.registry->ComponentLookup<layout::_::DispatchPass>(node);
+    graph.DepthFirstTraversal([this](std::vector<layout::DispatchGraph const*> const& graph_stack, dstk::Registry::Node node) {
+        auto const* dispatch_pass = graph.registry->ComponentLookup<layout::DispatchPass>(node);
         auto const* dispatch_stage = graph.registry->ComponentLookup<layout::DispatchStage>(node);
 
         if (dispatch_pass
@@ -2402,7 +2241,7 @@ void
 DispatchContext::ClearDynamicRuntime()
 {
     graph.DepthFirstTraversal(
-        [this](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
+        [this](std::vector<layout::DispatchGraph const*> const& graph_stack,
                dstk::Registry::Node node) {
             auto const* dispatch_stage = registry->ComponentLookup<layout::DispatchStage>(node);
             auto* stage_static = registry->ComponentLookup<DispatchStageStatic>(node);
@@ -2431,12 +2270,12 @@ DispatchContext::ClearDynamicRuntime()
 void
 DispatchContext::GenerateStaticRuntime()
 {
-    graph.DepthFirstTraversal([this](std::vector<layout::_::DispatchGraph const*> const& graph_stack, dstk::Registry::Node node) {
-        layout::_::DispatchGraph const& graph = *graph_stack.back();
-        auto const* dispatch_pass = graph.registry->ComponentLookup<layout::_::DispatchPass>(node);
-        auto const* dispatch_graph = graph.registry->ComponentLookup<layout::_::DispatchGraph>(node);
+    graph.DepthFirstTraversal([this](std::vector<layout::DispatchGraph const*> const& graph_stack, dstk::Registry::Node node) {
+        layout::DispatchGraph const& graph = *graph_stack.back();
+        auto const* dispatch_pass = graph.registry->ComponentLookup<layout::DispatchPass>(node);
+        auto const* dispatch_graph = graph.registry->ComponentLookup<layout::DispatchGraph>(node);
         auto const* dispatch_stage = graph.registry->ComponentLookup<layout::DispatchStage>(node);
-        auto const* node_tag = graph.registry->ComponentLookup<layout::_::NodeTag>(node);
+        auto const* node_tag = graph.registry->ComponentLookup<layout::NodeTag>(node);
 
         std::string const& node_name = graph.name_lookup[node];
 
@@ -2496,10 +2335,10 @@ DispatchContext::GenerateStaticRuntime()
 void
 DispatchContext::GenerateFramebufferRuntime(VkFormat const* _swapchain_format)
 {
-    graph.DepthFirstTraversal([this, _swapchain_format](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
+    graph.DepthFirstTraversal([this, _swapchain_format](std::vector<layout::DispatchGraph const*> const& graph_stack,
                                                          dstk::Registry::Node node) {
-        layout::_::DispatchGraph const& graph = *graph_stack.back();
-        auto const* dispatch_pass = graph.registry->ComponentLookup<layout::_::DispatchPass>(node);
+        layout::DispatchGraph const& graph = *graph_stack.back();
+        auto const* dispatch_pass = graph.registry->ComponentLookup<layout::DispatchPass>(node);
         auto const* dispatch_stage = graph.registry->ComponentLookup<layout::DispatchStage>(node);
 
         if (dispatch_pass
@@ -2513,14 +2352,14 @@ DispatchContext::GenerateFramebufferRuntime(VkFormat const* _swapchain_format)
             auto const& runtime = *graph.registry->ComponentLookup<DispatchStageStatic>(node);
 
             dstk::Registry::Node dispatch_pass_node = dstk::FreeList::kInvalidIndex;
-            layout::_::DispatchPass const* parent_pass = nullptr;
+            layout::DispatchPass const* parent_pass = nullptr;
             for (uint32_t index = 0u; index < graph_stack.size(); ++index)
             {
-                layout::_::DispatchGraph const* graph = graph_stack[graph_stack.size()-index-1];
+                layout::DispatchGraph const* graph = graph_stack[graph_stack.size()-index-1];
                 if (graph->parent_node == dstk::FreeList::kInvalidIndex)
                     continue;
 
-                parent_pass = registry->ComponentLookup<layout::_::DispatchPass>(graph->parent_node);
+                parent_pass = registry->ComponentLookup<layout::DispatchPass>(graph->parent_node);
                 if (parent_pass)
                 {
                     dispatch_pass_node = graph->parent_node;
@@ -2573,7 +2412,7 @@ DispatchContext::ResetDynamicRuntime(bind::PNextMap const& _pNext_map)
 {
     ClearDynamicRuntime();
 
-    graph.DepthFirstTraversal([this, _pNext_map](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
+    graph.DepthFirstTraversal([this, _pNext_map](std::vector<layout::DispatchGraph const*> const& graph_stack,
                                                   dstk::Registry::Node node) {
         std::string const& node_name = graph_stack.back()->name_lookup[node];
 
@@ -2583,7 +2422,7 @@ DispatchContext::ResetDynamicRuntime(bind::PNextMap const& _pNext_map)
         {
             if (dispatch_stage->invocation_count)
             {
-                layout::_::DispatchGraph* graph = *registry->ComponentLookup<layout::_::DispatchGraph*>(node);
+                layout::DispatchGraph* graph = *registry->ComponentLookup<layout::DispatchGraph*>(node);
                 graph->invoc_count[node] = dispatch_stage->invocation_count;
             }
 
@@ -2641,11 +2480,11 @@ void
 DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
 {
     graph.DepthFirstTraversal(
-        [this, &_command_buffer](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
+        [this, &_command_buffer](std::vector<layout::DispatchGraph const*> const& graph_stack,
                                  dstk::Registry::Node node) {
-        layout::_::DispatchGraph const& graph = *graph_stack.back();
+        layout::DispatchGraph const& graph = *graph_stack.back();
 
-        auto const* dispatch_pass = registry->ComponentLookup<layout::_::DispatchPass>(node);
+        auto const* dispatch_pass = registry->ComponentLookup<layout::DispatchPass>(node);
 
         if (dispatch_pass) {
             auto const* area_binding = registry->ComponentLookup<bind::FramebufferArea>(node);
@@ -2673,10 +2512,10 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
             vkCmdSetViewport(_command_buffer, 0, 1, &viewport);
             vkCmdSetScissor(_command_buffer, 0, 1, &scissor);
 
-            auto const* dispatch_graph = registry->ComponentLookup<layout::_::DispatchGraph>(node);
+            auto const* dispatch_graph = registry->ComponentLookup<layout::DispatchGraph>(node);
 
             dispatch_graph->DepthFirstTraversal(
-                [this, &_command_buffer](std::vector<layout::_::DispatchGraph const*> const& graph_stack,
+                [this, &_command_buffer](std::vector<layout::DispatchGraph const*> const& graph_stack,
                                          dstk::Registry::Node node) {
                 auto const* dispatch_stage = registry->ComponentLookup<layout::DispatchStage>(node);
                 auto const* stage_bindings = registry->ComponentLookup<bind::DispatchStage>(node);
@@ -2707,8 +2546,8 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
             vkCmdBeginRenderPass(_command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
             dispatch_graph->DepthFirstInvocation(
-                [this, &_command_buffer, dispatch_pass](vkrg::layout::_::DispatchGraph::GraphStack const& graph_stack,
-                                                        vkrg::layout::_::DispatchGraph::InvocStack const& invoc_stack,
+                [this, &_command_buffer, dispatch_pass](vkrg::layout::DispatchGraph::GraphStack const& graph_stack,
+                                                        vkrg::layout::DispatchGraph::InvocStack const& invoc_stack,
                                                         dstk::Registry::Node node) {
                 auto const* dispatch_stage = registry->ComponentLookup<layout::DispatchStage>(node);
                 auto const* stage_bindings = registry->ComponentLookup<bind::DispatchStage>(node);
@@ -2723,7 +2562,7 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
 
                 vkCmdBindPipeline(_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, *pipeline);
 
-                vkrg::layout::_::DispatchGraph::InvocStack invoc_indices = invoc_stack;
+                vkrg::layout::DispatchGraph::InvocStack invoc_indices = invoc_stack;
                 invoc_indices.push_back(0);
 
                 uint32_t invoc_count = std::max(stage_dynamic->invoc_count_stack.front(), 1u);
@@ -2811,7 +2650,7 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                     default: break;
                     }
 
-                    registry->ComponentRangeErase<bind::_::ShaderBinding>(node);
+                    registry->ComponentRangeErase<bind::ShaderBinding>(node);
                 }
             });
 
@@ -2825,14 +2664,14 @@ DispatchContext::RenderPassDescription(
     dstk::Registry::Node _node,
     VkFormat const* _swapchain_format) const
 {
-    auto const& dispatch_pass = *graph.registry->ComponentLookup<layout::_::DispatchPass>(_node);
+    auto const& dispatch_pass = *graph.registry->ComponentLookup<layout::DispatchPass>(_node);
 
     std::vector<vktk::Context::RenderPassAttachment> output = {};
 
     for (uint32_t index = 0u; index < (uint32_t)dispatch_pass.graphics.attachments.size(); ++index)
     {
-        layout::_::BindingPoint binding_point = {};
-        binding_point.type = layout::_::BindingType_Framebuffer;
+        layout::BindingPoint binding_point = {};
+        binding_point.type = layout::BindingType_Framebuffer;
         binding_point.attachment_index = index;
         layout::BindingPointSync sync_reqs = BindingPointSyncRequirements(_node, layout::EdgeType_Image, binding_point);
 
@@ -2845,12 +2684,12 @@ DispatchContext::RenderPassDescription(
 
     for (dstk::Registry::Node edge : (graph.edges_out.count(_node) ? graph.edges_out.at(_node) : std::vector<dstk::Registry::Node>{}))
     {
-        layout::_::DispatchGraph::EdgeDesc const& edge_desc =
-            *registry->ComponentLookup<layout::_::DispatchGraph::EdgeDesc>(edge);
+        layout::DispatchGraph::EdgeDesc const& edge_desc =
+            *registry->ComponentLookup<layout::DispatchGraph::EdgeDesc>(edge);
 
-        layout::_::EdgeBindings const* bindings = registry->ComponentLookup<layout::_::EdgeBindings>(edge);
+        layout::EdgeBindings const* bindings = registry->ComponentLookup<layout::EdgeBindings>(edge);
         if (!bindings
-            || bindings->source.type != layout::_::BindingType_Framebuffer)
+            || bindings->source.type != layout::BindingType_Framebuffer)
             continue;
 
         vktk::Context::RenderPassAttachment& desc = output[bindings->source.attachment_index];
@@ -2863,12 +2702,12 @@ DispatchContext::RenderPassDescription(
 
     for (dstk::Registry::Node edge : (graph.edges_in.count(_node) ? graph.edges_in.at(_node) : std::vector<dstk::Registry::Node>{}))
     {
-        layout::_::DispatchGraph::EdgeDesc const& edge_desc =
-            *registry->ComponentLookup<layout::_::DispatchGraph::EdgeDesc>(edge);
+        layout::DispatchGraph::EdgeDesc const& edge_desc =
+            *registry->ComponentLookup<layout::DispatchGraph::EdgeDesc>(edge);
 
-        layout::_::EdgeBindings const* bindings = registry->ComponentLookup<layout::_::EdgeBindings>(edge);
+        layout::EdgeBindings const* bindings = registry->ComponentLookup<layout::EdgeBindings>(edge);
         if (!bindings
-            || bindings->target.type != layout::_::BindingType_Framebuffer)
+            || bindings->target.type != layout::BindingType_Framebuffer)
             continue;
 
         vktk::Context::RenderPassAttachment& desc = output[bindings->target.attachment_index];
@@ -2883,7 +2722,7 @@ layout::BindingPointSync
 DispatchContext::BindingPointSyncRequirements(
     dstk::Registry::Node _node,
     layout::EdgeType _type,
-    layout::_::BindingPoint const& _binding_point) const
+    layout::BindingPoint const& _binding_point) const
 {
     if (_binding_point.node_override != dstk::FreeList::kInvalidIndex)
         _node = _binding_point.node_override;
@@ -2898,7 +2737,7 @@ DispatchContext::BindingPointSyncRequirements(
         switch (_binding_point.type)
         {
 
-        case layout::_::BindingType_Shader:
+        case layout::BindingType_Shader:
         {
             layout::DispatchStage const& stage = *registry->ComponentLookup<layout::DispatchStage>(_node);
             layout::StageBinding const& binding = stage
@@ -2927,9 +2766,9 @@ DispatchContext::BindingPointSyncRequirements(
             }
         } break;
 
-        case layout::_::BindingType_Framebuffer:
+        case layout::BindingType_Framebuffer:
         {
-            layout::_::DispatchPass const& pass = *registry->ComponentLookup<layout::_::DispatchPass>(_node);
+            layout::DispatchPass const& pass = *registry->ComponentLookup<layout::DispatchPass>(_node);
             layout::RenderAttachment const& attachment_info =
                 pass.graphics.attachments[_binding_point.attachment_index];
 
@@ -2949,11 +2788,11 @@ DispatchContext::BindingPointSyncRequirements(
         } break;
 
         default: {
-            layout::_::NodeTag const* tag = registry->ComponentLookup<layout::_::NodeTag>(_node);
+            layout::NodeTag const* tag = registry->ComponentLookup<layout::NodeTag>(_node);
             if (!tag)
                 break;
 
-            if (*tag == layout::_::NodeTag_Present)
+            if (*tag == layout::NodeTag_Present)
             {
                 output.access = 0;
                 output.layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
@@ -3020,7 +2859,7 @@ DispatchContext::UpdateDynamicInvocationCount(dstk::Registry::Node _node,
         }
     };
 
-    layout::_::DispatchGraph* graph = *registry->ComponentLookup<layout::_::DispatchGraph*>(_node);
+    layout::DispatchGraph* graph = *registry->ComponentLookup<layout::DispatchGraph*>(_node);
     graph->invoc_count[_node] = _invocation_count;
 
     layout::DispatchStage const* stage_layout = registry->ComponentLookup<layout::DispatchStage>(_node);
@@ -3034,11 +2873,11 @@ DispatchContext::UpdateDynamicInvocationCount(dstk::Registry::Node _node,
         update_descriptor_allocs(stage_layout, stage_dynamic, stage_static, _invocation_count, 0);
     }
 
-    layout::_::DispatchGraph const* subgraph = registry->ComponentLookup<layout::_::DispatchGraph>(_node);
+    layout::DispatchGraph const* subgraph = registry->ComponentLookup<layout::DispatchGraph>(_node);
     if (subgraph)
     {
         subgraph->DepthFirstTraversal([this, _invocation_count]
-                                      (std::vector<layout::_::DispatchGraph const*> const& graph_stack,
+                                      (std::vector<layout::DispatchGraph const*> const& graph_stack,
                                        dstk::Registry::Node node) {
             layout::DispatchStage const* stage_layout = registry->ComponentLookup<layout::DispatchStage>(node);
             if (!stage_layout)
@@ -3056,7 +2895,7 @@ void
 DispatchContext::BindBarrier(dstk::Registry::Node _node,
                              bind::ResourceBarrier const& _barrier)
 {
-    layout::_::DispatchGraph& parent_graph = **registry->ComponentLookup<layout::_::DispatchGraph*>(_node);
+    layout::DispatchGraph& parent_graph = **registry->ComponentLookup<layout::DispatchGraph*>(_node);
     bind::DispatchStage& stage_bindings = registry->ComponentRequest<bind::DispatchStage>(_node);
     stage_bindings.barriers.push_back(_barrier);
     if (_barrier.type == bind::BufferResource)
@@ -3168,7 +3007,7 @@ DispatchContext::BindIndexInput(dstk::Registry::Node _node,
 
 void
 DispatchContext::BindVertexInput(dstk::Registry::Node _node,
-                                 layout::_::BindingPoint const& _location,
+                                 layout::BindingPoint const& _location,
                                  std::vector<uint32_t> const& _invoc_indices,
                                  bind::VertexInput const& _vertex_input)
 {
@@ -3192,7 +3031,7 @@ DispatchContext::BindVertexInput(dstk::Registry::Node _node,
 
 void
 DispatchContext::BindVertexInput(dstk::Registry::Node _node,
-                                 layout::_::BindingPoint const& _location,
+                                 layout::BindingPoint const& _location,
                                  uint32_t _invoc_index,
                                  bind::VertexInput const& _vertex_input)
 {
@@ -3201,7 +3040,7 @@ DispatchContext::BindVertexInput(dstk::Registry::Node _node,
 
 void*
 DispatchContext::BindPushConstants(dstk::Registry::Node _node,
-                                   layout::_::BindingPoint const& _location,
+                                   layout::BindingPoint const& _location,
                                    std::vector<uint32_t> const& _invoc_indices)
 {
     DispatchStageDynamic const& stage_dynamic =
@@ -3220,7 +3059,7 @@ DispatchContext::BindPushConstants(dstk::Registry::Node _node,
 
 void*
 DispatchContext::BindPushConstants(dstk::Registry::Node _node,
-                                   layout::_::BindingPoint const& _location,
+                                   layout::BindingPoint const& _location,
                                    uint32_t _invoc_index)
 {
     return BindPushConstants(_node, _location, std::vector<uint32_t>{ _invoc_index });
@@ -3228,9 +3067,9 @@ DispatchContext::BindPushConstants(dstk::Registry::Node _node,
 
 VkWriteDescriptorSet
 DispatchContext::BindShaderResource(dstk::Registry::Node _node,
-                                    layout::_::BindingPoint const& _location,
+                                    layout::BindingPoint const& _location,
                                     std::vector<uint32_t> const& _invoc_indices,
-                                    bind::_::ShaderResources const& _resources)
+                                    bind::ShaderResources const& _resources)
 {
     DispatchStageDynamic const& stage_dynamic = *registry->ComponentLookup<DispatchStageDynamic>(_node);
     uint32_t const binding_index = ComputeBindingIndex(stage_dynamic.invoc_count_stack,
@@ -3242,8 +3081,8 @@ DispatchContext::BindShaderResource(dstk::Registry::Node _node,
     layout::StageBindingGroup const& binding_group = stage.binding_groups[_location.shader.group_index];
     layout::StageBinding const& binding = binding_group.bindings[_location.shader.binding_index];
 
-    bind::_::ShaderBinding& shader_binding =
-        *registry->BindComponent(_node, binding_index, bind::_::ShaderBinding{ _location, _resources });
+    bind::ShaderBinding& shader_binding =
+        *registry->BindComponent(_node, binding_index, bind::ShaderBinding{ _location, _resources });
 
     uint32_t descriptor_count = 0u;
     if (!shader_binding.resources.images.empty())
@@ -3293,9 +3132,9 @@ DispatchContext::BindShaderResource(dstk::Registry::Node _node,
 
 VkWriteDescriptorSet
 DispatchContext::BindShaderResource(dstk::Registry::Node _node,
-                                    layout::_::BindingPoint const& _location,
+                                    layout::BindingPoint const& _location,
                                     uint32_t _invoc_index,
-                                    bind::_::ShaderResources const& _resources)
+                                    bind::ShaderResources const& _resources)
 {
     return BindShaderResource(_node, _location, std::vector<uint32_t>{ _invoc_index }, _resources);
 }
