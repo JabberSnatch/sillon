@@ -2165,7 +2165,7 @@ dispatch_runtime_t DenseRenderingPipeline(voxel_state_t const* _state, vktk::Con
             command.vertex_count = 3;
             command.instance_count = 1;
 
-            _rt.context.BindGraphicsCommand(main_world_node, 0, command);
+            _rt.context.BindGraphicsCommand(skybox_node, 0, command);
             SkyboxPushConstants* push_constants =
                 (SkyboxPushConstants*)_rt.context.BindPushConstants(
                     skybox_node,
@@ -2179,7 +2179,7 @@ dispatch_runtime_t DenseRenderingPipeline(voxel_state_t const* _state, vktk::Con
         if (_rt.state->pixel_cycling_enabled)
         {
             dstk::Registry::Node resolve_node =
-                _rt.context.graph["FramebufferResolve"]["ResolveDispatch"];
+                _rt.context.graph["FramebufferResolve"]["ResolvePass"];
 
             vkrg::bind::GraphicsCommand command = {};
             command.command = vkrg::bind::DispatchCommand_Draw;
@@ -2259,7 +2259,7 @@ dispatch_runtime_t DensePixelCyclingRenderingPipeline(
             { payload.primary_pass_color.view, payload.primary_pass_depth.view }
         );
 
-        _rt.context.BindSwapchain(_rt.context.graph["FramebufferDispatch"], _swapchain);
+        _rt.context.BindSwapchain(_rt.context.graph["FramebufferResolve"], _swapchain);
 
         VkDescriptorImageInfo image_info{};
         image_info.sampler = payload.base.nearest_sampler;

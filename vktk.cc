@@ -2531,6 +2531,19 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                                                               barrier.second.second.access } });
             });
 
+            if (graph_stack.back()->edges_in.count(node))
+            {
+                for (dstk::Registry::Node edge : graph_stack.back()->edges_in.at(node))
+                {
+                    layout::DispatchGraph::EdgeDesc const& desc =
+                        *registry->ComponentLookup<layout::DispatchGraph::EdgeDesc>(edge);
+                    std::vector<layout::EdgeBindings const*> edge_bindings =
+                        registry->ComponentRangeLookup<layout::EdgeBindings>(edge);
+
+                    int i = 0;
+                }
+            }
+
             VkRenderPass render_pass = *registry->ComponentLookup<VkRenderPass>(node);
             std::vector<VkFramebuffer> const& framebuffers = *registry->ComponentLookup<std::vector<VkFramebuffer>>(node);
 
@@ -2550,10 +2563,9 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                                                         vkrg::layout::DispatchGraph::InvocStack const& invoc_stack,
                                                         dstk::Registry::Node node) {
                 auto const* dispatch_stage = registry->ComponentLookup<layout::DispatchStage>(node);
-                auto const* stage_bindings = registry->ComponentLookup<bind::DispatchStage>(node);
                 auto const* pipeline = registry->ComponentLookup<VkPipeline>(node);
 
-                if (!dispatch_stage || !stage_bindings || !pipeline)
+                if (!dispatch_stage || !pipeline)
                     return;
 
                 layout::GraphicsNode const& graphics_info = dispatch_pass->graphics;
