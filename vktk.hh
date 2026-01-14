@@ -845,13 +845,12 @@ struct DispatchInvocation {
     DispatchInvocation(DispatchInvocation&&) = default;
 };
 
-struct DispatchStage {
-    std::vector<DispatchInvocation> invocations;
+struct StageBarriers {
     std::vector<ResourceBarrier> barriers;
     std::unordered_map<VkBuffer, std::pair<AccessInfo, AccessInfo>> buffer_barriers;
 
-    DispatchStage() = default;
-    DispatchStage(DispatchStage&&) = default;
+    StageBarriers() = default;
+    StageBarriers(StageBarriers&&) = default;
 };
 
 using PushConstantStorage = std::vector<std::unique_ptr<uint8_t[]>>;

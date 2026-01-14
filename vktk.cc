@@ -2518,11 +2518,11 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                 [this, &_command_buffer](std::vector<layout::DispatchGraph const*> const& graph_stack,
                                          dstk::Registry::Node node) {
                 auto const* dispatch_stage = registry->ComponentLookup<layout::DispatchStage>(node);
-                auto const* stage_bindings = registry->ComponentLookup<bind::DispatchStage>(node);
-                if (!dispatch_stage || !stage_bindings)
+                auto const* stage_barriers = registry->ComponentLookup<bind::StageBarriers>(node);
+                if (!dispatch_stage || !stage_barriers)
                     return;
 
-                for (auto&& barrier : stage_bindings->buffer_barriers)
+                for (auto&& barrier : stage_barriers->buffer_barriers)
                     if (barrier.second.first.stage)
                         _command_buffer.BufferTransitions(barrier.second.first.stage,
                                                           barrier.second.second.stage,
@@ -2530,19 +2530,6 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                                                               barrier.second.first.access,
                                                               barrier.second.second.access } });
             });
-
-            if (graph_stack.back()->edges_in.count(node))
-            {
-                for (dstk::Registry::Node edge : graph_stack.back()->edges_in.at(node))
-                {
-                    layout::DispatchGraph::EdgeDesc const& desc =
-                        *registry->ComponentLookup<layout::DispatchGraph::EdgeDesc>(edge);
-                    std::vector<layout::EdgeBindings const*> edge_bindings =
-                        registry->ComponentRangeLookup<layout::EdgeBindings>(edge);
-
-                    int i = 0;
-                }
-            }
 
             VkRenderPass render_pass = *registry->ComponentLookup<VkRenderPass>(node);
             std::vector<VkFramebuffer> const& framebuffers = *registry->ComponentLookup<std::vector<VkFramebuffer>>(node);
@@ -2908,10 +2895,10 @@ DispatchContext::BindBarrier(dstk::Registry::Node _node,
                              bind::ResourceBarrier const& _barrier)
 {
     layout::DispatchGraph& parent_graph = **registry->ComponentLookup<layout::DispatchGraph*>(_node);
-    bind::DispatchStage& stage_bindings = registry->ComponentRequest<bind::DispatchStage>(_node);
-    stage_bindings.barriers.push_back(_barrier);
+    bind::StageBarriers& stage_barriers = registry->ComponentRequest<bind::StageBarriers>(_node);
+    stage_barriers.barriers.push_back(_barrier);
     if (_barrier.type == bind::BufferResource)
-        stage_bindings.buffer_barriers[_barrier.buffer].first = bind::AccessInfo{
+        stage_barriers.buffer_barriers[_barrier.buffer].first = bind::AccessInfo{
             _barrier.stage,
             _barrier.access
         };
@@ -2920,9 +2907,9 @@ DispatchContext::BindBarrier(dstk::Registry::Node _node,
 void
 DispatchContext::ClearStageBarriers(dstk::Registry::Node _node)
 {
-    bind::DispatchStage& stage_bindings = registry->ComponentRequest<bind::DispatchStage>(_node);
-    stage_bindings.barriers.clear();
-    stage_bindings.buffer_barriers.clear();
+    bind::StageBarriers& stage_barriers = registry->ComponentRequest<bind::StageBarriers>(_node);
+    stage_barriers.barriers.clear();
+    stage_barriers.buffer_barriers.clear();
 }
 
 void
@@ -3000,10 +2987,10 @@ DispatchContext::BindIndexInput(dstk::Registry::Node _node,
     uint32_t const binding_index = ComputeBindingIndex(stage_dynamic.invoc_count_stack,
                                                        _invoc_indices);
 
-    bind::DispatchStage& stage_bindings = registry->ComponentRequest<bind::DispatchStage>(_node);
+    bind::StageBarriers& stage_barriers = registry->ComponentRequest<bind::StageBarriers>(_node);
     bind::DispatchInvocation& invocation = registry->ComponentRequest<bind::DispatchInvocation>(_node, binding_index);
     invocation.index_input = _index_input;
-    stage_bindings.buffer_barriers[_index_input.buffer].second = bind::AccessInfo{
+    stage_barriers.buffer_barriers[_index_input.buffer].second = bind::AccessInfo{
         VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
         VK_ACCESS_INDEX_READ_BIT
     };
@@ -3028,14 +3015,14 @@ DispatchContext::BindVertexInput(dstk::Registry::Node _node,
     uint32_t const binding_index = ComputeBindingIndex(stage_dynamic.invoc_count_stack,
                                                        _invoc_indices);
 
-    bind::DispatchStage& stage_bindings = registry->ComponentRequest<bind::DispatchStage>(_node);
+    bind::StageBarriers& stage_barriers = registry->ComponentRequest<bind::StageBarriers>(_node);
     bind::DispatchInvocation& invocation = registry->ComponentRequest<bind::DispatchInvocation>(_node, binding_index);
 
     if (invocation.vertex_inputs.size() < _location.vertex_input_index+1)
         invocation.vertex_inputs.resize(_location.vertex_input_index+1);
     invocation.vertex_inputs[_location.vertex_input_index] = _vertex_input;
 
-    stage_bindings.buffer_barriers[_vertex_input.buffer].second = bind::AccessInfo{
+    stage_barriers.buffer_barriers[_vertex_input.buffer].second = bind::AccessInfo{
         VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
         VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT
     };
@@ -3114,14 +3101,14 @@ DispatchContext::BindShaderResource(dstk::Registry::Node _node,
     desc_write.pBufferInfo = shader_binding.resources.buffers.data();
     desc_write.pTexelBufferView = nullptr;
 
-    bind::DispatchStage& stage_bindings = registry->ComponentRequest<bind::DispatchStage>(_node);
+    bind::StageBarriers& stage_barriers = registry->ComponentRequest<bind::StageBarriers>(_node);
 
     switch (binding.type)
     {
     case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
     case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
         for (uint32_t desc_index = 0u; desc_index < descriptor_count; ++desc_index)
-            stage_bindings.buffer_barriers[shader_binding.resources.buffers[desc_index].buffer].second = bind::AccessInfo{
+            stage_barriers.buffer_barriers[shader_binding.resources.buffers[desc_index].buffer].second = bind::AccessInfo{
                 binding.stages,
                 VK_ACCESS_UNIFORM_READ_BIT
             };
@@ -3130,7 +3117,7 @@ DispatchContext::BindShaderResource(dstk::Registry::Node _node,
     case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
     case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
         for (uint32_t desc_index = 0u; desc_index < descriptor_count; ++desc_index)
-            stage_bindings.buffer_barriers[shader_binding.resources.buffers[desc_index].buffer].second = bind::AccessInfo{
+            stage_barriers.buffer_barriers[shader_binding.resources.buffers[desc_index].buffer].second = bind::AccessInfo{
                 binding.stages,
                 VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT
             };

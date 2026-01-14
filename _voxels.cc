@@ -2231,7 +2231,8 @@ dispatch_runtime_t DensePixelCyclingRenderingPipeline(
     {
         DensePixelCyclingPipelinePayload& payload = *(DensePixelCyclingPipelinePayload*)_rt.payload;
 
-        _rt.state->forward_runtime.RenderResources(_rt, _swapchain);
+        _rt.context.ClearFramebufferRuntime();
+        _rt.context.GenerateFramebufferRuntime(&_swapchain.format);
 
         {
             _rt.context.vulkan->DestroyTexture(payload.primary_pass_color);
@@ -2251,8 +2252,6 @@ dispatch_runtime_t DensePixelCyclingRenderingPipeline(
             );
         }
 
-        dstk::Registry::Node resolve_node = _rt.context.graph["FramebufferResolve"]["ResolvePass"];
-
         numtk::vec2u size = { _swapchain.size.width, _swapchain.size.height };
         _rt.context.BindAttachments(
             _rt.context.graph["FramebufferDispatch"], size,
@@ -2266,7 +2265,7 @@ dispatch_runtime_t DensePixelCyclingRenderingPipeline(
         image_info.imageView = payload.primary_pass_color.view;
         image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         VkWriteDescriptorSet desc_write = _rt.context.BindShaderResource(
-            resolve_node,
+            _rt.context.graph["FramebufferResolve"]["ResolvePass"],
             vkrg::layout::BindingPoint{
                 .type = vkrg::layout::BindingType_Shader,
                 .shader = { 0, 0 }
