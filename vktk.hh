@@ -890,10 +890,17 @@ struct DispatchStageDynamic {
 };
 
 struct DispatchContext {
-    vktk::Context* vulkan;
 
-    std::unique_ptr<dstk::Registry> registry{ new dstk::Registry{} };
-    vkrg::layout::DispatchGraph graph{ registry.get() };
+    DispatchContext(dstk::Registry& _registry, vktk::Context& _vulkan,
+                    vkrg::layout::DispatchGraph const& _graph)
+        : registry{ _registry }
+        , vulkan{ _vulkan }
+        , graph{ _graph }
+    {}
+
+    dstk::Registry& registry;
+    vktk::Context& vulkan;
+    vkrg::layout::DispatchGraph const& graph;
 
     void ClearStaticRuntime();
     void ClearFramebufferRuntime();
