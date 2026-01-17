@@ -1712,12 +1712,15 @@ vkrg::layout::DispatchGraph SparseRegionRenderGraph(dstk::Registry& _registry)
         vkrg::layout::DispatchGraph& subpasses = graph.MakeSubgraph("FramebufferDispatch");
         _registry.BindComponent(subpasses["SparseRegionSubpass"], SparseRegionDispatchStageInfo());
 
+#if 0
         {
             vkrg::layout::DispatchGraph& gui_subpasses = subpasses.MakeSubgraph("GUISubpass");
             _registry.BindComponent(gui_subpasses["GUIFrames"], GUIFramesDispatchStageInfo());
             _registry.BindComponent(gui_subpasses["GUIGlyphs"], GUIGlyphsDispatchStageInfo());
             gui_subpasses.MakeEdge("GUIFrames", "GUIGlyphs");
         }
+#endif
+        subpasses.BindSubgraph("GUISubpass", GUIRenderGraph(_registry));
 
         subpasses.MakeEdge("SparseRegionSubpass", "GUISubpass");
     }
@@ -1859,6 +1862,7 @@ vkrg::layout::DispatchGraph GUIRenderGraph(dstk::Registry& _registry)
     _registry.BindComponent(output["GUIFrames"], GUIFramesDispatchStageInfo());
     _registry.BindComponent(output["GUIGlyphs"], GUIGlyphsDispatchStageInfo());
     output.MakeEdge("GUIFrames", "GUIGlyphs");
+    return output;
 }
 
 struct DensePipelinePayload
@@ -3170,6 +3174,32 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt)
         );
 
     vkUpdateDescriptorSets(_rt.vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
+}
+
+struct GUIPipelinePayload
+{
+    vktk::Buffer gui_frame_indices;
+    vktk::Buffer gui_frames_vertices;
+    vktk::Buffer gui_frame_uv;
+    vktk::Buffer gui_glyph_indices;
+    vktk::Buffer gui_glyph_vertices;
+
+    vktk::Texture gui_font_texture;
+    vktk::Texture gui_symbols_texture;
+    VkSampler nearest_sampler;
+};
+
+dispatch_runtime_t GUIRuntime(
+    voxel_state_t* _state, vktk::Context* _vulkan)
+{
+    dispatch_runtime_t output = {};
+    output.graph = GUIRenderGraph(_state->core_registry);
+    output.vulkan = _vulkan;
+    output.registry = &_state->core_registry;
+    output.state = _state;
+    output.payload = new GUIPipelinePayload{};
+
+    return output;
 }
 
 }

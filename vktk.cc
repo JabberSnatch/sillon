@@ -2422,8 +2422,8 @@ DispatchContext::ResetDynamicRuntime(bind::PNextMap const& _pNext_map)
         {
             if (dispatch_stage->invocation_count)
             {
-                layout::DispatchGraph* graph = *registry.ComponentLookup<layout::DispatchGraph*>(node);
-                graph->invoc_count[node] = dispatch_stage->invocation_count;
+                layout::InvocCountMap* invoc_count = *registry.ComponentLookup<layout::InvocCountMap*>(node);
+                (*invoc_count)[node] = dispatch_stage->invocation_count;
             }
 
             auto* stage_static = registry.ComponentLookup<DispatchStageStatic>(node);
@@ -2858,8 +2858,8 @@ DispatchContext::UpdateDynamicInvocationCount(dstk::Registry::Node _node,
         }
     };
 
-    layout::DispatchGraph* graph = *registry.ComponentLookup<layout::DispatchGraph*>(_node);
-    graph->invoc_count[_node] = _invocation_count;
+    layout::InvocCountMap* invoc_count = *registry.ComponentLookup<layout::InvocCountMap*>(_node);
+    (*invoc_count)[_node] = _invocation_count;
 
     layout::DispatchStage const* stage_layout = registry.ComponentLookup<layout::DispatchStage>(_node);
     if (stage_layout)
@@ -2894,7 +2894,6 @@ void
 DispatchContext::BindBarrier(dstk::Registry::Node _node,
                              bind::ResourceBarrier const& _barrier)
 {
-    layout::DispatchGraph& parent_graph = **registry.ComponentLookup<layout::DispatchGraph*>(_node);
     bind::StageBarriers& stage_barriers = registry.ComponentRequest<bind::StageBarriers>(_node);
     stage_barriers.barriers.push_back(_barrier);
     if (_barrier.type == bind::BufferResource)

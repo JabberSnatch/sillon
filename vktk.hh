@@ -556,10 +556,14 @@ struct EdgeBindings {
     BindingPoint target;
 };
 
+using InvocCountMap = std::unordered_map<dstk::Registry::Node, uint32_t>;
+
 struct DispatchGraph
 {
     DispatchGraph(dstk::Registry* registry_ = nullptr)
         : registry{ registry_ }
+        , data_node{ registry ? registry->MakeNode() : dstk::FreeList::kInvalidIndex }
+        , invoc_count{ registry ? &registry->ComponentRequest<InvocCountMap>(data_node) : nullptr }
     {}
     DispatchGraph(DispatchGraph const&) = default;
     DispatchGraph& operator=(DispatchGraph const&) = default;
@@ -591,11 +595,18 @@ struct DispatchGraph
         return *registry->ComponentLookup<DispatchGraph>(node);
     }
 
+    void BindSubgraph(std::string const& parent_node, DispatchGraph const& graph) {
+        dstk::Registry::Node node = this->operator[](parent_node);
+        DispatchGraph& output = registry->ComponentRequest<DispatchGraph>(node);
+        output = graph;
+        output.parent_node = node;
+    }
+
     dstk::Registry::Node MakeNode(std::string const& name = "") {
         dstk::Registry::Node node = registry->MakeNode();
         if (name != "" && !name_lookup.contains(name))
             name_lookup.emplace(node, name);
-        registry->BindComponent(node, this);
+        registry->BindComponent(node, invoc_count);
         return node;
     }
 
@@ -737,8 +748,8 @@ struct DispatchGraph
                 if (subgraph)
                 {
                     uint32_t node_invoc_count =
-                        root->invoc_count.count(current_node)
-                        ? root->invoc_count.at(current_node) : 1u;
+                        root->invoc_count->count(current_node)
+                        ? root->invoc_count->at(current_node) : 1u;
 
                     graph_stack.push_back(subgraph);
                     invoc_stack.push_back(0u);
@@ -772,8 +783,10 @@ struct DispatchGraph
     dstk::Registry::Node parent_node = dstk::FreeList::kInvalidIndex;
     std::unordered_map<dstk::Registry::Node, std::vector<dstk::Registry::Node>> edges_in;
     std::unordered_map<dstk::Registry::Node, std::vector<dstk::Registry::Node>> edges_out;
-    std::unordered_map<dstk::Registry::Node, uint32_t> invoc_count;
     dstk::BijectiveMap<dstk::Registry::Node, std::string> name_lookup;
+
+    dstk::Registry::Node data_node;
+    InvocCountMap* invoc_count;
 };
 
 } // namespace layout
