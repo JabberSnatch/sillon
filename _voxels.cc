@@ -2381,8 +2381,7 @@ dispatch_runtime_t SparseRenderingPipeline(
     {
         _rt.graph.DepthFirstTraversal(
             [&]
-            (std::vector<vkrg::layout::DispatchGraph const*> const& graph_stack,
-             dstk::Registry::Node node) {
+            (uint32_t, dstk::Registry::Node node) {
                 dispatch_runtime_t* runtime =
                     _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
                 if (runtime && runtime->ConstantResources)
@@ -2462,8 +2461,7 @@ dispatch_runtime_t SparseRenderingPipeline(
     {
         _rt.graph.DepthFirstTraversal(
             [&]
-            (std::vector<vkrg::layout::DispatchGraph const*> const& graph_stack,
-             dstk::Registry::Node node) {
+            (uint32_t, dstk::Registry::Node node) {
                 dispatch_runtime_t* runtime =
                     _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
                 if (runtime && runtime->RenderResources)
@@ -2480,8 +2478,7 @@ dispatch_runtime_t SparseRenderingPipeline(
     {
         _rt.graph.DepthFirstTraversal(
             [&]
-            (std::vector<vkrg::layout::DispatchGraph const*> const& graph_stack,
-             dstk::Registry::Node node) {
+            (uint32_t, dstk::Registry::Node node) {
                 dispatch_runtime_t* runtime =
                     _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
                 if (runtime && runtime->Update)
@@ -2495,8 +2492,7 @@ dispatch_runtime_t SparseRenderingPipeline(
     {
         _rt.graph.DepthFirstTraversal(
             [&]
-            (std::vector<vkrg::layout::DispatchGraph const*> const& graph_stack,
-             dstk::Registry::Node node) {
+            (uint32_t, dstk::Registry::Node node) {
                 dispatch_runtime_t* runtime =
                     _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
                 if (runtime && runtime->Dispatch)
@@ -2594,8 +2590,7 @@ dispatch_runtime_t SparseRenderingPipeline(
     {
         _rt.graph.DepthFirstTraversal(
             [&]
-            (std::vector<vkrg::layout::DispatchGraph const*> const& graph_stack,
-             dstk::Registry::Node node) {
+            (uint32_t, dstk::Registry::Node node) {
                 dispatch_runtime_t* runtime =
                     _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
                 if (runtime && runtime->PostSubmit)
@@ -2837,7 +2832,7 @@ void BindGUIRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
         guitk::WidgetStates const* gui_record = _rt.state->current_gui_record;
 
         _rt.Context().UpdateDynamicInvocationCount(
-            _rt.graph.parent_node,
+            _rt.graph.data->parent_node,
             gui_record->frames.size());
 
         _rt.Context().UpdateDynamicInvocationCount(

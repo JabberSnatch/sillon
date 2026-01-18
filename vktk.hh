@@ -561,10 +561,17 @@ using InvocCountMap = std::unordered_map<dstk::Registry::Node, uint32_t>;
 struct DispatchGraph
 {
     DispatchGraph(dstk::Registry* registry_ = nullptr)
-        : registry{ registry_ }
-        , data_node{ registry ? registry->MakeNode() : dstk::FreeList::kInvalidIndex }
-        , invoc_count{ registry ? &registry->ComponentRequest<InvocCountMap>(data_node) : nullptr }
-    {}
+        : data{ nullptr }
+    {
+        if (!registry_)
+            return;
+
+        dstk::Registry::Node data_node = registry_->MakeNode();
+        data = &registry_->ComponentRequest<Data>(data_node);
+        data->registry = registry_;
+        data->data_node = data_node;
+    }
+
     DispatchGraph(DispatchGraph const&) = default;
     DispatchGraph& operator=(DispatchGraph const&) = default;
     DispatchGraph(DispatchGraph&&) = default;
@@ -578,7 +585,7 @@ struct DispatchGraph
     struct NodeView {
         operator dstk::Registry::Node() const { return node; }
         NodeView operator[](std::string const& name) const {
-            return (*graph->registry->ComponentLookup<DispatchGraph>(node))[name];
+            return (*graph->data->registry->ComponentLookup<DispatchGraph>(node))[name];
         }
         NodeView operator[](char const* name) {
             return this->operator[](std::string{ name });
@@ -589,48 +596,48 @@ struct DispatchGraph
 
     DispatchGraph& MakeSubgraph(std::string const& parent_node) {
         dstk::Registry::Node node = this->operator[](parent_node);
-        DispatchGraph output{ registry };
-        output.parent_node = node;
-        registry->BindComponent(node, output);
-        return *registry->ComponentLookup<DispatchGraph>(node);
+        DispatchGraph output{ data->registry };
+        output.data->parent_node = node;
+        data->registry->BindComponent(node, output);
+        return *data->registry->ComponentLookup<DispatchGraph>(node);
     }
 
     void BindSubgraph(std::string const& parent_node, DispatchGraph const& graph) {
         dstk::Registry::Node node = this->operator[](parent_node);
-        DispatchGraph& output = registry->ComponentRequest<DispatchGraph>(node);
+        DispatchGraph& output = data->registry->ComponentRequest<DispatchGraph>(node);
         output = graph;
-        output.parent_node = node;
+        output.data->parent_node = node;
     }
 
     dstk::Registry::Node MakeNode(std::string const& name = "") {
-        dstk::Registry::Node node = registry->MakeNode();
-        if (name != "" && !name_lookup.contains(name))
-            name_lookup.emplace(node, name);
-        registry->BindComponent(node, invoc_count);
+        dstk::Registry::Node node = data->registry->MakeNode();
+        if (name != "" && !data->name_lookup.contains(name))
+            data->name_lookup.emplace(node, name);
+        data->registry->BindComponent(node, data);
         return node;
     }
 
     dstk::Registry::Node MakeEdge(std::string const& source, std::string const& target) {
-        dstk::Registry::Node source_node = name_lookup[source];
-        dstk::Registry::Node target_node = name_lookup[target];
+        dstk::Registry::Node source_node = data->name_lookup[source];
+        dstk::Registry::Node target_node = data->name_lookup[target];
 
-        dstk::Registry::Node edge = registry->handle_pool.Reserve();
-        edges_in[target_node].push_back(edge);
-        edges_out[source_node].push_back(edge);
-        registry->BindComponent(edge, EdgeDesc{ source_node, target_node });
+        dstk::Registry::Node edge = data->registry->handle_pool.Reserve();
+        data->edges_in[target_node].push_back(edge);
+        data->edges_out[source_node].push_back(edge);
+        data->registry->BindComponent(edge, EdgeDesc{ source_node, target_node });
         return edge;
     }
 
     DispatchGraph const& Subgraph(std::string const& name) const {
-        return *registry->ComponentLookup<DispatchGraph>((*this)[name]);
+        return *data->registry->ComponentLookup<DispatchGraph>((*this)[name]);
     }
 
     std::vector<dstk::Registry::Node> Inputs() const {
         std::vector<dstk::Registry::Node> result = {};
-        for (auto const& pair : name_lookup.pairs)
+        for (auto const& pair : data->name_lookup.pairs)
         {
-            if (edges_in.count(pair.first) == 0
-                || edges_in.at(pair.first).empty())
+            if (data->edges_in.count(pair.first) == 0
+                || data->edges_in.at(pair.first).empty())
                 result.push_back(pair.first);
         }
         return result;
@@ -638,10 +645,10 @@ struct DispatchGraph
 
     std::vector<dstk::Registry::Node> Outputs() const {
         std::vector<dstk::Registry::Node> result = {};
-        for (auto const& pair : name_lookup.pairs)
+        for (auto const& pair : data->name_lookup.pairs)
         {
-            if (edges_out.count(pair.first) == 0
-                || edges_out.at(pair.first).empty())
+            if (data->edges_out.count(pair.first) == 0
+                || data->edges_out.at(pair.first).empty())
                 result.push_back(pair.first);
         }
         return result;
@@ -657,28 +664,28 @@ struct DispatchGraph
 
     NodeView operator[](std::string const& name) {
         dstk::Registry::Node node = ~(dstk::Registry::Node)0;
-        if (!name_lookup.contains(name))
+        if (!data->name_lookup.contains(name))
             node = MakeNode(name);
         else
-            node = name_lookup[name];
+            node = data->name_lookup[name];
         return NodeView{ this, node };
     }
 
     NodeView operator[](std::string const& name) const {
-        if (!name_lookup.contains(name))
+        if (!data->name_lookup.contains(name))
             return NodeView{ this, ~(dstk::Registry::Node)0 };
-        return NodeView{ this, name_lookup[name] };
+        return NodeView{ this, data->name_lookup[name] };
     }
 
     using GraphStack = std::vector<vkrg::layout::DispatchGraph const*>;
     using InvocStack = std::vector<uint32_t>;
 
     using TraversalCallbackType =
-        std::function<void(GraphStack const&,
+        std::function<void(uint32_t,
                            dstk::Registry::Node)>;
 
     using InvocationCallbackType =
-        std::function<void(GraphStack const&,
+        std::function<void(uint32_t,
                            InvocStack const&,
                            dstk::Registry::Node)>;
 
@@ -686,14 +693,15 @@ struct DispatchGraph
         std::vector<dstk::Registry::Node> node_stack = Inputs();
         std::vector<vkrg::layout::DispatchGraph const*> graph_stack{ this };
 
+        uint32_t base_depth = Depth();
         while (!node_stack.empty())
         {
             dstk::Registry::Node current_node = node_stack.back();
             vkrg::layout::DispatchGraph const* current_graph = graph_stack.back();
-            vkrg::layout::DispatchGraph const* dispatch_graph = registry->ComponentLookup<vkrg::layout::DispatchGraph>(current_node);
+            vkrg::layout::DispatchGraph const* dispatch_graph = data->registry->ComponentLookup<vkrg::layout::DispatchGraph>(current_node);
 
             bool skip_callback = false;
-            while (!current_graph->name_lookup.contains(current_node))
+            while (!current_graph->data->name_lookup.contains(current_node))
             {
                 graph_stack.pop_back();
                 current_graph = graph_stack.back();
@@ -702,7 +710,7 @@ struct DispatchGraph
             }
 
             if (!skip_callback)
-                callback(graph_stack, current_node);
+                callback(graph_stack.size() + base_depth, current_node);
 
             if (dispatch_graph)
             {
@@ -713,12 +721,12 @@ struct DispatchGraph
             else
             {
                 node_stack.pop_back();
-                if (current_graph->edges_out.count(current_node))
+                if (current_graph->data->edges_out.count(current_node))
                 {
-                    for (dstk::Registry::Node edge : current_graph->edges_out.at(current_node))
+                    for (dstk::Registry::Node edge : current_graph->data->edges_out.at(current_node))
                     {
                         vkrg::layout::DispatchGraph::EdgeDesc const* edge_desc =
-                            registry->ComponentLookup<vkrg::layout::DispatchGraph::EdgeDesc>(edge);
+                            data->registry->ComponentLookup<vkrg::layout::DispatchGraph::EdgeDesc>(edge);
                         node_stack.push_back(edge_desc->target);
                     }
                 }
@@ -731,6 +739,7 @@ struct DispatchGraph
         static auto const impl = [](vkrg::layout::DispatchGraph const* root,
                                     auto&& callback,
                                     auto&& recursion,
+                                    uint32_t base_depth,
                                     std::vector<vkrg::layout::DispatchGraph const*> graph_stack,
                                     std::vector<uint32_t> invoc_stack)
             -> void
@@ -741,52 +750,65 @@ struct DispatchGraph
             while (!node_stack.empty())
             {
                 dstk::Registry::Node current_node = node_stack.back();
-                vkrg::layout::DispatchGraph const* subgraph = root->registry->ComponentLookup<vkrg::layout::DispatchGraph>(current_node);
+                vkrg::layout::DispatchGraph const* subgraph = root->data->registry->ComponentLookup<vkrg::layout::DispatchGraph>(current_node);
 
-                callback(graph_stack, invoc_stack, current_node);
+                callback(graph_stack.size() + base_depth, invoc_stack, current_node);
 
                 if (subgraph)
                 {
                     uint32_t node_invoc_count =
-                        root->invoc_count->count(current_node)
-                        ? root->invoc_count->at(current_node) : 1u;
+                        root->data->invoc_count.count(current_node)
+                        ? root->data->invoc_count.at(current_node) : 1u;
 
                     graph_stack.push_back(subgraph);
                     invoc_stack.push_back(0u);
                     for (uint32_t invoc_index = 0u; invoc_index < node_invoc_count; ++invoc_index)
                     {
                         invoc_stack.back() = invoc_index;
-                        recursion(root, callback, recursion, graph_stack, invoc_stack);
+                        recursion(root, callback, recursion, base_depth, graph_stack, invoc_stack);
                     }
                     invoc_stack.pop_back();
                     graph_stack.pop_back();
                 }
 
                 node_stack.pop_back();
-                if (current_graph->edges_out.count(current_node))
+                if (current_graph->data->edges_out.count(current_node))
                 {
-                    for (dstk::Registry::Node edge : current_graph->edges_out.at(current_node))
+                    for (dstk::Registry::Node edge : current_graph->data->edges_out.at(current_node))
                     {
                         vkrg::layout::DispatchGraph::EdgeDesc const* edge_desc =
-                            root->registry->ComponentLookup<vkrg::layout::DispatchGraph::EdgeDesc>(edge);
+                            root->data->registry->ComponentLookup<vkrg::layout::DispatchGraph::EdgeDesc>(edge);
                         node_stack.push_back(edge_desc->target);
                     }
                 }
             }
         };
 
-        impl(this, callback, impl, { this }, { 0u });
+        impl(this, callback, impl, Depth(), { this }, { 0u });
     }
 
-    dstk::Registry* registry;
+    uint32_t Depth() const {
+        Data* current_data = data;
+        uint32_t depth = 0u;
+        while (current_data->parent_node != dstk::FreeList::kInvalidIndex) {
+            current_data =
+                *current_data->registry->ComponentLookup<Data*>(current_data->parent_node);
+            ++depth;
+        }
+        return depth;
+    }
 
-    dstk::Registry::Node parent_node = dstk::FreeList::kInvalidIndex;
-    std::unordered_map<dstk::Registry::Node, std::vector<dstk::Registry::Node>> edges_in;
-    std::unordered_map<dstk::Registry::Node, std::vector<dstk::Registry::Node>> edges_out;
-    dstk::BijectiveMap<dstk::Registry::Node, std::string> name_lookup;
+    struct Data {
+        dstk::Registry* registry;
+        dstk::Registry::Node data_node;
+        dstk::Registry::Node parent_node = dstk::FreeList::kInvalidIndex;
+        std::unordered_map<dstk::Registry::Node, std::vector<dstk::Registry::Node>> edges_in;
+        std::unordered_map<dstk::Registry::Node, std::vector<dstk::Registry::Node>> edges_out;
+        dstk::BijectiveMap<dstk::Registry::Node, std::string> name_lookup;
+        InvocCountMap invoc_count;
+    };
 
-    dstk::Registry::Node data_node;
-    InvocCountMap* invoc_count;
+    Data* data;
 };
 
 } // namespace layout

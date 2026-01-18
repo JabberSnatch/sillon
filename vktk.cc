@@ -2180,7 +2180,7 @@ DispatchContext::ClearStaticRuntime()
 {
     ClearDynamicRuntime();
 
-    graph.DepthFirstTraversal([this](std::vector<layout::DispatchGraph const*> const&, dstk::Registry::Node node) {
+    graph.DepthFirstTraversal([this](uint32_t, dstk::Registry::Node node) {
         auto const* dispatch_stage = registry.ComponentLookup<layout::DispatchStage>(node);
         if (dispatch_stage)
         {
@@ -2202,7 +2202,7 @@ DispatchContext::ClearStaticRuntime()
 void
 DispatchContext::ClearFramebufferRuntime()
 {
-    graph.DepthFirstTraversal([this](std::vector<layout::DispatchGraph const*> const&, dstk::Registry::Node node) {
+    graph.DepthFirstTraversal([this](uint32_t, dstk::Registry::Node node) {
         auto const* dispatch_pass = registry.ComponentLookup<layout::DispatchPass>(node);
         auto const* dispatch_stage = registry.ComponentLookup<layout::DispatchStage>(node);
 
@@ -2240,44 +2240,43 @@ DispatchContext::ClearFramebufferRuntime()
 void
 DispatchContext::ClearDynamicRuntime()
 {
-    graph.DepthFirstTraversal(
-        [this](std::vector<layout::DispatchGraph const*> const&,
-               dstk::Registry::Node node) {
-            auto const* dispatch_stage = registry.ComponentLookup<layout::DispatchStage>(node);
-            auto* stage_static = registry.ComponentLookup<DispatchStageStatic>(node);
-            auto* stage_dynamic = registry.ComponentLookup<DispatchStageDynamic>(node);
+    graph.DepthFirstTraversal([this](uint32_t, dstk::Registry::Node node) {
+        auto const* dispatch_stage = registry.ComponentLookup<layout::DispatchStage>(node);
+        auto* stage_static = registry.ComponentLookup<DispatchStageStatic>(node);
+        auto* stage_dynamic = registry.ComponentLookup<DispatchStageDynamic>(node);
 
-            if (dispatch_stage
-                && stage_static
-                && stage_dynamic)
+        if (dispatch_stage
+            && stage_static
+            && stage_dynamic)
+        {
+            for (uint32_t group_index = 0u; group_index < (uint32_t)dispatch_stage->binding_groups.size(); ++group_index)
             {
-                for (uint32_t group_index = 0u; group_index < (uint32_t)dispatch_stage->binding_groups.size(); ++group_index)
-                {
-                    StageBindingGroupDynamic& group_dynamic = stage_dynamic->binding_groups[group_index];
-                    StageBindingGroupStatic& group_static = stage_static->binding_groups[group_index];
+                StageBindingGroupDynamic& group_dynamic = stage_dynamic->binding_groups[group_index];
+                StageBindingGroupStatic& group_static = stage_static->binding_groups[group_index];
 
-                    for (VkDescriptorSet set : group_dynamic.sets)
-                        group_static.pool.FreeDescriptorSet(set);
+                for (VkDescriptorSet set : group_dynamic.sets)
+                    group_static.pool.FreeDescriptorSet(set);
 
-                    group_dynamic.sets.clear();
-                }
-
-                registry.ComponentErase(node, stage_dynamic);
+                group_dynamic.sets.clear();
             }
-        });
+
+            registry.ComponentErase(node, stage_dynamic);
+        }
+    });
 }
 
 void
 DispatchContext::GenerateStaticRuntime()
 {
-    graph.DepthFirstTraversal([this](std::vector<layout::DispatchGraph const*> const& graph_stack, dstk::Registry::Node node) {
-        layout::DispatchGraph const& graph = *graph_stack.back();
+    graph.DepthFirstTraversal([this](uint32_t, dstk::Registry::Node node) {
         auto const* dispatch_pass = registry.ComponentLookup<layout::DispatchPass>(node);
         auto const* dispatch_graph = registry.ComponentLookup<layout::DispatchGraph>(node);
         auto const* dispatch_stage = registry.ComponentLookup<layout::DispatchStage>(node);
         auto const* node_tag = registry.ComponentLookup<layout::NodeTag>(node);
 
-        std::string const& node_name = graph.name_lookup[node];
+        layout::DispatchGraph::Data* graph_data =
+            *registry.ComponentLookup<layout::DispatchGraph::Data*>(node);
+        std::string const& node_name = graph_data->name_lookup[node];
 
         if (dispatch_stage)
         {
@@ -2335,9 +2334,8 @@ DispatchContext::GenerateStaticRuntime()
 void
 DispatchContext::GenerateFramebufferRuntime(VkFormat const* _swapchain_format)
 {
-    graph.DepthFirstTraversal([this, _swapchain_format](std::vector<layout::DispatchGraph const*> const& graph_stack,
-                                                         dstk::Registry::Node node) {
-        layout::DispatchGraph const& graph = *graph_stack.back();
+    graph.DepthFirstTraversal([this, _swapchain_format](uint32_t,
+                                                        dstk::Registry::Node node) {
         auto const* dispatch_pass = registry.ComponentLookup<layout::DispatchPass>(node);
         auto const* dispatch_stage = registry.ComponentLookup<layout::DispatchStage>(node);
 
@@ -2353,17 +2351,22 @@ DispatchContext::GenerateFramebufferRuntime(VkFormat const* _swapchain_format)
 
             dstk::Registry::Node dispatch_pass_node = dstk::FreeList::kInvalidIndex;
             layout::DispatchPass const* parent_pass = nullptr;
-            for (uint32_t index = 0u; index < graph_stack.size(); ++index)
             {
-                layout::DispatchGraph const* graph = graph_stack[graph_stack.size()-index-1];
-                if (graph->parent_node == dstk::FreeList::kInvalidIndex)
-                    continue;
-
-                parent_pass = registry.ComponentLookup<layout::DispatchPass>(graph->parent_node);
-                if (parent_pass)
+                layout::DispatchGraph::Data* current_data =
+                    *registry.ComponentLookup<layout::DispatchGraph::Data*>(node);
+                while (current_data->parent_node)
                 {
-                    dispatch_pass_node = graph->parent_node;
-                    break;
+                    parent_pass =
+                        registry.ComponentLookup<layout::DispatchPass>(current_data->parent_node);
+                    if (parent_pass)
+                    {
+                        dispatch_pass_node = current_data->parent_node;
+                        break;
+                    }
+
+                    current_data =
+                        *registry.ComponentLookup<layout::DispatchGraph::Data*>(
+                            current_data->parent_node);
                 }
             }
             assert(parent_pass);
@@ -2412,9 +2415,11 @@ DispatchContext::ResetDynamicRuntime(bind::PNextMap const& _pNext_map)
 {
     ClearDynamicRuntime();
 
-    graph.DepthFirstTraversal([this, _pNext_map](std::vector<layout::DispatchGraph const*> const& graph_stack,
-                                                  dstk::Registry::Node node) {
-        std::string const& node_name = graph_stack.back()->name_lookup[node];
+    graph.DepthFirstTraversal([this, _pNext_map](uint32_t stack_depth,
+                                                 dstk::Registry::Node node) {
+        layout::DispatchGraph::Data* graph_data =
+            *registry.ComponentLookup<layout::DispatchGraph::Data*>(node);
+        std::string const& node_name = graph_data->name_lookup[node];
 
         auto const* dispatch_stage = registry.ComponentLookup<layout::DispatchStage>(node);
 
@@ -2422,14 +2427,15 @@ DispatchContext::ResetDynamicRuntime(bind::PNextMap const& _pNext_map)
         {
             if (dispatch_stage->invocation_count)
             {
-                layout::InvocCountMap* invoc_count = *registry.ComponentLookup<layout::InvocCountMap*>(node);
-                (*invoc_count)[node] = dispatch_stage->invocation_count;
+                layout::DispatchGraph::Data* graph_data =
+                    *registry.ComponentLookup<layout::DispatchGraph::Data*>(node);
+                graph_data->invoc_count[node] = dispatch_stage->invocation_count;
             }
 
             auto* stage_static = registry.ComponentLookup<DispatchStageStatic>(node);
             DispatchStageDynamic stage_dynamic = {};
             stage_dynamic.invocation_count = dispatch_stage->invocation_count;
-            stage_dynamic.invoc_count_stack.resize(graph_stack.size());
+            stage_dynamic.invoc_count_stack.resize(stack_depth);
             stage_dynamic.invoc_count_stack[0] = dispatch_stage->invocation_count;
 
             std::vector<bind::PNextEntry> stage_pnexts = {};
@@ -2480,10 +2486,8 @@ void
 DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
 {
     graph.DepthFirstTraversal(
-        [this, &_command_buffer](std::vector<layout::DispatchGraph const*> const& graph_stack,
+        [this, &_command_buffer](uint32_t,
                                  dstk::Registry::Node node) {
-        layout::DispatchGraph const& graph = *graph_stack.back();
-
         auto const* dispatch_pass = registry.ComponentLookup<layout::DispatchPass>(node);
 
         if (dispatch_pass) {
@@ -2514,9 +2518,8 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
 
             auto const* dispatch_graph = registry.ComponentLookup<layout::DispatchGraph>(node);
 
-            dispatch_graph->DepthFirstTraversal(
-                [this, &_command_buffer](std::vector<layout::DispatchGraph const*> const&,
-                                         dstk::Registry::Node node) {
+            dispatch_graph->DepthFirstTraversal([this, &_command_buffer]
+                                                (uint32_t, dstk::Registry::Node node) {
                 auto const* dispatch_stage = registry.ComponentLookup<layout::DispatchStage>(node);
                 auto const* stage_barriers = registry.ComponentLookup<bind::StageBarriers>(node);
                 if (!dispatch_stage || !stage_barriers)
@@ -2545,10 +2548,10 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
             rp_begin_info.pClearValues = clear_values.data();
             vkCmdBeginRenderPass(_command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
-            dispatch_graph->DepthFirstInvocation(
-                [this, &_command_buffer, dispatch_pass](vkrg::layout::DispatchGraph::GraphStack const&,
-                                                        vkrg::layout::DispatchGraph::InvocStack const& invoc_stack,
-                                                        dstk::Registry::Node node) {
+            dispatch_graph->DepthFirstInvocation([this, &_command_buffer, dispatch_pass]
+                                                 (uint32_t,
+                                                  vkrg::layout::DispatchGraph::InvocStack const& invoc_stack,
+                                                  dstk::Registry::Node node) {
                 auto const* dispatch_stage = registry.ComponentLookup<layout::DispatchStage>(node);
                 auto const* pipeline = registry.ComponentLookup<VkPipeline>(node);
 
@@ -2681,7 +2684,10 @@ DispatchContext::RenderPassDescription(
         });
     }
 
-    for (dstk::Registry::Node edge : (graph.edges_out.count(_node) ? graph.edges_out.at(_node) : std::vector<dstk::Registry::Node>{}))
+    for (dstk::Registry::Node edge : (
+             graph.data->edges_out.count(_node)
+             ? graph.data->edges_out.at(_node)
+             : std::vector<dstk::Registry::Node>{}))
     {
         layout::DispatchGraph::EdgeDesc const& edge_desc =
             *registry.ComponentLookup<layout::DispatchGraph::EdgeDesc>(edge);
@@ -2699,7 +2705,10 @@ DispatchContext::RenderPassDescription(
             desc.format = *_swapchain_format;
     }
 
-    for (dstk::Registry::Node edge : (graph.edges_in.count(_node) ? graph.edges_in.at(_node) : std::vector<dstk::Registry::Node>{}))
+    for (dstk::Registry::Node edge : (
+             graph.data->edges_in.count(_node)
+             ? graph.data->edges_in.at(_node)
+             : std::vector<dstk::Registry::Node>{}))
     {
         layout::DispatchGraph::EdgeDesc const& edge_desc =
             *registry.ComponentLookup<layout::DispatchGraph::EdgeDesc>(edge);
@@ -2858,8 +2867,9 @@ DispatchContext::UpdateDynamicInvocationCount(dstk::Registry::Node _node,
         }
     };
 
-    layout::InvocCountMap* invoc_count = *registry.ComponentLookup<layout::InvocCountMap*>(_node);
-    (*invoc_count)[_node] = _invocation_count;
+    layout::DispatchGraph::Data* graph_data =
+        *registry.ComponentLookup<layout::DispatchGraph::Data*>(_node);
+    graph_data->invoc_count[_node] = _invocation_count;
 
     layout::DispatchStage const* stage_layout = registry.ComponentLookup<layout::DispatchStage>(_node);
     if (stage_layout)
@@ -2875,17 +2885,23 @@ DispatchContext::UpdateDynamicInvocationCount(dstk::Registry::Node _node,
     layout::DispatchGraph const* subgraph = registry.ComponentLookup<layout::DispatchGraph>(_node);
     if (subgraph)
     {
-        subgraph->DepthFirstTraversal([this, _invocation_count]
-                                      (std::vector<layout::DispatchGraph const*> const& graph_stack,
+        subgraph->DepthFirstTraversal([this, _invocation_count, base_depth = subgraph->Depth()]
+                                      (uint32_t stack_depth,
                                        dstk::Registry::Node node) {
             layout::DispatchStage const* stage_layout = registry.ComponentLookup<layout::DispatchStage>(node);
             if (!stage_layout)
                 return;
 
-            DispatchStageDynamic& stage_dynamic = *registry.ComponentLookup<DispatchStageDynamic>(node);
-            DispatchStageStatic& stage_static = *registry.ComponentLookup<DispatchStageStatic>(node);
+            DispatchStageDynamic& stage_dynamic =
+                *registry.ComponentLookup<DispatchStageDynamic>(node);
+            DispatchStageStatic& stage_static =
+                *registry.ComponentLookup<DispatchStageStatic>(node);
 
-            update_descriptor_allocs(stage_layout, stage_dynamic, stage_static, _invocation_count, graph_stack.size());
+            update_descriptor_allocs(stage_layout,
+                                     stage_dynamic,
+                                     stage_static,
+                                     _invocation_count,
+                                     stack_depth-base_depth);
         });
     }
 }
