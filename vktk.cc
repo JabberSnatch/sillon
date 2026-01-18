@@ -2180,7 +2180,7 @@ DispatchContext::ClearStaticRuntime()
 {
     ClearDynamicRuntime();
 
-    graph.DepthFirstTraversal([this](std::vector<layout::DispatchGraph const*> const& graph_stack, dstk::Registry::Node node) {
+    graph.DepthFirstTraversal([this](std::vector<layout::DispatchGraph const*> const&, dstk::Registry::Node node) {
         auto const* dispatch_stage = registry.ComponentLookup<layout::DispatchStage>(node);
         if (dispatch_stage)
         {
@@ -2202,7 +2202,7 @@ DispatchContext::ClearStaticRuntime()
 void
 DispatchContext::ClearFramebufferRuntime()
 {
-    graph.DepthFirstTraversal([this](std::vector<layout::DispatchGraph const*> const& graph_stack, dstk::Registry::Node node) {
+    graph.DepthFirstTraversal([this](std::vector<layout::DispatchGraph const*> const&, dstk::Registry::Node node) {
         auto const* dispatch_pass = registry.ComponentLookup<layout::DispatchPass>(node);
         auto const* dispatch_stage = registry.ComponentLookup<layout::DispatchStage>(node);
 
@@ -2241,7 +2241,7 @@ void
 DispatchContext::ClearDynamicRuntime()
 {
     graph.DepthFirstTraversal(
-        [this](std::vector<layout::DispatchGraph const*> const& graph_stack,
+        [this](std::vector<layout::DispatchGraph const*> const&,
                dstk::Registry::Node node) {
             auto const* dispatch_stage = registry.ComponentLookup<layout::DispatchStage>(node);
             auto* stage_static = registry.ComponentLookup<DispatchStageStatic>(node);
@@ -2515,7 +2515,7 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
             auto const* dispatch_graph = registry.ComponentLookup<layout::DispatchGraph>(node);
 
             dispatch_graph->DepthFirstTraversal(
-                [this, &_command_buffer](std::vector<layout::DispatchGraph const*> const& graph_stack,
+                [this, &_command_buffer](std::vector<layout::DispatchGraph const*> const&,
                                          dstk::Registry::Node node) {
                 auto const* dispatch_stage = registry.ComponentLookup<layout::DispatchStage>(node);
                 auto const* stage_barriers = registry.ComponentLookup<bind::StageBarriers>(node);
@@ -2546,7 +2546,7 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
             vkCmdBeginRenderPass(_command_buffer, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
             dispatch_graph->DepthFirstInvocation(
-                [this, &_command_buffer, dispatch_pass](vkrg::layout::DispatchGraph::GraphStack const& graph_stack,
+                [this, &_command_buffer, dispatch_pass](vkrg::layout::DispatchGraph::GraphStack const&,
                                                         vkrg::layout::DispatchGraph::InvocStack const& invoc_stack,
                                                         dstk::Registry::Node node) {
                 auto const* dispatch_stage = registry.ComponentLookup<layout::DispatchStage>(node);
