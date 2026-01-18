@@ -1053,6 +1053,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         _state->current_gui_record = gui_record;
 
         _state->sparse_runtime.Update(_state->sparse_runtime);
+        _state->forward_runtime.Update(_state->forward_runtime);
     }
 
     _state->time += _input->time_delta;
@@ -1178,6 +1179,8 @@ void Draw(void* _pstate,
                           &_state->last_submit);
 
     _state->sparse_runtime.PostSubmit(_state->sparse_runtime, _state->last_submit);
+    if (_state->current_runtime->PostSubmit)
+        _state->current_runtime->PostSubmit(*_state->current_runtime, _state->last_submit);
 
     _vulkan->ScheduleFenceDestroy(_state->last_submit);
 
@@ -1711,17 +1714,7 @@ vkrg::layout::DispatchGraph SparseRegionRenderGraph(dstk::Registry& _registry)
     {
         vkrg::layout::DispatchGraph& subpasses = graph.MakeSubgraph("FramebufferDispatch");
         _registry.BindComponent(subpasses["SparseRegionSubpass"], SparseRegionDispatchStageInfo());
-
-#if 0
-        {
-            vkrg::layout::DispatchGraph& gui_subpasses = subpasses.MakeSubgraph("GUISubpass");
-            _registry.BindComponent(gui_subpasses["GUIFrames"], GUIFramesDispatchStageInfo());
-            _registry.BindComponent(gui_subpasses["GUIGlyphs"], GUIGlyphsDispatchStageInfo());
-            gui_subpasses.MakeEdge("GUIFrames", "GUIGlyphs");
-        }
-#endif
         subpasses.BindSubgraph("GUISubpass", GUIRenderGraph(_registry));
-
         subpasses.MakeEdge("SparseRegionSubpass", "GUISubpass");
     }
 
@@ -1764,6 +1757,9 @@ vkrg::layout::DispatchGraph FullFrameRenderGraph(dstk::Registry& _registry)
         _registry.BindComponent(subpasses["RegionPass"], RegionPassDispatchStageInfo());
         _registry.BindComponent(subpasses["SkyboxPass"], SkyboxDispatchStageInfo());
         subpasses.MakeEdge("RegionPass", "SkyboxPass");
+
+        subpasses.BindSubgraph("GUISubpass", GUIRenderGraph(_registry));
+        subpasses.MakeEdge("SkyboxPass", "GUISubpass");
     }
 
     _registry.BindComponent(graph["present"], vkrg::layout::NodeTag_Present);
@@ -1882,8 +1878,19 @@ dispatch_runtime_t DenseRenderingPipeline(
     output.state = _state;
     output.payload = new DensePipelinePayload{};
 
+    BindGUIRuntime(_state, _vulkan, output.graph["FramebufferDispatch"]["GUISubpass"]);
+
     output.ConstantResources = [](dispatch_runtime_t& _rt)
     {
+        _rt.graph.DepthFirstTraversal(
+            [&]
+            (uint32_t, dstk::Registry::Node node) {
+                dispatch_runtime_t* runtime =
+                    _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
+                if (runtime && runtime->ConstantResources)
+                    runtime->ConstantResources(*runtime);
+            });
+
         DensePipelinePayload& payload = *(DensePipelinePayload*)_rt.payload;
 
         vkrg::bind::PNextMap pNext_map = {};
@@ -2047,15 +2054,45 @@ dispatch_runtime_t DenseRenderingPipeline(
     output.RenderResources = [](dispatch_runtime_t& _rt,
                                 vktk::Swapchain const& _swapchain)
     {
+        _rt.graph.DepthFirstTraversal(
+            [&]
+            (uint32_t, dstk::Registry::Node node) {
+                dispatch_runtime_t* runtime =
+                    _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
+                if (runtime && runtime->RenderResources)
+                    runtime->RenderResources(*runtime, _swapchain);
+            });
+
         _rt.Context().ClearFramebufferRuntime();
         _rt.Context().GenerateFramebufferRuntime(&_swapchain.format);
         _rt.Context().BindSwapchain(_rt.graph["FramebufferDispatch"], _swapchain);
+    };
+
+    output.Update = [](dispatch_runtime_t& _rt)
+    {
+        _rt.graph.DepthFirstTraversal(
+            [&]
+            (uint32_t, dstk::Registry::Node node) {
+                dispatch_runtime_t* runtime =
+                    _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
+                if (runtime && runtime->Update)
+                    runtime->Update(*runtime);
+            });
     };
 
     output.Dispatch = [](dispatch_runtime_t& _rt,
                          vktk::CommandBuffer& _command_buffer,
                          vktk::Swapchain const& _swapchain)
     {
+        _rt.graph.DepthFirstTraversal(
+            [&]
+            (uint32_t, dstk::Registry::Node node) {
+                dispatch_runtime_t* runtime =
+                    _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
+                if (runtime && runtime->Dispatch)
+                    runtime->Dispatch(*runtime, _command_buffer, _swapchain);
+            });
+
         DensePipelinePayload& payload = *(DensePipelinePayload*)_rt.payload;
 
         float how = (float)_swapchain.size.height / (float)_swapchain.size.width;
@@ -2217,7 +2254,17 @@ dispatch_runtime_t DenseRenderingPipeline(
         _rt.Context().Dispatch(_command_buffer);
     };
 
-    output.Update = nullptr;
+    output.PostSubmit = [](dispatch_runtime_t& _rt, VkFence _last_submit)
+    {
+        _rt.graph.DepthFirstTraversal(
+            [&]
+            (uint32_t, dstk::Registry::Node node) {
+                dispatch_runtime_t* runtime =
+                    _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
+                if (runtime && runtime->PostSubmit)
+                    runtime->PostSubmit(*runtime, _last_submit);
+            });
+    };
 
     return output;
 }
