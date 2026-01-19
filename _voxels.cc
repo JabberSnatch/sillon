@@ -1027,7 +1027,13 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         guitk::BeginRecord(_state->gui_context, _input, _past_input);
         guitk::BeginFrame(_state->gui_context, _state->framerate_frame);
         guitk::Label(_state->gui_context, _state->framerate_label.c_str());
+
+#if defined(TRAVERSAL_V1)
+        guitk::Checkbox(_state->gui_context, &_state->pixel_cycling_enabled, "Pixel Cycling");
+#elif defined(TRAVERSAL_V2)
         guitk::Checkbox(_state->gui_context, &_state->enable_indirect_light, "Indirect Lighting");
+#endif
+
 #if 0
         for (uint32_t i = 0; i < 4; ++i)
         {
@@ -1054,6 +1060,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
         _state->sparse_runtime.Update(_state->sparse_runtime);
         _state->forward_runtime.Update(_state->forward_runtime);
+        _state->pixel_cycling_runtime.Update(_state->pixel_cycling_runtime);
     }
 
     _state->time += _input->time_delta;
@@ -1822,6 +1829,9 @@ vkrg::layout::DispatchGraph PixelCyclingRenderGraph(dstk::Registry& _registry)
     {
         vkrg::layout::DispatchGraph& subpasses = graph.MakeSubgraph("FramebufferResolve");
         _registry.BindComponent(subpasses["ResolvePass"], ResolveDispatchStageInfo());
+
+        subpasses.BindSubgraph("GUISubpass", GUIRenderGraph(_registry));
+        subpasses.MakeEdge("ResolvePass", "GUISubpass");
     }
 
     _registry.BindComponent(graph.MakeEdge("FramebufferDispatch", "FramebufferResolve"),
@@ -2287,9 +2297,20 @@ dispatch_runtime_t DensePixelCyclingRenderingPipeline(
     output.state = _state;
     output.payload = new DensePixelCyclingPipelinePayload{};
 
+    BindGUIRuntime(_state, _vulkan, output.graph["FramebufferResolve"]["GUISubpass"]);
+
     output.ConstantResources = _state->forward_runtime.ConstantResources;
     output.RenderResources = [](dispatch_runtime_t& _rt, vktk::Swapchain const& _swapchain)
     {
+        _rt.graph.DepthFirstTraversal(
+            [&]
+            (uint32_t, dstk::Registry::Node node) {
+                dispatch_runtime_t* runtime =
+                    _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
+                if (runtime && runtime->RenderResources)
+                    runtime->RenderResources(*runtime, _swapchain);
+            });
+
         DensePixelCyclingPipelinePayload& payload = *(DensePixelCyclingPipelinePayload*)_rt.payload;
 
         _rt.Context().ClearFramebufferRuntime();
@@ -2378,9 +2399,31 @@ dispatch_runtime_t DensePixelCyclingRenderingPipeline(
         }
     };
 
+    output.Update = [](dispatch_runtime_t& _rt)
+    {
+        _rt.graph.DepthFirstTraversal(
+            [&]
+            (uint32_t, dstk::Registry::Node node) {
+                dispatch_runtime_t* runtime =
+                    _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
+                if (runtime && runtime->Update)
+                    runtime->Update(*runtime);
+            });
+    };
+
     output.Dispatch = _state->forward_runtime.Dispatch;
 
-    output.Update = nullptr;
+    output.PostSubmit = [](dispatch_runtime_t& _rt, VkFence _last_submit)
+    {
+        _rt.graph.DepthFirstTraversal(
+            [&]
+            (uint32_t, dstk::Registry::Node node) {
+                dispatch_runtime_t* runtime =
+                    _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
+                if (runtime && runtime->PostSubmit)
+                    runtime->PostSubmit(*runtime, _last_submit);
+            });
+    };
 
     return output;
 }
