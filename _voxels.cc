@@ -1698,6 +1698,54 @@ vkrg::layout::DispatchStage GUIGlyphsDispatchStageInfo()
     return output;
 }
 
+vkrg::layout::DispatchStage ProgressiveResolveStageInfo()
+{
+    vkrg::layout::DispatchStage output = {};
+    output.name = "progressive-resolve";
+
+    output.shaders = std::vector<vkrg::layout::ShaderStage>{
+        { VK_SHADER_STAGE_VERTEX_BIT,
+          { "#version 450",
+            #include "shaders/full_screen.vert.h"
+          }
+        },
+        { VK_SHADER_STAGE_FRAGMENT_BIT,
+          { "#version 450",
+            "layout(location = 0) in vec3 iFS_csPosition;"
+            "layout(location = 0) out vec4 oFS_color;"
+            "layout(set = 0, binding = 0) uniform sampler2D framebuffer;"
+            "layout(push_constant, std430) uniform PushConstant {"
+            "float sample_weight;"
+            "};"
+            "void main() {"
+            "oFS_color = vec4(texelFetch(framebuffer, ivec2(gl_FragCoord.xy)).xyz, sample_weight);"
+            "}"
+          }
+        }
+    };
+
+    output.invocation_count = 1;
+    output.binding_groups.push_back(vkrg::layout::StageBindingGroup{
+        {
+            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              0, 1 }
+        }
+    });
+
+    output.push_constants.push_back(vkrg::layout::PushConstantRange{
+        VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float) }
+    );
+
+    output.graphics.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+    output.graphics.blend_states.push_back(vktk::Context::BlendState{
+        VK_TRUE,
+        VK_BLEND_FACTOR_SRC_ALPHA,
+        VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        VK_BLEND_OP_ADD
+    });
+}
+
 vkrg::layout::DispatchGraph SparseRegionRenderGraph(dstk::Registry& _registry)
 {
     vkrg::layout::DispatchGraph graph{ &_registry };
@@ -1860,6 +1908,40 @@ vkrg::layout::DispatchGraph PixelCyclingRenderGraph(dstk::Registry& _registry)
                             });
 
     return graph;
+}
+
+vkrg::layout::DispatchGraph ProgressiveRenderGraph(dstk::Registry& _registry)
+{
+    vkrg::layout::DispatchGraph graph{ &_registry };
+
+    _registry.BindComponent(graph["FramebufferDispatch"], vkrg::layout::DispatchPass{});
+    graph.MakeSubgraph("FramebufferDispatch");
+    _registry.BindComponent(graph["FramebufferDispatch"]["SparseRegionSubpass"],
+                            SparseRegionDispatchStageInfo());
+
+    _registry.BindComponent(graph["FramebufferResolve"], vkrg::layout::DispatchPass{
+        .mode = vkrg::layout::DispatchMode_Graphics,
+        .graphics = {
+            .attachments = {
+                { VK_IMAGE_TYPE_2D, VK_FORMAT_B8G8R8A8_UNORM,
+                  numtk::vec4f{ 0.f, 1.f, 1.f, 0.f } },
+                { VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
+                  numtk::vec4f{ 0.f, 0.f, 0.f, 0.f } }
+            }
+        }
+    });
+    graph.MakeSubgraph("FramebufferResolve");
+
+    _registry.BindComponent(graph["present"], vkrg::layout::NodeTag_Present);
+    _registry.BindComponent(graph.MakeEdge("FramebufferResolve", "present"),
+                            vkrg::layout::EdgeBindings{
+                                vkrg::layout::EdgeType_Image,
+                                vkrg::layout::BindingPoint{
+                                    .type = vkrg::layout::BindingType_Framebuffer,
+                                    .attachment_index = 0
+                                },
+                                {}
+                            });
 }
 
 vkrg::layout::DispatchGraph GUIRenderGraph(dstk::Registry& _registry)
