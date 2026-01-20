@@ -1007,6 +1007,17 @@ VkPipeline Context::CreatePipeline(VkPipelineLayout _layout,
     return CreatePipeline(_layout, _renderPass, _stages, {}, _topology, _input);
 }
 
+
+VkPipeline Context::CreatePipeline(VkPipelineLayout _layout,
+                                   VkRenderPass _renderPass,
+                                   std::vector<PipelineStage> const& _stages,
+                                   std::vector<StateOverride> const& _states,
+                                   VkPrimitiveTopology _topology,
+                                   std::vector<VertexInput> const& _input)
+{
+    return CreatePipeline(_layout, _renderPass, _stages, _states, {}, _topology, _input);
+}
+
 #define VKTK_DYNAMIC_STATES(x)                                          \
     x(StateOverrideTag::CullMode, cull_mode, VK_CULL_MODE_BACK_BIT) \
     x(StateOverrideTag::DepthTestEnable, depth_test_enable, VK_TRUE)    \
@@ -1048,6 +1059,7 @@ VkPipeline Context::CreatePipeline(VkPipelineLayout _layout,
                                    VkRenderPass _renderPass,
                                    std::vector<PipelineStage> const& _stages,
                                    std::vector<StateOverride> const& _states,
+                                   std::vector<BlendState> const& _blend,
                                    VkPrimitiveTopology _topology,
                                    std::vector<VertexInput> const& _input)
 {
@@ -1139,25 +1151,31 @@ VkPipeline Context::CreatePipeline(VkPipelineLayout _layout,
     dynamicState.dynamicStateCount = 2u;
     dynamicState.pDynamicStates = dynamic_states;
 
-    VkPipelineColorBlendAttachmentState blendAttachmentState{};
-    blendAttachmentState.blendEnable = VK_TRUE;
-    blendAttachmentState.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-    blendAttachmentState.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    blendAttachmentState.colorBlendOp = VK_BLEND_OP_ADD;
-    blendAttachmentState.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-    blendAttachmentState.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-    blendAttachmentState.alphaBlendOp = VK_BLEND_OP_ADD;
-    blendAttachmentState.colorWriteMask =
-        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-        VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    std::vector<VkPipelineColorBlendAttachmentState> blendAttachmentStates{};
+    blendAttachmentStates.reserve(_blend.size());
+    for (BlendState const& state : _blend)
+    {
+        blendAttachmentStates.push_back(VkPipelineColorBlendAttachmentState{
+            state.blend_enable,
+            state.src_blend_factor,
+            state.dst_blend_factor,
+            state.blend_op,
+            state.src_blend_factor,
+            state.dst_blend_factor,
+            state.blend_op,
+            VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
+            VK_COLOR_COMPONENT_A_BIT
+        });
+    }
+
     VkPipelineColorBlendStateCreateInfo blendState{};
     blendState.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     blendState.pNext = nullptr;
     blendState.flags = 0;
     blendState.logicOpEnable = VK_FALSE;
     blendState.logicOp = VK_LOGIC_OP_CLEAR;
-    blendState.attachmentCount = 1;
-    blendState.pAttachments = &blendAttachmentState;
+    blendState.attachmentCount = blendAttachmentStates.size();
+    blendState.pAttachments = blendAttachmentStates.data();
     blendState.blendConstants[0] = 0;
     blendState.blendConstants[1] = 0;
     blendState.blendConstants[2] = 0;
@@ -1210,7 +1228,7 @@ VkPipeline Context::CreatePipeline(VkPipelineLayout _layout,
     createPipeline.pRasterizationState = &rasterizationState;
     createPipeline.pMultisampleState = &multisampleState;
     createPipeline.pDepthStencilState = &depthStencilState;
-    createPipeline.pColorBlendState = &blendState;
+    createPipeline.pColorBlendState = _blend.empty() ? nullptr : &blendState;
     createPipeline.pDynamicState = &dynamicState;
     createPipeline.layout = _layout;
     createPipeline.renderPass = _renderPass;

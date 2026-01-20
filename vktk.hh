@@ -365,6 +365,21 @@ struct Context
                               VkPrimitiveTopology _topology,
                               std::vector<VertexInput> const& _input);
 
+    struct BlendState {
+        VkBool32 blend_enable;
+        VkBlendFactor src_blend_factor;
+        VkBlendFactor dst_blend_factor;
+        VkBlendOp blend_op;
+    };
+
+    VkPipeline CreatePipeline(VkPipelineLayout _layout,
+                              VkRenderPass _renderPass,
+                              std::vector<PipelineStage> const& _stages,
+                              std::vector<StateOverride> const& _states,
+                              std::vector<BlendState> const& _blend,
+                              VkPrimitiveTopology _topology,
+                              std::vector<VertexInput> const& _input);
+
     Swapchain CreateSwapchain(uint32_t const _size[2]);
 
     struct DescriptorSetBindingPoint {
@@ -505,6 +520,7 @@ struct GraphicsStage {
     // geometry attachments
     VkPrimitiveTopology topology;
     std::vector<vktk::Context::VertexInput> input_layout;
+    std::vector<vktk::Context::BlendState> blend_states;
 };
 
 struct DispatchStage {
