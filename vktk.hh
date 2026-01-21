@@ -541,7 +541,8 @@ enum NodeTag {
     NodeTag_None,
     NodeTag_Output,
     NodeTag_Input,
-    NodeTag_Present
+    NodeTag_Present,
+    NodeTag_BlitImage,
 };
 
 enum BindingType {
@@ -550,6 +551,12 @@ enum BindingType {
     BindingType_Shader,
     BindingType_PushConstantRange,
     BindingType_VertexInput,
+    BindingType_BlitImage,
+};
+
+enum BlitImageSlot {
+    BlitImageSlot_Source,
+    BlitImageSlot_Sink,
 };
 
 struct BindingPoint {
@@ -563,13 +570,14 @@ struct BindingPoint {
             uint32_t group_index;
             uint32_t binding_index;
         } shader;
+        BlitImageSlot blit_slot;
     };
 };
 
 struct EdgeBindings {
     EdgeType type;
     BindingPoint source;
-    BindingPoint target;
+    BindingPoint sink;
 };
 
 using InvocCountMap = std::unordered_map<dstk::Registry::Node, uint32_t>;
@@ -595,7 +603,7 @@ struct DispatchGraph
 
     struct EdgeDesc {
         dstk::Registry::Node source;
-        dstk::Registry::Node target;
+        dstk::Registry::Node sink;
     };
 
     struct NodeView {
@@ -633,14 +641,14 @@ struct DispatchGraph
         return node;
     }
 
-    dstk::Registry::Node MakeEdge(std::string const& source, std::string const& target) {
+    dstk::Registry::Node MakeEdge(std::string const& source, std::string const& sink) {
         dstk::Registry::Node source_node = data->name_lookup[source];
-        dstk::Registry::Node target_node = data->name_lookup[target];
+        dstk::Registry::Node sink_node = data->name_lookup[sink];
 
         dstk::Registry::Node edge = data->registry->handle_pool.Reserve();
-        data->edges_in[target_node].push_back(edge);
+        data->edges_in[sink_node].push_back(edge);
         data->edges_out[source_node].push_back(edge);
-        data->registry->BindComponent(edge, EdgeDesc{ source_node, target_node });
+        data->registry->BindComponent(edge, EdgeDesc{ source_node, sink_node });
         return edge;
     }
 
@@ -743,7 +751,7 @@ struct DispatchGraph
                     {
                         vkrg::layout::DispatchGraph::EdgeDesc const* edge_desc =
                             data->registry->ComponentLookup<vkrg::layout::DispatchGraph::EdgeDesc>(edge);
-                        node_stack.push_back(edge_desc->target);
+                        node_stack.push_back(edge_desc->sink);
                     }
                 }
             }
@@ -794,7 +802,7 @@ struct DispatchGraph
                     {
                         vkrg::layout::DispatchGraph::EdgeDesc const* edge_desc =
                             root->data->registry->ComponentLookup<vkrg::layout::DispatchGraph::EdgeDesc>(edge);
-                        node_stack.push_back(edge_desc->target);
+                        node_stack.push_back(edge_desc->sink);
                     }
                 }
             }
@@ -912,8 +920,15 @@ struct ShaderResources {
 };
 
 struct ShaderBinding {
-    ::vkrg::layout::BindingPoint target;
+    ::vkrg::layout::BindingPoint sink;
     ShaderResources resources;
+};
+
+struct BlitCommand {
+    numtk::bounds3u source_bounds;
+    numtk::bounds3u sink_bounds;
+    VkImageAspectFlagBits aspect_mask;
+    VkFilter filter;
 };
 
 } // namespace bind
@@ -986,6 +1001,13 @@ struct DispatchContext {
 
     void BindFramebufferArea(dstk::Registry::Node _node,
                              bind::FramebufferArea const& _area);
+
+    void BindBlitCommand(dstk::Registry::Node _node,
+                         bind::BlitCommand const& _command);
+
+    void BindImage(dstk::Registry::Node _node,
+                   layout::BindingPoint const& _location,
+                   VkImage _image);
 
     static uint32_t ComputeBindingIndex(std::vector<uint32_t> const& _invoc_count_stack,
                                         std::vector<uint32_t> const& _invoc_indices);

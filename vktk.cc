@@ -1167,6 +1167,12 @@ VkPipeline Context::CreatePipeline(VkPipelineLayout _layout,
             VK_COLOR_COMPONENT_A_BIT
         });
     }
+    if (blendAttachmentStates.empty())
+    {
+        VkPipelineColorBlendAttachmentState default_blend = {};
+        default_blend.blendEnable = VK_FALSE;
+        blendAttachmentStates.push_back(default_blend);
+    }
 
     VkPipelineColorBlendStateCreateInfo blendState{};
     blendState.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
@@ -1228,7 +1234,7 @@ VkPipeline Context::CreatePipeline(VkPipelineLayout _layout,
     createPipeline.pRasterizationState = &rasterizationState;
     createPipeline.pMultisampleState = &multisampleState;
     createPipeline.pDepthStencilState = &depthStencilState;
-    createPipeline.pColorBlendState = _blend.empty() ? nullptr : &blendState;
+    createPipeline.pColorBlendState = &blendState;
     createPipeline.pDynamicState = &dynamicState;
     createPipeline.layout = _layout;
     createPipeline.renderPass = _renderPass;
@@ -1300,7 +1306,8 @@ Swapchain Context::CreateSwapchain(uint32_t const _size[2])
     swapchain_info.imageColorSpace = color_space;
     swapchain_info.imageExtent = swapchain_extent;
     swapchain_info.imageArrayLayers = 1;
-    swapchain_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    swapchain_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+        | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     swapchain_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     swapchain_info.queueFamilyIndexCount = 0;
     swapchain_info.pQueueFamilyIndices = nullptr;
@@ -2415,6 +2422,7 @@ DispatchContext::GenerateFramebufferRuntime(VkFormat const* _swapchain_format)
                     *render_pass,
                     pipeline_stages,
                     dispatch_stage->graphics.state_overrides,
+                    dispatch_stage->graphics.blend_states,
                     dispatch_stage->graphics.topology,
                     dispatch_stage->graphics.input_layout
                     );
@@ -2716,7 +2724,7 @@ DispatchContext::RenderPassDescription(
             continue;
 
         vktk::Context::RenderPassAttachment& desc = output[bindings->source.attachment_index];
-        layout::BindingPointSync sync_reqs = BindingPointSyncRequirements(edge_desc.target, bindings->type, bindings->target);
+        layout::BindingPointSync sync_reqs = BindingPointSyncRequirements(edge_desc.sink, bindings->type, bindings->sink);
         desc.finalLayout = sync_reqs.layout;
 
         if (_swapchain_format && sync_reqs.layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
@@ -2733,10 +2741,10 @@ DispatchContext::RenderPassDescription(
 
         layout::EdgeBindings const* bindings = registry.ComponentLookup<layout::EdgeBindings>(edge);
         if (!bindings
-            || bindings->target.type != layout::BindingType_Framebuffer)
+            || bindings->sink.type != layout::BindingType_Framebuffer)
             continue;
 
-        vktk::Context::RenderPassAttachment& desc = output[bindings->target.attachment_index];
+        vktk::Context::RenderPassAttachment& desc = output[bindings->sink.attachment_index];
         layout::BindingPointSync sync_reqs = BindingPointSyncRequirements(edge_desc.source, bindings->type, bindings->source);
         desc.initialLayout = sync_reqs.layout;
     }
@@ -2822,6 +2830,14 @@ DispatchContext::BindingPointSyncRequirements(
             {
                 output.access = 0;
                 output.layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+            }
+            else if (*tag == layout::NodeTag_BlitImage)
+            {
+                output.access = VK_ACCESS_TRANSFER_READ_BIT;
+                if (_binding_point.blit_slot == layout::BlitImageSlot_Source)
+                    output.layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+                else if (_binding_point.blit_slot == layout::BlitImageSlot_Sink)
+                    output.layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
             }
         } break;
         }
@@ -3126,7 +3142,7 @@ DispatchContext::BindShaderResource(dstk::Registry::Node _node,
     desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     desc_write.pNext = nullptr;
     desc_write.dstSet = group_runtime.sets[binding_index];
-    desc_write.dstBinding = shader_binding.target.shader.binding_index;
+    desc_write.dstBinding = shader_binding.sink.shader.binding_index;
     desc_write.dstArrayElement = 0u;
     desc_write.descriptorCount = descriptor_count;
     desc_write.descriptorType = binding.type;

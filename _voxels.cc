@@ -138,6 +138,7 @@ struct voxel_state_t
     dispatch_runtime_t pixel_cycling_runtime;
     dispatch_runtime_t* current_runtime;
     dispatch_runtime_t sparse_runtime;
+    dispatch_runtime_t progressive_runtime;
 
     VkFence last_submit;
 
@@ -185,6 +186,8 @@ dispatch_runtime_t DenseRenderingPipeline(
 dispatch_runtime_t DensePixelCyclingRenderingPipeline(
     voxel_state_t* _state, vktk::Context* _vulkan);
 dispatch_runtime_t SparseRenderingPipeline(
+    voxel_state_t* _state, vktk::Context* _vulkan);
+dispatch_runtime_t ProgressiveRenderingPipeline(
     voxel_state_t* _state, vktk::Context* _vulkan);
 
 void BindGUIRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
@@ -951,6 +954,8 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->forward_runtime = DenseRenderingPipeline(_state, _vulkan);
     _state->pixel_cycling_runtime = DensePixelCyclingRenderingPipeline(_state, _vulkan);
     _state->sparse_runtime = SparseRenderingPipeline(_state, _vulkan);
+    _state->progressive_runtime = ProgressiveRenderingPipeline(_state, _vulkan);
+    _state->progressive_runtime.ConstantResources(_state->progressive_runtime);
 
 #if defined(TRAVERSAL_V1)
     _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
@@ -992,9 +997,11 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
 #endif
 
+#if 0
     _state->forward_runtime.ConstantResources(_state->forward_runtime);
     _state->pixel_cycling_runtime.ConstantResources(_state->pixel_cycling_runtime);
     _state->sparse_runtime.ConstantResources(_state->sparse_runtime);
+#endif
 
     return;
 }
@@ -1005,9 +1012,12 @@ void RenderResources(void* _pstate,
 {
     voxel_state_t* _state = (voxel_state_t*)_pstate;
 
+#if 0
     _state->forward_runtime.RenderResources(_state->forward_runtime, _swapchain);
     _state->pixel_cycling_runtime.RenderResources(_state->pixel_cycling_runtime, _swapchain);
     _state->sparse_runtime.RenderResources(_state->sparse_runtime, _swapchain);
+#endif
+    _state->progressive_runtime.RenderResources(_state->progressive_runtime, _swapchain);
 }
 
 bool Update(void* _pstate, vktk::Context* _vulkan,
@@ -1718,7 +1728,7 @@ vkrg::layout::DispatchStage ProgressiveResolveStageInfo()
             "float sample_weight;"
             "};"
             "void main() {"
-            "oFS_color = vec4(texelFetch(framebuffer, ivec2(gl_FragCoord.xy)).xyz, sample_weight);"
+            "oFS_color = vec4(texelFetch(framebuffer, ivec2(gl_FragCoord.xy), 0).xyz, sample_weight);"
             "}"
           }
         }
@@ -1744,6 +1754,8 @@ vkrg::layout::DispatchStage ProgressiveResolveStageInfo()
         VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
         VK_BLEND_OP_ADD
     });
+
+    return output;
 }
 
 vkrg::layout::DispatchGraph SparseRegionRenderGraph(dstk::Registry& _registry)
@@ -1914,7 +1926,21 @@ vkrg::layout::DispatchGraph ProgressiveRenderGraph(dstk::Registry& _registry)
 {
     vkrg::layout::DispatchGraph graph{ &_registry };
 
-    _registry.BindComponent(graph["FramebufferDispatch"], vkrg::layout::DispatchPass{});
+    _registry.BindComponent(graph["FramebufferDispatch"], vkrg::layout::DispatchPass{
+        .mode = vkrg::layout::DispatchMode_Graphics,
+        .graphics = {
+            .attachments = {
+                {
+                    VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
+                    numtk::vec4f{ 0.f, 1.f, 1.f, 0.f }
+                },
+                {
+                    VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
+                    vkrg::layout::ClearValue{ 1.f, 0u }
+                }
+            }
+        }
+    });
     graph.MakeSubgraph("FramebufferDispatch");
     _registry.BindComponent(graph["FramebufferDispatch"]["SparseRegionSubpass"],
                             SparseRegionDispatchStageInfo());
@@ -1923,25 +1949,55 @@ vkrg::layout::DispatchGraph ProgressiveRenderGraph(dstk::Registry& _registry)
         .mode = vkrg::layout::DispatchMode_Graphics,
         .graphics = {
             .attachments = {
-                { VK_IMAGE_TYPE_2D, VK_FORMAT_B8G8R8A8_UNORM,
-                  numtk::vec4f{ 0.f, 1.f, 1.f, 0.f } },
                 { VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
                   numtk::vec4f{ 0.f, 0.f, 0.f, 0.f } }
             }
         }
     });
     graph.MakeSubgraph("FramebufferResolve");
+    _registry.BindComponent(graph["FramebufferResolve"]["ResolvePass"],
+                            ProgressiveResolveStageInfo());
 
-    _registry.BindComponent(graph["present"], vkrg::layout::NodeTag_Present);
-    _registry.BindComponent(graph.MakeEdge("FramebufferResolve", "present"),
+    _registry.BindComponent(graph.MakeEdge("FramebufferDispatch", "FramebufferResolve"),
                             vkrg::layout::EdgeBindings{
                                 vkrg::layout::EdgeType_Image,
                                 vkrg::layout::BindingPoint{
                                     .type = vkrg::layout::BindingType_Framebuffer,
                                     .attachment_index = 0
                                 },
+                                vkrg::layout::BindingPoint{
+                                    .type = vkrg::layout::BindingType_Shader,
+                                    .node_override = graph["FramebufferResolve"]["ResolvePass"],
+                                    .shader = { 0, 0 }
+                                }
+                            });
+
+    _registry.BindComponent(graph["FramebufferBlit"], vkrg::layout::NodeTag_BlitImage);
+    _registry.BindComponent(graph.MakeEdge("FramebufferResolve", "FramebufferBlit"),
+                            vkrg::layout::EdgeBindings{
+                                vkrg::layout::EdgeType_Image,
+                                vkrg::layout::BindingPoint{
+                                    .type = vkrg::layout::BindingType_Framebuffer,
+                                    .attachment_index = 0
+                                },
+                                vkrg::layout::BindingPoint{
+                                    .type = vkrg::layout::BindingType_BlitImage,
+                                    .blit_slot = vkrg::layout::BlitImageSlot_Source
+                                }
+                            });
+
+    _registry.BindComponent(graph["present"], vkrg::layout::NodeTag_Present);
+    _registry.BindComponent(graph.MakeEdge("FramebufferBlit", "present"),
+                            vkrg::layout::EdgeBindings{
+                                vkrg::layout::EdgeType_Image,
+                                vkrg::layout::BindingPoint{
+                                    .type = vkrg::layout::BindingType_BlitImage,
+                                    .blit_slot = vkrg::layout::BlitImageSlot_Sink
+                                },
                                 {}
                             });
+
+    return graph;
 }
 
 vkrg::layout::DispatchGraph GUIRenderGraph(dstk::Registry& _registry)
@@ -2876,6 +2932,32 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt)
 
     vkUpdateDescriptorSets(_rt.vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
 }
+
+dispatch_runtime_t ProgressiveRenderingPipeline(voxel_state_t* _state, vktk::Context* _vulkan)
+{
+    dispatch_runtime_t output = {};
+    output.graph = ProgressiveRenderGraph(_state->core_registry);
+    output.vulkan = _vulkan;
+    output.registry = &_state->core_registry;
+    output.state = _state;
+
+    output.ConstantResources = [](dispatch_runtime_t& _rt)
+    {
+        _rt.Context().GenerateStaticRuntime();
+        _rt.Context().ClearDynamicRuntime();
+        _rt.Context().ResetDynamicRuntime();
+    };
+
+    output.RenderResources = [](dispatch_runtime_t& _rt,
+                                vktk::Swapchain const& _swapchain)
+    {
+        _rt.Context().ClearFramebufferRuntime();
+        _rt.Context().GenerateFramebufferRuntime(&_swapchain.format);
+    };
+
+    return output;
+}
+
 
 struct GUIPipelinePayload
 {
