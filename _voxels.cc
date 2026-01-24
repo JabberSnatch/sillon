@@ -2821,6 +2821,7 @@ struct ProgressivePipelinePayload
     vktk::Texture primary_pass_color;
     vktk::Texture primary_pass_depth;
     vktk::Texture accumulated_color;
+    VkSampler nearest_sampler;
 };
 
 dispatch_runtime_t ProgressiveRenderingPipeline(voxel_state_t* _state, vktk::Context* _vulkan)
@@ -2849,8 +2850,25 @@ dispatch_runtime_t ProgressiveRenderingPipeline(voxel_state_t* _state, vktk::Con
 
     output.ConstantResources = [](dispatch_runtime_t& _rt)
     {
+        ProgressivePipelinePayload& payload = *(ProgressivePipelinePayload*)_rt.payload;
+
         _rt.Context().GenerateStaticRuntime();
         _rt.Context().ResetDynamicRuntime();
+
+        VkSamplerCreateInfo sampler_create{};
+        sampler_create.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        sampler_create.pNext = nullptr;
+        sampler_create.flags = 0u;
+        sampler_create.magFilter = VK_FILTER_NEAREST;
+        sampler_create.minFilter = VK_FILTER_NEAREST;
+        sampler_create.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        sampler_create.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sampler_create.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sampler_create.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sampler_create.minLod = 0.0;
+        sampler_create.maxLod = 0.0;
+        CHECKCALL(vkCreateSampler, _rt.vulkan->device,
+                  &sampler_create, nullptr, &payload.nearest_sampler);
 
         _rt.graph.DepthFirstTraversal(
             [&]
@@ -2912,6 +2930,23 @@ dispatch_runtime_t ProgressiveRenderingPipeline(voxel_state_t* _state, vktk::Con
             { payload.accumulated_color.view }
         );
 
+        VkDescriptorImageInfo image_info{};
+        image_info.sampler = payload.nearest_sampler;
+        image_info.imageView = payload.primary_pass_color.view;
+        image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkWriteDescriptorSet desc_write = _rt.Context().BindShaderResource(
+            _rt.graph["FramebufferResolve"]["ResolvePass"],
+            vkrg::layout::BindingPoint{
+                .type = vkrg::layout::BindingType_Shader,
+                .shader = { 0, 0 }
+            },
+            0,
+            vkrg::bind::ShaderResources{
+                .images = { image_info }
+            });
+
+        vkUpdateDescriptorSets(_rt.vulkan->device, 1, &desc_write, 0u, nullptr);
+
         _rt.graph.DepthFirstTraversal(
             [&]
             (uint32_t, dstk::Registry::Node node) {
@@ -2959,6 +2994,19 @@ dispatch_runtime_t ProgressiveRenderingPipeline(voxel_state_t* _state, vktk::Con
         _rt.Context().BindFramebufferArea(
             _rt.graph["FramebufferResolve"],
             { 0, scissor, viewport });
+
+        _rt.Context().BindGraphicsCommand(
+            _rt.graph["FramebufferResolve"]["ResolvePass"],
+            0,
+            { vkrg::bind::DispatchCommand_Draw, 3, 1 });
+
+        float* push_constants = (float*)_rt.Context().BindPushConstants(
+            _rt.graph["FramebufferResolve"]["ResolvePass"],
+            {
+                .type = vkrg::layout::BindingType_PushConstantRange,
+                .push_constant_range = 0
+            }, 0);
+        *push_constants = 1.f;
 
         _rt.Context().Dispatch(_command_buffer);
     };
