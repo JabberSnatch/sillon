@@ -957,10 +957,9 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->forward_runtime = DenseRenderingPipeline(_state, _vulkan);
     _state->pixel_cycling_runtime = DensePixelCyclingRenderingPipeline(_state, _vulkan);
     _state->sparse_runtime = SparseRenderingPipeline(_state, _vulkan);
-#if 0
+
     _state->progressive_runtime = ProgressiveRenderingPipeline(_state, _vulkan);
     _state->progressive_runtime.ConstantResources(_state->progressive_runtime);
-#endif
 
 #if defined(TRAVERSAL_V1)
     _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
@@ -1002,7 +1001,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
 #endif
 
-#if 1
+#if 0
     _state->forward_runtime.ConstantResources(_state->forward_runtime);
     _state->pixel_cycling_runtime.ConstantResources(_state->pixel_cycling_runtime);
     _state->sparse_runtime.ConstantResources(_state->sparse_runtime);
@@ -1017,13 +1016,13 @@ void RenderResources(void* _pstate,
 {
     voxel_state_t* _state = (voxel_state_t*)_pstate;
 
-#if 1
+#if 0
     _state->forward_runtime.RenderResources(_state->forward_runtime, _swapchain);
     _state->pixel_cycling_runtime.RenderResources(_state->pixel_cycling_runtime, _swapchain);
     _state->sparse_runtime.RenderResources(_state->sparse_runtime, _swapchain);
-#else
-    _state->progressive_runtime.RenderResources(_state->progressive_runtime, _swapchain);
 #endif
+
+    _state->progressive_runtime.RenderResources(_state->progressive_runtime, _swapchain);
 }
 
 bool Update(void* _pstate, vktk::Context* _vulkan,
@@ -1074,9 +1073,12 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         guitk::WidgetStates const* gui_record = guitk::EndRecord(_state->gui_context);
         _state->current_gui_record = gui_record;
 
+#if 0
         _state->sparse_runtime.Update(_state->sparse_runtime);
         _state->forward_runtime.Update(_state->forward_runtime);
         _state->pixel_cycling_runtime.Update(_state->pixel_cycling_runtime);
+#endif
+        _state->progressive_runtime.Update(_state->progressive_runtime);
     }
 
     _state->time += _input->time_delta;
@@ -1192,7 +1194,8 @@ void Draw(void* _pstate,
 #if defined(TRAVERSAL_V1)
     _state->current_runtime->Dispatch(*_state->current_runtime, command_buffer, _swapchain);
 #elif defined(TRAVERSAL_V2)
-    _state->sparse_runtime.Dispatch(_state->sparse_runtime, command_buffer, _swapchain);
+    //_state->sparse_runtime.Dispatch(_state->sparse_runtime, command_buffer, _swapchain);
+    _state->progressive_runtime.Dispatch(_state->progressive_runtime, command_buffer, _swapchain);
 #endif
 
     command_buffer.End();
@@ -1201,9 +1204,13 @@ void Draw(void* _pstate,
     command_buffer.Submit(nullptr, &_acquire_semaphore, &wait_dst_stage, 1u,
                           &_state->last_submit);
 
+    _state->progressive_runtime.PostSubmit(_state->progressive_runtime, _state->last_submit);
+
+#if 0
     _state->sparse_runtime.PostSubmit(_state->sparse_runtime, _state->last_submit);
     if (_state->current_runtime->PostSubmit)
         _state->current_runtime->PostSubmit(*_state->current_runtime, _state->last_submit);
+#endif
 
     _vulkan->ScheduleFenceDestroy(_state->last_submit);
 
@@ -1947,9 +1954,11 @@ vkrg::layout::DispatchGraph ProgressiveRenderGraph(dstk::Registry& _registry)
             }
         }
     });
-    graph.MakeSubgraph("FramebufferDispatch");
-    _registry.BindComponent(graph["FramebufferDispatch"]["SparseRegionSubpass"],
-                            SparseRegionDispatchStageInfo());
+
+    {
+        vkrg::layout::DispatchGraph& subpasses = graph.MakeSubgraph("FramebufferDispatch");
+        subpasses.BindSubgraph("SparseRegionSubpass", SparseRegionRenderGraph(_registry));
+    }
 
     _registry.BindComponent(graph["FramebufferResolve"], vkrg::layout::DispatchPass{
         .mode = vkrg::layout::DispatchMode_Graphics,
@@ -2807,6 +2816,13 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt)
     vkUpdateDescriptorSets(_rt.vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
 }
 
+struct ProgressivePipelinePayload
+{
+    vktk::Texture primary_pass_color;
+    vktk::Texture primary_pass_depth;
+    vktk::Texture accumulated_color;
+};
+
 dispatch_runtime_t ProgressiveRenderingPipeline(voxel_state_t* _state, vktk::Context* _vulkan)
 {
     dispatch_runtime_t output = {};
@@ -2814,12 +2830,36 @@ dispatch_runtime_t ProgressiveRenderingPipeline(voxel_state_t* _state, vktk::Con
     output.vulkan = _vulkan;
     output.registry = &_state->core_registry;
     output.state = _state;
+    output.payload = new ProgressivePipelinePayload{};
+
+    BindSparseRegionRuntime(_state, _vulkan,
+                            output.graph["FramebufferDispatch"]["SparseRegionSubpass"]);
+
+    output.DestroyPayload = [](dispatch_runtime_t& _rt)
+    {
+        _rt.graph.DepthFirstTraversal(
+            [&]
+            (uint32_t, dstk::Registry::Node node) {
+                dispatch_runtime_t* runtime =
+                    _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
+                if (runtime && runtime->DestroyPayload)
+                    runtime->DestroyPayload(*runtime);
+            });
+    };
 
     output.ConstantResources = [](dispatch_runtime_t& _rt)
     {
         _rt.Context().GenerateStaticRuntime();
-        _rt.Context().ClearDynamicRuntime();
         _rt.Context().ResetDynamicRuntime();
+
+        _rt.graph.DepthFirstTraversal(
+            [&]
+            (uint32_t, dstk::Registry::Node node) {
+                dispatch_runtime_t* runtime =
+                    _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
+                if (runtime && runtime->ConstantResources)
+                    runtime->ConstantResources(*runtime);
+            });
     };
 
     output.RenderResources = [](dispatch_runtime_t& _rt,
@@ -2827,6 +2867,112 @@ dispatch_runtime_t ProgressiveRenderingPipeline(voxel_state_t* _state, vktk::Con
     {
         _rt.Context().ClearFramebufferRuntime();
         _rt.Context().GenerateFramebufferRuntime(&_swapchain.format);
+#if 0
+        _rt.Context().BindSwapchain(_rt.graph["FramebufferDispatch"],
+                                    _swapchain);
+#endif
+
+        ProgressivePipelinePayload& payload = *(ProgressivePipelinePayload*)_rt.payload;
+
+        {
+            _rt.vulkan->DestroyTexture(payload.primary_pass_color);
+            payload.primary_pass_color = _rt.vulkan->CreateTexture(
+                _swapchain.size.width, _swapchain.size.height, 1,
+                VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
+                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+                | VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+                | VK_IMAGE_USAGE_SAMPLED_BIT
+            );
+
+            _rt.vulkan->DestroyTexture(payload.primary_pass_depth);
+            payload.primary_pass_depth = _rt.vulkan->CreateTexture(
+                _swapchain.size.width, _swapchain.size.height, 1,
+                VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
+                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
+            );
+
+            _rt.vulkan->DestroyTexture(payload.accumulated_color);
+            payload.accumulated_color = _rt.vulkan->CreateTexture(
+                _swapchain.size.width, _swapchain.size.height, 1,
+                VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
+                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+                | VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+                | VK_IMAGE_USAGE_SAMPLED_BIT
+            );
+        }
+
+        numtk::vec2u size = { _swapchain.size.width, _swapchain.size.height };
+        _rt.Context().BindAttachments(
+            _rt.graph["FramebufferDispatch"], size,
+            { payload.primary_pass_color.view, payload.primary_pass_depth.view }
+        );
+
+        _rt.Context().BindAttachments(
+            _rt.graph["FramebufferResolve"], size,
+            { payload.accumulated_color.view }
+        );
+
+        _rt.graph.DepthFirstTraversal(
+            [&]
+            (uint32_t, dstk::Registry::Node node) {
+                dispatch_runtime_t* runtime =
+                    _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
+                if (runtime && runtime->RenderResources)
+                    runtime->RenderResources(*runtime, _swapchain);
+            });
+    };
+
+    output.Update = [](dispatch_runtime_t& _rt)
+    {
+        _rt.graph.DepthFirstTraversal(
+            [&]
+            (uint32_t, dstk::Registry::Node node) {
+                dispatch_runtime_t* runtime =
+                    _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
+                if (runtime && runtime->Update)
+                    runtime->Update(*runtime);
+            });
+    };
+
+    output.Dispatch = [](dispatch_runtime_t& _rt,
+                         vktk::CommandBuffer& _command_buffer,
+                         vktk::Swapchain const& _swapchain)
+    {
+        _rt.graph.DepthFirstTraversal(
+            [&]
+            (uint32_t, dstk::Registry::Node node) {
+                dispatch_runtime_t* runtime =
+                    _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
+                if (runtime && runtime->Dispatch)
+                    runtime->Dispatch(*runtime, _command_buffer, _swapchain);
+            });
+
+        numtk::bounds2u scissor{ { 0, 0 },
+                                 { _swapchain.size.width, _swapchain.size.height } };
+        numtk::bounds2f viewport{ { 0.f, 0.f },
+                                  { (float)scissor.extent.x(), (float)scissor.extent.y() } };
+
+        _rt.Context().BindFramebufferArea(
+            _rt.graph["FramebufferDispatch"],
+            { 0, scissor, viewport });
+
+        _rt.Context().BindFramebufferArea(
+            _rt.graph["FramebufferResolve"],
+            { 0, scissor, viewport });
+
+        _rt.Context().Dispatch(_command_buffer);
+    };
+
+    output.PostSubmit = [](dispatch_runtime_t& _rt, VkFence _last_submit)
+    {
+        _rt.graph.DepthFirstTraversal(
+            [&]
+            (uint32_t, dstk::Registry::Node node) {
+                dispatch_runtime_t* runtime =
+                    _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
+                if (runtime && runtime->PostSubmit)
+                    runtime->PostSubmit(*runtime, _last_submit);
+            });
     };
 
     return output;
