@@ -894,22 +894,14 @@ struct AccessInfo {
     VkAccessFlags access;
 };
 
-struct DispatchInvocation {
-    GraphicsCommand graphics;
-    std::vector<std::unique_ptr<uint8_t[]>> push_constants;
+struct VertexBindings {
     std::vector<VertexInput> vertex_inputs;
     IndexInput index_input;
-
-    DispatchInvocation() = default;
-    DispatchInvocation(DispatchInvocation&&) = default;
 };
 
 struct StageBarriers {
     std::vector<ResourceBarrier> barriers;
     std::unordered_map<VkBuffer, std::pair<AccessInfo, AccessInfo>> buffer_barriers;
-
-    StageBarriers() = default;
-    StageBarriers(StageBarriers&&) = default;
 };
 
 using PushConstantStorage = std::vector<std::unique_ptr<uint8_t[]>>;

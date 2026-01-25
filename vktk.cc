@@ -2639,15 +2639,16 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                                            memory);
                     }
 
-                    auto const* invocation = registry.ComponentLookup<bind::DispatchInvocation>(node, binding_index);
+                    auto const* vertices = registry.ComponentLookup<bind::VertexBindings>(
+                        node, binding_index);
                     bool indexed_draw = false;
-                    if (invocation)
+                    if (vertices)
                     {
                         for (uint32_t vertex_input_index = 0u;
-                             vertex_input_index < (uint32_t)invocation->vertex_inputs.size();
+                             vertex_input_index < (uint32_t)vertices->vertex_inputs.size();
                              ++vertex_input_index)
                         {
-                            bind::VertexInput const& binding = invocation->vertex_inputs[vertex_input_index];
+                            bind::VertexInput const& binding = vertices->vertex_inputs[vertex_input_index];
                             if (binding.buffer == VK_NULL_HANDLE)
                                 continue;
 
@@ -2655,11 +2656,11 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                                                    &binding.buffer, &binding.offset);
                         }
 
-                        indexed_draw = (invocation->index_input.buffer != VK_NULL_HANDLE);
+                        indexed_draw = (vertices->index_input.buffer != VK_NULL_HANDLE);
                         if (indexed_draw)
                             vkCmdBindIndexBuffer(_command_buffer,
-                                                 invocation->index_input.buffer,
-                                                 invocation->index_input.offset,
+                                                 vertices->index_input.buffer,
+                                                 vertices->index_input.offset,
                                                  VK_INDEX_TYPE_UINT32);
                     }
 
@@ -3040,8 +3041,8 @@ DispatchContext::BindIndexInput(dstk::Registry::Node _node,
                                                        _invoc_indices);
 
     bind::StageBarriers& stage_barriers = registry.ComponentRequest<bind::StageBarriers>(_node);
-    bind::DispatchInvocation& invocation = registry.ComponentRequest<bind::DispatchInvocation>(_node, binding_index);
-    invocation.index_input = _index_input;
+    bind::VertexBindings& vertices = registry.ComponentRequest<bind::VertexBindings>(_node, binding_index);
+    vertices.index_input = _index_input;
     stage_barriers.buffer_barriers[_index_input.buffer].second = bind::AccessInfo{
         VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
         VK_ACCESS_INDEX_READ_BIT
@@ -3068,11 +3069,11 @@ DispatchContext::BindVertexInput(dstk::Registry::Node _node,
                                                        _invoc_indices);
 
     bind::StageBarriers& stage_barriers = registry.ComponentRequest<bind::StageBarriers>(_node);
-    bind::DispatchInvocation& invocation = registry.ComponentRequest<bind::DispatchInvocation>(_node, binding_index);
+    bind::VertexBindings& vertices = registry.ComponentRequest<bind::VertexBindings>(_node, binding_index);
 
-    if (invocation.vertex_inputs.size() < _location.vertex_input_index+1)
-        invocation.vertex_inputs.resize(_location.vertex_input_index+1);
-    invocation.vertex_inputs[_location.vertex_input_index] = _vertex_input;
+    if (vertices.vertex_inputs.size() < _location.vertex_input_index+1)
+        vertices.vertex_inputs.resize(_location.vertex_input_index+1);
+    vertices.vertex_inputs[_location.vertex_input_index] = _vertex_input;
 
     stage_barriers.buffer_barriers[_vertex_input.buffer].second = bind::AccessInfo{
         VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
