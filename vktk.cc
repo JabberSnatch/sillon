@@ -2688,6 +2688,35 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
 
             vkCmdEndRenderPass(_command_buffer);
         }
+
+        layout::NodeTag const* tag = registry.ComponentLookup<layout::NodeTag>(node);
+        if (tag && *tag == layout::NodeTag_BlitImage)
+        {
+            auto const* blit_bindings = registry.ComponentLookup<bind::BlitBindings>(node);
+            numtk::vec3i src_min = blit_bindings->command.source_bounds.min.cast<int32_t>();
+            numtk::vec3i src_max = blit_bindings->command.source_bounds.max().cast<int32_t>();
+            numtk::vec3i dst_min = blit_bindings->command.sink_bounds.min.cast<int32_t>();
+            numtk::vec3i dst_max = blit_bindings->command.sink_bounds.max().cast<int32_t>();
+
+            VkImageBlit blit_region = {};
+            blit_region.srcSubresource = VkImageSubresourceLayers{
+                blit_bindings->command.aspect_mask, 0, 0, VK_REMAINING_ARRAY_LAYERS
+            };
+            blit_region.srcOffsets[0] = { src_min.x, src_min.y, src_min.z };
+            blit_region.srcOffsets[1] = { src_max.x, src_max.y, src_max.z };
+            blit_region.dstSubresource = blit_region.srcSubresource;
+            blit_region.dstOffsets[0] = { dst_min.x, dst_min.y, dst_min.z };
+            blit_region.dstOffsets[1] = { dst_max.x, dst_max.y, dst_max.z };
+
+            vkCmdBlitImage(_command_buffer,
+                           blit_bindings->source,
+                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           blit_bindings->sink,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           1,
+                           &blit_region,
+                           blit_bindings->command.filter);
+        }
     });
 }
 
@@ -2999,6 +3028,28 @@ DispatchContext::BindFramebufferArea(dstk::Registry::Node _node,
     registry.ComponentRequest<bind::FramebufferArea>(_node) = _area;
 }
 
+void
+DispatchContext::BindBlitCommand(dstk::Registry::Node _node,
+                                 bind::BlitCommand const& _command)
+{
+    registry.ComponentRequest<bind::BlitBindings>(_node).command = _command;
+}
+
+void
+DispatchContext::BindImage(dstk::Registry::Node _node,
+                           layout::BindingPoint const& _location,
+                           VkImage _image)
+{
+    if (_location.type == layout::BindingType_BlitImage)
+    {
+        bind::BlitBindings& bindings = registry.ComponentRequest<bind::BlitBindings>(_node);
+        if (_location.blit_slot == layout::BlitImageSlot_Source)
+            bindings.source = _image;
+        if (_location.blit_slot == layout::BlitImageSlot_Sink)
+            bindings.sink = _image;
+    }
+}
+
 uint32_t
 DispatchContext::ComputeBindingIndex(std::vector<uint32_t> const& _invoc_count_stack,
                                      std::vector<uint32_t> const& _invoc_indices)
@@ -3146,7 +3197,7 @@ DispatchContext::BindShaderResource(dstk::Registry::Node _node,
     desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     desc_write.pNext = nullptr;
     desc_write.dstSet = group_runtime.sets[binding_index];
-    desc_write.dstBinding = shader_binding.sink.shader.binding_index;
+    desc_write.dstBinding = shader_binding.target.shader.binding_index;
     desc_write.dstArrayElement = 0u;
     desc_write.descriptorCount = descriptor_count;
     desc_write.descriptorType = binding.type;

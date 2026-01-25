@@ -2947,6 +2947,38 @@ dispatch_runtime_t ProgressiveRenderingPipeline(voxel_state_t* _state, vktk::Con
 
         vkUpdateDescriptorSets(_rt.vulkan->device, 1, &desc_write, 0u, nullptr);
 
+        _rt.Context().BindBlitCommand(
+            _rt.graph["FramebufferBlit"],
+            vkrg::bind::BlitCommand{
+                numtk::bounds3u{
+                    { 0, 0, 0 }, { _swapchain.size.width, _swapchain.size.height, 1 }
+                },
+                numtk::bounds3u{
+                    { 0, 0, 0 }, { _swapchain.size.width, _swapchain.size.height, 1 }
+                },
+                VK_IMAGE_ASPECT_COLOR_BIT,
+                VK_FILTER_NEAREST
+            }
+        );
+
+        _rt.Context().BindImage(
+            _rt.graph["FramebufferBlit"],
+            vkrg::layout::BindingPoint{
+                .type = vkrg::layout::BindingType_BlitImage,
+                .blit_slot = vkrg::layout::BlitImageSlot_Source
+            },
+            payload.accumulated_color.image
+        );
+
+        _rt.Context().BindImage(
+            _rt.graph["FramebufferBlit"],
+            vkrg::layout::BindingPoint{
+                .type = vkrg::layout::BindingType_BlitImage,
+                .blit_slot = vkrg::layout::BlitImageSlot_Sink
+            },
+            _swapchain.images[_swapchain.index]
+        );
+
         _rt.graph.DepthFirstTraversal(
             [&]
             (uint32_t, dstk::Registry::Node node) {

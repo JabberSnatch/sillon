@@ -912,15 +912,21 @@ struct ShaderResources {
 };
 
 struct ShaderBinding {
-    ::vkrg::layout::BindingPoint sink;
+    ::vkrg::layout::BindingPoint target;
     ShaderResources resources;
 };
 
 struct BlitCommand {
     numtk::bounds3u source_bounds;
     numtk::bounds3u sink_bounds;
-    VkImageAspectFlagBits aspect_mask;
+    VkImageAspectFlags aspect_mask;
     VkFilter filter;
+};
+
+struct BlitBindings {
+    BlitCommand command;
+    VkImage source;
+    VkImage sink;
 };
 
 } // namespace bind
