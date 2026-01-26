@@ -316,6 +316,7 @@ struct Context
         VkFormat format;
         VkImageLayout initialLayout;
         VkImageLayout finalLayout;
+        VkAttachmentLoadOp loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     };
     VkRenderPass CreateRenderPass(std::vector<RenderPassAttachment> const& _attachments);
     VkRenderPass CreateRenderPass(std::vector<RenderPassAttachment> const& _attachments,
@@ -470,6 +471,7 @@ struct RenderAttachment {
     VkImageType type;
     VkFormat format;
     ClearValue clear_value;
+    VkAttachmentLoadOp load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
 };
 
 enum DispatchMode {

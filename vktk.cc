@@ -866,7 +866,7 @@ VkRenderPass Context::CreateRenderPass(std::vector<RenderPassAttachment> const& 
         description.flags = 0u;
         description.format = attachment.format;
         description.samples = VK_SAMPLE_COUNT_1_BIT;
-        description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        description.loadOp = attachment.loadOp;
         description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -887,7 +887,7 @@ VkRenderPass Context::CreateRenderPass(std::vector<RenderPassAttachment> const& 
         description.flags = 0u;
         description.format = _depth_attachment->format;
         description.samples = VK_SAMPLE_COUNT_1_BIT;
-        description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        description.loadOp = _depth_attachment->loadOp;
         description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -2739,7 +2739,8 @@ DispatchContext::RenderPassDescription(
         output.push_back(vktk::Context::RenderPassAttachment{
             dispatch_pass.graphics.attachments[index].format,
             VK_IMAGE_LAYOUT_UNDEFINED,
-            sync_reqs.layout
+            sync_reqs.layout,
+            dispatch_pass.graphics.attachments[index].load_op
         });
     }
 

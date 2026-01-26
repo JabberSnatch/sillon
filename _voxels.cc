@@ -68,6 +68,7 @@ struct FlightCamera
     void Update(iotk::input_t const* _input,
                 iotk::input_t const* _past_input);
     numtk::mat4f Matrix() const;
+    bool updated;
 };
 
 struct VoxelRegionPackage
@@ -132,6 +133,8 @@ struct voxel_state_t
 
     uint32_t frame_index = 0;
     bool pixel_cycling_enabled = false;
+
+    uint32_t progressive_frame_index = 0;
 
     dstk::Registry core_registry;
     dispatch_runtime_t forward_runtime;
@@ -959,7 +962,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->sparse_runtime = SparseRenderingPipeline(_state, _vulkan);
 
     _state->progressive_runtime = ProgressiveRenderingPipeline(_state, _vulkan);
-    _state->progressive_runtime.ConstantResources(_state->progressive_runtime);
 
 #if defined(TRAVERSAL_V1)
     _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
@@ -1007,6 +1009,8 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->sparse_runtime.ConstantResources(_state->sparse_runtime);
 #endif
 
+    _state->progressive_runtime.ConstantResources(_state->progressive_runtime);
+
     return;
 }
 
@@ -1031,6 +1035,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 {
     voxel_state_t* _state = (voxel_state_t*)_pstate;
 
+    bool old_indirect_light_state = _state->enable_indirect_light;
     {
         if (!(_state->frame_index % 10))
         {
@@ -1102,7 +1107,10 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
     }
 
     if (!_input->key_down['c'] && _past_input->key_down['c'])
+    {
         _state->pixel_cycling_enabled = !_state->pixel_cycling_enabled;
+        _state->enable_indirect_light = !_state->enable_indirect_light;
+    }
 
     if (_input->key_down['p'] && !_past_input->key_down['p'])
         _state->region_package.display_depth = std::min(_state->region_package.display_depth+1, _state->region_package.stack_depth);
@@ -1173,6 +1181,9 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
     if (!_state->current_gui_record->mouse_over)
         _state->camera.Update(_input, _past_input);
 
+    if (_state->camera.updated || (old_indirect_light_state != _state->enable_indirect_light))
+        _state->progressive_frame_index = 0;
+
     return true;
 }
 
@@ -1232,6 +1243,7 @@ void Draw(void* _pstate,
               _vulkan->present_queue, &present_info);
 
     ++_state->frame_index;
+    ++_state->progressive_frame_index;
 }
 
 void Shutdown(void* _pstate,
@@ -1333,6 +1345,8 @@ numtk::mat4f TurntableCamera::Matrix() const
 void FlightCamera::Update(iotk::input_t const* _input,
                           iotk::input_t const* _past_input)
 {
+    updated = false;
+
     {
         velocity *= (1.f + 0.005f * (float)_input->wheel_delta);
         if (velocity < 0.01f)
@@ -1351,6 +1365,8 @@ void FlightCamera::Update(iotk::input_t const* _input,
 
         forward_spherical.y() =
             std::min(std::max(forward_spherical.y(), -numtk::kPi*0.4999f), numtk::kPi*0.4999f);
+
+        updated = true;
     }
 
     numtk::vec3f forward = {
@@ -1380,6 +1396,9 @@ void FlightCamera::Update(iotk::input_t const* _input,
     if (_input->mod_down & iotk::fKeyMod::kShift)
         movement.y -= 1.f;
     movement.normalise();
+
+    if (movement != numtk::vec3f::Constant(0.f))
+        updated = true;
 
     position += (forward*movement.z + left*movement.x + numtk::vec3f{ 0.f, movement.y, 0.f })
         * velocity * _input->time_delta;
@@ -1965,7 +1984,7 @@ vkrg::layout::DispatchGraph ProgressiveRenderGraph(dstk::Registry& _registry)
         .graphics = {
             .attachments = {
                 { VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
-                  numtk::vec4f{ 0.f, 0.f, 0.f, 0.f } }
+                  numtk::vec4f{ 0.f, 0.f, 0.f, 0.f }, VK_ATTACHMENT_LOAD_OP_LOAD }
             }
         }
     });
@@ -2885,10 +2904,6 @@ dispatch_runtime_t ProgressiveRenderingPipeline(voxel_state_t* _state, vktk::Con
     {
         _rt.Context().ClearFramebufferRuntime();
         _rt.Context().GenerateFramebufferRuntime(&_swapchain.format);
-#if 0
-        _rt.Context().BindSwapchain(_rt.graph["FramebufferDispatch"],
-                                    _swapchain);
-#endif
 
         ProgressivePipelinePayload& payload = *(ProgressivePipelinePayload*)_rt.payload;
 
@@ -3038,7 +3053,7 @@ dispatch_runtime_t ProgressiveRenderingPipeline(voxel_state_t* _state, vktk::Con
                 .type = vkrg::layout::BindingType_PushConstantRange,
                 .push_constant_range = 0
             }, 0);
-        *push_constants = 1.f;
+        *push_constants = 1.f / (float)(_rt.state->progressive_frame_index + 1);
 
         _rt.Context().Dispatch(_command_buffer);
     };
