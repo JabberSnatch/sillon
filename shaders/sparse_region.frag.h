@@ -442,23 +442,31 @@ void main()
         float avg_t = 0.0;
         if (display_mode != 0.0)
         {
-#define SAMPLE_COUNT 4
+            vec4 previous_hit = trav;
+            vec3 previous_org = org;
+            vec3 previous_dir = dir;
+            float current_weight = 1.0;
+
+#if 1
+#define SAMPLE_COUNT 16
             for (uint sample_index = 0; sample_index < SAMPLE_COUNT; ++sample_index)
             {
-
-#if 0
-                uint th_index = sample_index / 4;
-                uint ph_index = sample_index % 4;
-                float theta = 3.14159265 * 0.5 * (float(th_index + 0.5) / 4.0);
-                float phi = 3.14159265 * 2.0 * (float(ph_index) / 4.0);
-#else
+                vec3 previous_hitp = previous_org + previous_dir*previous_hit.w;
+                vec3 current_org = previous_hitp + previous_hit.xyz*0.0001;
+                if (dot(previous_hit.xyz, light_dir) > 0.0)
+                {
+                    float sample_t = RegionTraversal4(current_org + light_dir*0.0001, light_dir).w;
+                    float sample_v = sample_t >= 0.0 ? 0.0 : 1.0;
+                    indirect += 1.0 * sample_v
+                        * max(0.0, dot(-previous_dir, light_dir))
+                        * current_weight;
+                }
 
                 vec2 owen_sample = OwenPlastic(
                     pixelCount * SAMPLE_COUNT * sample_offset +
                     pixelID * SAMPLE_COUNT + sample_index, 0);
                 float theta = owen_sample.x * 3.14159265 * 0.5;
                 float phi = owen_sample.y * 3.14159265 * 2.0;
-#endif
 
                 vec3 ts_sample = vec3(
                     cos(theta) * cos(phi),
@@ -466,16 +474,40 @@ void main()
                     sin(theta)
                     );
 
-#if 0
-                vec3 n = trav.xyz;
-                vec3 t = cross(vec3(0.0, 1.0, 0.0), n);
-                if (dot(t, t) == 0.0)
-                    t = cross(vec3(0.0, 0.0, 1.0), n);
-                vec3 b = cross(n, t);
-                t = cross(b, n);
+                mat3 tb_mat = genTB(trav.xyz);
+                vec3 current_ray = tb_mat * ts_sample;
+                float next_weight = max(0.0, dot(-previous_dir, current_ray));
 
-                vec3 second_ray = t * ts_sample.x + b * ts_sample.y + n * ts_sample.z;
-#endif
+                if (dot(current_ray, previous_hit.xyz) < 0.0)
+                    break;
+
+                vec4 current_hit = RegionTraversal4(current_org, current_ray);
+                if (current_hit.w < 0.0)
+                    break;
+
+                previous_org = current_org;
+                previous_dir = current_ray;
+                previous_hit = current_hit;
+                current_weight *= next_weight;
+            }
+
+#else
+
+#define SAMPLE_COUNT 4
+            for (uint sample_index = 0; sample_index < SAMPLE_COUNT; ++sample_index)
+            {
+                vec2 owen_sample = OwenPlastic(
+                    pixelCount * SAMPLE_COUNT * sample_offset +
+                    pixelID * SAMPLE_COUNT + sample_index, 0);
+                float theta = owen_sample.x * 3.14159265 * 0.5;
+                float phi = owen_sample.y * 3.14159265 * 2.0;
+
+                vec3 ts_sample = vec3(
+                    cos(theta) * cos(phi),
+                    cos(theta) * sin(phi),
+                    sin(theta)
+                    );
+
                 mat3 tb_mat = genTB(trav.xyz);
                 vec3 second_ray = tb_mat * ts_sample;
 
@@ -500,6 +532,8 @@ void main()
                     avg_t += sample_v;
                 }
             }
+#endif
+
         }
 
         //color.xyz = vec3(mix(shadow.xxx * diffuse + indirect.xxx * indirect_contribution, vec3(0.3, 0.5, 0.5), (1.0 - fog).xxx));
