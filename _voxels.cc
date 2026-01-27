@@ -174,6 +174,7 @@ struct SparseRegionPushConstants
     float display_mode;
     float node_size;
     int32_t stack_depth;
+    uint32_t sample_offset;
 };
 
 struct SkyboxPushConstants
@@ -1036,6 +1037,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
     voxel_state_t* _state = (voxel_state_t*)_pstate;
 
     bool old_indirect_light_state = _state->enable_indirect_light;
+    bool reset_progressive_counter = false;
     {
         if (!(_state->frame_index % 10))
         {
@@ -1104,6 +1106,8 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
         _state->sun_spherical.y() =
             std::min(std::max(_state->sun_spherical.y(), -numtk::kPi*0.4999f), numtk::kPi*0.4999f);
+
+        reset_progressive_counter = true;
     }
 
     if (!_input->key_down['c'] && _past_input->key_down['c'])
@@ -1181,7 +1185,9 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
     if (!_state->current_gui_record->mouse_over)
         _state->camera.Update(_input, _past_input);
 
-    if (_state->camera.updated || (old_indirect_light_state != _state->enable_indirect_light))
+    if (_state->camera.updated
+        || (old_indirect_light_state != _state->enable_indirect_light)
+        || reset_progressive_counter)
         _state->progressive_frame_index = 0;
 
     return true;
@@ -3824,6 +3830,7 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
         push_constants->display_mode = _rt.state->enable_indirect_light ? 1.f : 0.f;
         push_constants->node_size = (float)_rt.state->region_package.node_size;
         push_constants->stack_depth = std::max(_rt.state->region_package.display_depth-1, 0);
+        push_constants->sample_offset = _rt.state->progressive_frame_index;
     };
 
     runtime.PostSubmit = [](dispatch_runtime_t& _rt, VkFence _last_submit)

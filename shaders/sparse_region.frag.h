@@ -20,6 +20,7 @@ layout(push_constant, std430) uniform PushConstants {
     float display_mode;
     float node_size;
     int stack_depth;
+    uint sample_offset;
 };
 
 layout(set = 1, binding = 0) uniform usampler3D masks[];
@@ -387,13 +388,16 @@ vec4 RegionTraversal4(vec3 org, vec3 dir)
     else
         return vec4((HitNormalDDAContext(ctx) * 0.5 + vec3(0.5)) * 0.1, -1.0);
 }
+)"
 
+R"(
 void main()
 {
     vec2 uv =
         (vec2(gl_FragCoord.xy) - vec2(screen_offset.xy))
         / vec2(screen_size.xy);
     uint pixelID = morton2D(uvec2(gl_FragCoord.xy));
+    uint pixelCount = uint(screen_size.x) * uint(screen_size.y);
 
     vec3 dir =
         inverse(mat3(view_model)) *
@@ -438,7 +442,7 @@ void main()
         float avg_t = 0.0;
         if (display_mode != 0.0)
         {
-#define SAMPLE_COUNT 16
+#define SAMPLE_COUNT 4
             for (uint sample_index = 0; sample_index < SAMPLE_COUNT; ++sample_index)
             {
 
@@ -449,7 +453,9 @@ void main()
                 float phi = 3.14159265 * 2.0 * (float(ph_index) / 4.0);
 #else
 
-                vec2 owen_sample = OwenPlastic(pixelID * SAMPLE_COUNT + sample_index, 0);
+                vec2 owen_sample = OwenPlastic(
+                    pixelCount * SAMPLE_COUNT * sample_offset +
+                    pixelID * SAMPLE_COUNT + sample_index, 0);
                 float theta = owen_sample.x * 3.14159265 * 0.5;
                 float phi = owen_sample.y * 3.14159265 * 2.0;
 #endif
