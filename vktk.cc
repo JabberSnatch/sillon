@@ -194,10 +194,15 @@ Context::Context(uint64_t _hinstance, uint64_t _hwindow)
         Vulkan12Features.runtimeDescriptorArray = VK_TRUE;
         Vulkan12Features.descriptorBindingVariableDescriptorCount = VK_TRUE;
 
+        VkPhysicalDeviceMaintenance5Features Maintenance5Features = {};
+        Maintenance5Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES;
+        Maintenance5Features.maintenance5 = VK_TRUE;
+
         VkPhysicalDeviceFeatures2 Features2 = {};
         Features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
 
         Features2.pNext = &Vulkan12Features;
+        Vulkan12Features.pNext = &Maintenance5Features;
         vkGetPhysicalDeviceFeatures2(physical_device, &Features2);
 
         VkDeviceCreateInfo device_info{};
@@ -2689,6 +2694,60 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
             vkCmdEndRenderPass(_command_buffer);
         }
 
+        layout::DispatchGraph::Data const* graph_data =
+            *registry.ComponentLookup<layout::DispatchGraph::Data*>(node);
+#if 0
+        if (graph_data->edges_in.count(node))
+        {
+            for (dstk::Registry::Node edge : graph_data->edges_in.at(node))
+            {
+                layout::DispatchGraph::EdgeDesc const& edge_desc =
+                    *registry.ComponentLookup<layout::DispatchGraph::EdgeDesc>(edge);
+                layout::EdgeBindings const* bindings =
+                    registry.ComponentLookup<layout::EdgeBindings>(edge);
+
+                if (!bindings
+                    || bindings->source.type == layout::BindingType_Framebuffer
+                    || bindings->sink.type == layout::BindingType_Framebuffer
+                    || bindings->type != layout::EdgeType_Image)
+                    continue;
+
+                layout::BindingPointSync source_reqs =
+                    BindingPointSyncRequirements(edge_desc.source,
+                                                 bindings->type,
+                                                 bindings->source);
+                layout::BindingPointSync sink_reqs =
+                    BindingPointSyncRequirements(node,
+                                                 bindings->type,
+                                                 bindings->sink);
+
+                VkImage image = {};
+                if (bindings->sink.type == layout::BindingType_BlitImage)
+                {
+                    bind::BlitBindings const& blit_bindings =
+                        *registry.ComponentLookup<bind::BlitBindings>(node);
+
+                    if (bindings->sink.blit_slot == layout::BlitImageSlot_Source)
+                        image = blit_bindings.source;
+                    if (bindings->sink.blit_slot == layout::BlitImageSlot_Sink)
+                        image = blit_bindings.sink;
+                }
+
+                _command_buffer.ImageTransitions(
+                    source_reqs.stage, sink_reqs.stage,
+                    {
+                        {
+                            image,
+                            source_reqs.access, sink_reqs.access,
+                            source_reqs.layout, sink_reqs.layout,
+                            VK_IMAGE_ASPECT_COLOR_BIT
+                        }
+                    }
+                );
+            }
+        }
+#endif
+
         layout::NodeTag const* tag = registry.ComponentLookup<layout::NodeTag>(node);
         if (tag && *tag == layout::NodeTag_BlitImage)
         {
@@ -2717,6 +2776,69 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                            &blit_region,
                            blit_bindings->command.filter);
         }
+
+        if (graph_data->edges_out.count(node))
+        {
+            for (dstk::Registry::Node edge : graph_data->edges_out.at(node))
+            {
+                layout::DispatchGraph::EdgeDesc const& edge_desc =
+                    *registry.ComponentLookup<layout::DispatchGraph::EdgeDesc>(edge);
+                layout::EdgeBindings const* bindings =
+                    registry.ComponentLookup<layout::EdgeBindings>(edge);
+
+                if (!bindings
+                    || bindings->source.type == layout::BindingType_Framebuffer
+                    || bindings->sink.type == layout::BindingType_Framebuffer
+                    || bindings->type != layout::EdgeType_Image)
+                    continue;
+
+                layout::BindingPointSync source_reqs =
+                    BindingPointSyncRequirements(node,
+                                                 bindings->type,
+                                                 bindings->source,
+                                                 layout::EdgeBindingSlot_Source);
+                layout::BindingPointSync sink_reqs =
+                    BindingPointSyncRequirements(edge_desc.sink,
+                                                 bindings->type,
+                                                 bindings->sink,
+                                                 layout::EdgeBindingSlot_Sink);
+
+                VkImage image = {};
+                if (bindings->source.type == layout::BindingType_BlitImage)
+                {
+                    bind::BlitBindings const& blit_bindings =
+                        *registry.ComponentLookup<bind::BlitBindings>(node);
+
+                    if (bindings->source.blit_slot == layout::BlitImageSlot_Source)
+                        image = blit_bindings.source;
+                    if (bindings->source.blit_slot == layout::BlitImageSlot_Sink)
+                        image = blit_bindings.sink;
+                }
+
+                if (bindings->sink.type == layout::BindingType_BlitImage)
+                {
+                    bind::BlitBindings const& blit_bindings =
+                        *registry.ComponentLookup<bind::BlitBindings>(edge_desc.sink);
+
+                    if (bindings->sink.blit_slot == layout::BlitImageSlot_Source)
+                        image = blit_bindings.source;
+                    if (bindings->sink.blit_slot == layout::BlitImageSlot_Sink)
+                        image = blit_bindings.sink;
+                }
+
+                _command_buffer.ImageTransitions(
+                    source_reqs.stage, sink_reqs.stage,
+                    {
+                        {
+                            image,
+                            source_reqs.access, sink_reqs.access,
+                            source_reqs.layout, sink_reqs.layout,
+                            VK_IMAGE_ASPECT_COLOR_BIT
+                        }
+                    }
+                );
+            }
+        }
     });
 }
 
@@ -2734,7 +2856,11 @@ DispatchContext::RenderPassDescription(
         layout::BindingPoint binding_point = {};
         binding_point.type = layout::BindingType_Framebuffer;
         binding_point.attachment_index = index;
-        layout::BindingPointSync sync_reqs = BindingPointSyncRequirements(_node, layout::EdgeType_Image, binding_point);
+        layout::BindingPointSync sync_reqs =
+            BindingPointSyncRequirements(_node,
+                                         layout::EdgeType_Image,
+                                         binding_point,
+                                         layout::EdgeBindingSlot_Source);
 
         output.push_back(vktk::Context::RenderPassAttachment{
             dispatch_pass.graphics.attachments[index].format,
@@ -2758,7 +2884,11 @@ DispatchContext::RenderPassDescription(
             continue;
 
         vktk::Context::RenderPassAttachment& desc = output[bindings->source.attachment_index];
-        layout::BindingPointSync sync_reqs = BindingPointSyncRequirements(edge_desc.sink, bindings->type, bindings->sink);
+        layout::BindingPointSync sync_reqs =
+            BindingPointSyncRequirements(edge_desc.sink,
+                                         bindings->type,
+                                         bindings->sink,
+                                         layout::EdgeBindingSlot_Sink);
         desc.finalLayout = sync_reqs.layout;
 
         if (_swapchain_format && sync_reqs.layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
@@ -2779,7 +2909,11 @@ DispatchContext::RenderPassDescription(
             continue;
 
         vktk::Context::RenderPassAttachment& desc = output[bindings->sink.attachment_index];
-        layout::BindingPointSync sync_reqs = BindingPointSyncRequirements(edge_desc.source, bindings->type, bindings->source);
+        layout::BindingPointSync sync_reqs =
+            BindingPointSyncRequirements(edge_desc.source,
+                                         bindings->type,
+                                         bindings->source,
+                                         layout::EdgeBindingSlot_Source);
         desc.initialLayout = sync_reqs.layout;
     }
 
@@ -2790,7 +2924,8 @@ layout::BindingPointSync
 DispatchContext::BindingPointSyncRequirements(
     dstk::Registry::Node _node,
     layout::EdgeType _type,
-    layout::BindingPoint const& _binding_point) const
+    layout::BindingPoint const& _binding_point,
+    layout::EdgeBindingSlot _edge_slot) const
 {
     if (_binding_point.node_override != dstk::FreeList::kInvalidIndex)
         _node = _binding_point.node_override;
@@ -2798,7 +2933,9 @@ DispatchContext::BindingPointSyncRequirements(
     layout::BindingPointSync output = {};
     output.access = VK_ACCESS_NONE;
     output.layout = VK_IMAGE_LAYOUT_UNDEFINED;
-    output.stage = 0;
+    output.stage = (_edge_slot == layout::EdgeBindingSlot_Source)
+        ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT
+        : VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
 
     if (_type == layout::EdgeType_Image)
     {
@@ -2862,11 +2999,13 @@ DispatchContext::BindingPointSyncRequirements(
 
             if (*tag == layout::NodeTag_Present)
             {
+                output.stage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
                 output.access = 0;
                 output.layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
             }
             else if (*tag == layout::NodeTag_BlitImage)
             {
+                output.stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
                 output.access = VK_ACCESS_TRANSFER_READ_BIT;
                 if (_binding_point.blit_slot == layout::BlitImageSlot_Source)
                     output.layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;

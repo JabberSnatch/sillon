@@ -582,6 +582,11 @@ struct EdgeBindings {
     BindingPoint sink;
 };
 
+enum EdgeBindingSlot {
+    EdgeBindingSlot_Source,
+    EdgeBindingSlot_Sink,
+};
+
 using InvocCountMap = std::unordered_map<dstk::Registry::Node, uint32_t>;
 
 struct DispatchGraph
@@ -984,7 +989,8 @@ struct DispatchContext {
     vkrg::layout::BindingPointSync BindingPointSyncRequirements(
         dstk::Registry::Node _node,
         vkrg::layout::EdgeType _type,
-        vkrg::layout::BindingPoint const& _binding_point) const;
+        vkrg::layout::BindingPoint const& _binding_point,
+        vkrg::layout::EdgeBindingSlot _edge_slot) const;
 
     void UpdateDynamicInvocationCount(dstk::Registry::Node _node,
                                       uint32_t _invocation_count);

@@ -2026,6 +2026,17 @@ vkrg::layout::DispatchGraph ProgressiveRenderGraph(dstk::Registry& _registry)
                                 }
                             });
 
+    _registry.BindComponent(graph["swapchain_input"], vkrg::layout::NodeTag_Input);
+    _registry.BindComponent(graph.MakeEdge("swapchain_input", "FramebufferBlit"),
+                            vkrg::layout::EdgeBindings{
+                                vkrg::layout::EdgeType_Image,
+                                {},
+                                vkrg::layout::BindingPoint{
+                                    .type = vkrg::layout::BindingType_BlitImage,
+                                    .blit_slot = vkrg::layout::BlitImageSlot_Sink
+                                }
+                            });
+
     _registry.BindComponent(graph["present"], vkrg::layout::NodeTag_Present);
     _registry.BindComponent(graph.MakeEdge("FramebufferBlit", "present"),
                             vkrg::layout::EdgeBindings{
