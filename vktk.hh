@@ -721,6 +721,29 @@ struct DispatchGraph
                            dstk::Registry::Node)>;
 
     void DepthFirstTraversal(TraversalCallbackType const& callback) const {
+
+        DispatchGraph const* current_graph = this;
+        std::vector<dstk::Registry::Node> current_nodes = Outputs();
+        std::vector<dstk::Registry::Node> node_queue = {};
+        while (!current_nodes.empty())
+        {
+            node_queue.insert(node_queue.end(), current_nodes.begin(), current_nodes.end());
+            std::vector<dstk::Registry::Node> next_nodes = {};
+            for (dstk::Registry::Node node : current_nodes)
+            {
+                if (!current_graph->data->edges_in.count(node))
+                    continue;
+
+                for (dstk::Registry::Node edge : current_graph->data->edges_in.at(node))
+                {
+                    EdgeDesc const* edge_desc =
+                        current_graph->data->registry->ComponentLookup<EdgeDesc>(edge);
+                    next_nodes.push_back(edge_desc->source);
+                }
+            }
+            std::swap(next_nodes, current_nodes);
+        }
+
         std::vector<dstk::Registry::Node> node_stack = Inputs();
         std::vector<vkrg::layout::DispatchGraph const*> graph_stack{ this };
 
