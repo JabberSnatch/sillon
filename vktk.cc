@@ -2792,13 +2792,23 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                     || bindings->type != layout::EdgeType_Image)
                     continue;
 
+                dstk::Registry::Node source_node =
+                    (bindings->source.node_override == dstk::FreeList::kInvalidIndex)
+                    ? edge_desc.source
+                    : bindings->source.node_override;
+
+                dstk::Registry::Node sink_node =
+                    (bindings->sink.node_override == dstk::FreeList::kInvalidIndex)
+                    ? edge_desc.sink
+                    : bindings->sink.node_override;
+
                 layout::BindingPointSync source_reqs =
-                    BindingPointSyncRequirements(node,
+                    BindingPointSyncRequirements(source_node,
                                                  bindings->type,
                                                  bindings->source,
                                                  layout::EdgeBindingSlot_Source);
                 layout::BindingPointSync sink_reqs =
-                    BindingPointSyncRequirements(edge_desc.sink,
+                    BindingPointSyncRequirements(sink_node,
                                                  bindings->type,
                                                  bindings->sink,
                                                  layout::EdgeBindingSlot_Sink);
@@ -2807,7 +2817,7 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                 if (bindings->source.type == layout::BindingType_BlitImage)
                 {
                     bind::BlitBindings const& blit_bindings =
-                        *registry.ComponentLookup<bind::BlitBindings>(node);
+                        *registry.ComponentLookup<bind::BlitBindings>(source_node);
 
                     if (bindings->source.blit_slot == layout::BlitImageSlot_Source)
                         image = blit_bindings.source;
@@ -2818,7 +2828,7 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
                 if (bindings->sink.type == layout::BindingType_BlitImage)
                 {
                     bind::BlitBindings const& blit_bindings =
-                        *registry.ComponentLookup<bind::BlitBindings>(edge_desc.sink);
+                        *registry.ComponentLookup<bind::BlitBindings>(sink_node);
 
                     if (bindings->sink.blit_slot == layout::BlitImageSlot_Source)
                         image = blit_bindings.source;
