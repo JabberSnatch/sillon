@@ -722,70 +722,45 @@ struct DispatchGraph
 
     void DepthFirstTraversal(TraversalCallbackType const& callback) const {
 
-        DispatchGraph const* current_graph = this;
-        std::vector<dstk::Registry::Node> current_nodes = Outputs();
-        std::vector<dstk::Registry::Node> node_queue = {};
-        while (!current_nodes.empty())
-        {
-            node_queue.insert(node_queue.end(), current_nodes.begin(), current_nodes.end());
-            std::vector<dstk::Registry::Node> next_nodes = {};
-            for (dstk::Registry::Node node : current_nodes)
-            {
-                if (!current_graph->data->edges_in.count(node))
-                    continue;
+        static auto const impl = [](DispatchGraph const* graph,
+                                    auto&& callback,
+                                    auto&& recursion,
+                                    uint32_t depth) -> void {
+            std::vector<dstk::Registry::Node> current_nodes = graph->Outputs();
+            std::vector<dstk::Registry::Node> node_queue = {};
 
-                for (dstk::Registry::Node edge : current_graph->data->edges_in.at(node))
+            while (!current_nodes.empty())
+            {
+                node_queue.insert(node_queue.end(), current_nodes.begin(), current_nodes.end());
+                std::vector<dstk::Registry::Node> next_nodes = {};
+                for (dstk::Registry::Node node : current_nodes)
                 {
-                    EdgeDesc const* edge_desc =
-                        current_graph->data->registry->ComponentLookup<EdgeDesc>(edge);
-                    next_nodes.push_back(edge_desc->source);
-                }
-            }
-            std::swap(next_nodes, current_nodes);
-        }
+                    if (!graph->data->edges_in.count(node))
+                        continue;
 
-        std::vector<dstk::Registry::Node> node_stack = Inputs();
-        std::vector<vkrg::layout::DispatchGraph const*> graph_stack{ this };
-
-        uint32_t base_depth = Depth();
-        while (!node_stack.empty())
-        {
-            dstk::Registry::Node current_node = node_stack.back();
-            vkrg::layout::DispatchGraph const* current_graph = graph_stack.back();
-            vkrg::layout::DispatchGraph const* dispatch_graph = data->registry->ComponentLookup<vkrg::layout::DispatchGraph>(current_node);
-
-            bool skip_callback = false;
-            while (!current_graph->data->name_lookup.contains(current_node))
-            {
-                graph_stack.pop_back();
-                current_graph = graph_stack.back();
-                dispatch_graph = nullptr;
-                skip_callback = true;
-            }
-
-            if (!skip_callback)
-                callback(graph_stack.size() + base_depth, current_node);
-
-            if (dispatch_graph)
-            {
-                std::vector<dstk::Registry::Node> graph_inputs = dispatch_graph->Inputs();
-                node_stack.insert(node_stack.end(), graph_inputs.begin(), graph_inputs.end());
-                graph_stack.push_back(dispatch_graph);
-            }
-            else
-            {
-                node_stack.pop_back();
-                if (current_graph->data->edges_out.count(current_node))
-                {
-                    for (dstk::Registry::Node edge : current_graph->data->edges_out.at(current_node))
+                    for (dstk::Registry::Node edge : graph->data->edges_in.at(node))
                     {
-                        vkrg::layout::DispatchGraph::EdgeDesc const* edge_desc =
-                            data->registry->ComponentLookup<vkrg::layout::DispatchGraph::EdgeDesc>(edge);
-                        node_stack.push_back(edge_desc->sink);
+                        EdgeDesc const* edge_desc =
+                            graph->data->registry->ComponentLookup<EdgeDesc>(edge);
+                        next_nodes.push_back(edge_desc->source);
                     }
                 }
+                std::swap(next_nodes, current_nodes);
             }
-        }
+
+            for (uint32_t index = 0; index < node_queue.size(); ++index)
+            {
+                dstk::Registry::Node node = node_queue[node_queue.size() - 1 - index];
+                callback(depth, node);
+
+                DispatchGraph const* subgraph =
+                    graph->data->registry->ComponentLookup<DispatchGraph>(node);
+                if (subgraph)
+                    recursion(subgraph, callback, recursion, depth+1);
+            }
+        };
+
+        impl(this, callback, impl, Depth());
     }
 
     void DepthFirstInvocation(InvocationCallbackType const& callback) const {
