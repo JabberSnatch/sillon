@@ -390,6 +390,138 @@ vec4 RegionTraversal4(vec3 org, vec3 dir)
 }
 )"
 
+R"_(
+float RayleighPhase(float cos_th) {
+    return 3.0 * (1 + cos_th*cos_th) / (16.0 * 3.14159265);
+}
+
+float RayleighDensity(float h) {
+    return exp(-h/0.008);
+}
+
+float MiePhase(float cos_th) {
+    const float g = 0.8;
+    // Henyey-Greenstein phase func
+    return (1 - g*g) / (pow(1 + g*g - 2*g*cos_th, 1.5) * 4 * 3.14159265);
+}
+
+float MieDensity(float h) {
+    return exp(-h/0.0012);
+}
+
+float OzonePhase() {
+    return 1 / (4.0 * 3.14159265);
+}
+
+float OzoneDensity(float h) {
+    return max(0.0, 1.0 - abs(h - 0.025)/0.015);
+}
+
+vec3 CircleIntersection(float radius, float org_height, float ray_polar)
+{
+    float b = org_height * ray_polar;
+    float det = b*b - (org_height*org_height - radius*radius);
+    float sqrt_det = sqrt(det);
+    vec3 result = vec3(det, -b - sqrt_det, -b + sqrt_det);
+    if (result.x > 0.0 && result.y < 0.0 && result.z < 0.0)
+        result.x = -result.x;
+    return result;
+}
+
+#define STEP_COUNT 128.0
+#define STEP_COUNT_SECONDARY 8.0
+vec3 AtmosphericScattering(vec3 position, vec3 direction)
+{
+    const float base_radius = 6.360;
+    const float outer_radius = 6.460;
+
+    const float scale_factor = 1000000;
+
+    const vec3 rayleigh_scattering = vec3(5.802e-6, 13.56e-6, 33.10e-6) * scale_factor;
+    const float mie_scattering = 3.996e-6 * scale_factor;
+    const float mie_absorption = 4.40e-6 * scale_factor;
+    const vec3 ozone_absorption = vec3(0.65e-6, 1.881e-6, 0.085e-6) * scale_factor;
+
+    const float light_angle = dot(direction, light_dir);
+
+    vec3 origin = vec3(0.0, base_radius + 0.000001, 0.0) + position.xyz / scale_factor;
+    float altitude = origin.y;
+
+    vec3 primary_ground_hit =
+        CircleIntersection(base_radius, altitude, direction.y);
+    if (primary_ground_hit.x > 0.0)
+        return vec3(0.1);
+
+    vec3 primary_atmosphere_hit =
+        CircleIntersection(outer_radius, altitude, direction.y);
+    if (primary_atmosphere_hit.x <= 0.0)
+        return direction * 0.5 + vec3(0.5);
+
+    float step_size = primary_atmosphere_hit.z / STEP_COUNT;
+
+    vec3 optical_depths = vec3(0.0);
+    vec3 inscattering = vec3(0.0);
+
+    for (float index_primary = 0.0; index_primary < STEP_COUNT; ++index_primary)
+    {
+        vec3 step = origin + step_size * (index_primary + 0.5) * direction;
+        float sample_height = length(step) - base_radius;
+
+        vec3 densities = vec3(
+            RayleighDensity(sample_height),
+            MieDensity(sample_height),
+            OzoneDensity(sample_height)
+        );
+        vec3 optical_step = densities * step_size;
+
+        vec3 light_optical_depths = vec3(0.0);
+
+        vec3 secondary_atmosphere_hit =
+            CircleIntersection(outer_radius, sample_height, dot(normalize(step), light_dir));
+
+        vec3 secondary_ground_hit =
+            CircleIntersection(base_radius, sample_height, dot(normalize(step), light_dir));
+        if (secondary_ground_hit.x <= 0.0)
+            continue;
+
+        float light_step_size = secondary_atmosphere_hit.z / STEP_COUNT_SECONDARY;
+        for (float index_light = 0.0; index_light < STEP_COUNT_SECONDARY; ++index_light)
+        {
+            vec3 light_step = step + (index_light + 0.5) * light_step_size * light_dir;
+            float light_height = length(light_step) - base_radius;
+
+            vec3 light_densities = vec3(
+                RayleighDensity(light_height),
+                MieDensity(light_height),
+                OzoneDensity(light_height)
+            );
+
+            light_optical_depths += light_densities * light_step_size;
+        }
+
+        vec3 current_depths = optical_depths + light_optical_depths;
+        vec3 transmittance = exp(
+            -rayleigh_scattering * current_depths.x
+            -(mie_scattering+mie_absorption).xxx * current_depths.y
+            -ozone_absorption * current_depths.z);
+
+        vec3 rayleigh_transmittance = densities.x * transmittance;
+        vec3 mie_transmittance = densities.y * transmittance;
+
+        inscattering += 40.0 * step_size *
+            (rayleigh_scattering * RayleighPhase(light_angle) * rayleigh_transmittance
+             + mie_scattering * MiePhase(light_angle) * mie_transmittance);
+
+        optical_depths += densities * step_size;
+    }
+
+    vec3 sky_color = vec3(1.0) - exp(-1.0 * inscattering);
+    if (sky_color != sky_color)
+        sky_color = vec3(1.0, 0.0, 1.0);
+    return sky_color;
+}
+)_"
+
 R"(
 void main()
 {
@@ -434,15 +566,16 @@ void main()
 
         vec3 hitp = org + dir*trav.w;
         float shadow = 0.0;
-        float diffuse = 0.0;
+        vec3 diffuse = vec3(0.0);
 
-        float indirect = 0.0;
+        vec3 indirect = vec3(0.0);
+        vec3 exit_color = vec3(0.0);
         vec3 avg_dir = vec3(0.0);
         float avg_t = 0.0;
         if (display_mode == 0.0)
         {
             shadow = RegionTraversal4(hitp + light_dir*0.0001, light_dir).w >= 0.0 ? 0.0 : 1.0;
-            diffuse = max(0.0, dot(light_dir, trav.xyz));
+            diffuse = max(0.0, dot(light_dir, trav.xyz)) * AtmosphericScattering(hitp, light_dir);
         }
         else
         {
@@ -452,7 +585,7 @@ void main()
             float current_weight = 1.0;
 
 #if 1
-#define SAMPLE_COUNT 16
+#define SAMPLE_COUNT 4
             for (uint sample_index = 0; sample_index < SAMPLE_COUNT; ++sample_index)
             {
                 vec3 previous_hitp = previous_org + previous_dir*previous_hit.w;
@@ -460,10 +593,12 @@ void main()
                 if (dot(previous_hit.xyz, light_dir) > 0.0)
                 {
                     float sample_t = RegionTraversal4(current_org + light_dir*0.0001, light_dir).w;
-                    float sample_v = sample_t >= 0.0 ? 0.0 : 1.0;
-                    indirect += 1.0 * sample_v
-                        * max(0.0, dot(previous_hit.xyz, light_dir))
-                        * current_weight;
+                    if (sample_t < 0.0)
+                    {
+                        indirect += max(0.0, dot(previous_hit.xyz, light_dir))
+                            * current_weight
+                            * AtmosphericScattering(current_org, light_dir);
+                    }
                 }
 
                 vec2 owen_sample = OwenPlastic(
@@ -485,64 +620,28 @@ void main()
                 if (dot(current_ray, previous_hit.xyz) < 0.0)
                     break;
 
+                current_weight *= next_weight;
                 vec4 current_hit = RegionTraversal4(current_org, current_ray);
                 if (current_hit.w < 0.0)
+                {
+                    exit_color =
+                        AtmosphericScattering(current_org, current_ray) * current_weight;
                     break;
+                }
 
                 previous_org = current_org;
                 previous_dir = current_ray;
                 previous_hit = current_hit;
-                current_weight *= next_weight;
             }
 
 #else
-
-#define SAMPLE_COUNT 4
-            for (uint sample_index = 0; sample_index < SAMPLE_COUNT; ++sample_index)
-            {
-                vec2 owen_sample = OwenPlastic(
-                    pixelCount * SAMPLE_COUNT * sample_offset +
-                    pixelID * SAMPLE_COUNT + sample_index, 0);
-                float theta = owen_sample.x * 3.14159265 * 0.5;
-                float phi = owen_sample.y * 3.14159265 * 2.0;
-
-                vec3 ts_sample = vec3(
-                    cos(theta) * cos(phi),
-                    cos(theta) * sin(phi),
-                    sin(theta)
-                    );
-
-                mat3 tb_mat = genTB(trav.xyz);
-                vec3 second_ray = tb_mat * ts_sample;
-
-                avg_dir += second_ray / float(SAMPLE_COUNT);
-                if (dot(second_ray, trav.xyz) <= 0.0)
-                    continue;
-
-                vec4 second_hit = RegionTraversal4(hitp + trav.xyz*0.0001, second_ray);
-                if (second_hit.w < 0.0)
-                    continue;
-
-                vec3 second_hitp = hitp + second_ray*second_hit.w;
-                if (dot(second_hit.xyz, light_dir) <= 0.0)
-                    continue;
-
-                {
-                    float sample_t = RegionTraversal4(second_hitp + light_dir*0.0001, light_dir).w;
-                    float sample_v = sample_t >= 0.0 ? 0.0 : 1.0;
-                    avg_dir += second_ray / float(SAMPLE_COUNT);
-                    indirect += (sample_v * max(0.0, dot(-second_ray, light_dir))) / float(SAMPLE_COUNT)
-;
-                    avg_t += sample_v;
-                }
-            }
 #endif
 
         }
 
         //color.xyz = vec3(mix(shadow.xxx * diffuse + indirect.xxx * indirect_contribution, vec3(0.3, 0.5, 0.5), (1.0 - fog).xxx));
         if (display_mode < 2.0)
-            color.xyz = shadow.xxx * diffuse + indirect.xxx;
+            color.xyz = shadow.xxx * diffuse + indirect + exit_color;
 #if 0
         else if (display_mode == 2.0)
             color.xyz = avg_t.xxx/16.0;
@@ -560,7 +659,7 @@ void main()
 #endif
     }
     else
-        color.xyz = light_dir * 0.5 + vec3(0.5) + trav.xyz;//trav.xyz;
+        color.xyz = AtmosphericScattering(org, dir);
     color.w = 1.0;
 }
 
