@@ -3002,15 +3002,6 @@ dispatch_runtime_t ProgressiveRenderingPipeline(voxel_state_t* _state, vktk::Con
             payload.accumulated_color.image
         );
 
-        _rt.Context().BindImage(
-            _rt.graph["FramebufferBlit"],
-            vkrg::layout::BindingPoint{
-                .type = vkrg::layout::BindingType_BlitImage,
-                .blit_slot = vkrg::layout::BlitImageSlot_Sink
-            },
-            _swapchain.images[_swapchain.index]
-        );
-
         _rt.graph.DepthFirstTraversal(
             [&]
             (uint32_t, dstk::Registry::Node node) {
@@ -3058,6 +3049,15 @@ dispatch_runtime_t ProgressiveRenderingPipeline(voxel_state_t* _state, vktk::Con
         _rt.Context().BindFramebufferArea(
             _rt.graph["FramebufferResolve"],
             { 0, scissor, viewport });
+
+        _rt.Context().BindImage(
+            _rt.graph["FramebufferBlit"],
+            vkrg::layout::BindingPoint{
+                .type = vkrg::layout::BindingType_BlitImage,
+                .blit_slot = vkrg::layout::BlitImageSlot_Sink
+            },
+            _swapchain.images[_swapchain.index]
+        );
 
         _rt.Context().BindGraphicsCommand(
             _rt.graph["FramebufferResolve"]["ResolvePass"],

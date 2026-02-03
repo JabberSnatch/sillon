@@ -433,14 +433,18 @@ void main()
         float fog = exp(-frag_depth * 10.0);
 
         vec3 hitp = org + dir*trav.w;
-        float shadow = RegionTraversal4(hitp + light_dir*0.0001, light_dir).w >= 0.0 ? 0.0 : 1.0;
-
-        float diffuse = max(0.0, dot(light_dir, trav.xyz));
+        float shadow = 0.0;
+        float diffuse = 0.0;
 
         float indirect = 0.0;
         vec3 avg_dir = vec3(0.0);
         float avg_t = 0.0;
-        if (display_mode != 0.0)
+        if (display_mode == 0.0)
+        {
+            shadow = RegionTraversal4(hitp + light_dir*0.0001, light_dir).w >= 0.0 ? 0.0 : 1.0;
+            diffuse = max(0.0, dot(light_dir, trav.xyz));
+        }
+        else
         {
             vec4 previous_hit = trav;
             vec3 previous_org = org;
@@ -458,21 +462,21 @@ void main()
                     float sample_t = RegionTraversal4(current_org + light_dir*0.0001, light_dir).w;
                     float sample_v = sample_t >= 0.0 ? 0.0 : 1.0;
                     indirect += 1.0 * sample_v
-                        * max(0.0, dot(-previous_dir, light_dir))
+                        * max(0.0, dot(previous_hit.xyz, light_dir))
                         * current_weight;
                 }
 
                 vec2 owen_sample = OwenPlastic(
                     pixelCount * SAMPLE_COUNT * sample_offset +
                     pixelID * SAMPLE_COUNT + sample_index, 0);
-                float theta = owen_sample.x * 3.14159265 * 0.5;
-                float phi = owen_sample.y * 3.14159265 * 2.0;
 
+                float sqrt_term = sqrt(1.0 - owen_sample.x*owen_sample.x);
+                float phi = owen_sample.y * 3.14159265 * 2.0;
                 vec3 ts_sample = vec3(
-                    cos(theta) * cos(phi),
-                    cos(theta) * sin(phi),
-                    sin(theta)
-                    );
+                    cos(phi) * sqrt_term,
+                    sin(phi) * sqrt_term,
+                    owen_sample.x
+                );
 
                 mat3 tb_mat = genTB(trav.xyz);
                 vec3 current_ray = tb_mat * ts_sample;
