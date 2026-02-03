@@ -1265,7 +1265,10 @@ Swapchain Context::CreateSwapchain(uint32_t const _size[2])
     swapchain.size.width = _size[0];
     swapchain.size.height = _size[1];
     swapchain.vulkan = this;
+    swapchain.format = VK_FORMAT_B8G8R8A8_SRGB;
+    VkColorSpaceKHR color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 
+#if 0
     VkColorSpaceKHR color_space{};
     {
         std::uint32_t format_count = 1;
@@ -1280,6 +1283,7 @@ Swapchain Context::CreateSwapchain(uint32_t const _size[2])
 
         color_space = surface_format.colorSpace;
     }
+#endif
 
     RenderPassAttachment depth_attachment =
         { VK_FORMAT_D32_SFLOAT,
