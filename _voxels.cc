@@ -2037,13 +2037,43 @@ vkrg::layout::DispatchGraph ProgressiveRenderGraph(dstk::Registry& _registry)
                                 }
                             });
 
-    _registry.BindComponent(graph["present"], vkrg::layout::NodeTag_Present);
-    _registry.BindComponent(graph.MakeEdge("FramebufferBlit", "present"),
+    _registry.BindComponent(graph["FramebufferScreenSpace"], vkrg::layout::DispatchPass{
+        .mode = vkrg::layout::DispatchMode_Graphics,
+        .graphics = {
+            .attachments = {
+                {
+                    VK_IMAGE_TYPE_2D, VK_FORMAT_B8G8R8A8_SRGB,
+                    numtk::vec4f::Constant(0.f), VK_ATTACHMENT_LOAD_OP_LOAD
+                }
+            }
+        }
+    });
+
+    {
+        vkrg::layout::DispatchGraph& subpasses = graph.MakeSubgraph("FramebufferScreenSpace");
+        subpasses.BindSubgraph("GUISubpass", GUIRenderGraph(_registry));
+    }
+
+    _registry.BindComponent(graph.MakeEdge("FramebufferBlit", "FramebufferScreenSpace"),
                             vkrg::layout::EdgeBindings{
                                 vkrg::layout::EdgeType_Image,
                                 vkrg::layout::BindingPoint{
                                     .type = vkrg::layout::BindingType_BlitImage,
                                     .blit_slot = vkrg::layout::BlitImageSlot_Sink
+                                },
+                                vkrg::layout::BindingPoint{
+                                    .type = vkrg::layout::BindingType_Framebuffer,
+                                    .attachment_index = 0
+                                }
+                            });
+
+    _registry.BindComponent(graph["present"], vkrg::layout::NodeTag_Present);
+    _registry.BindComponent(graph.MakeEdge("FramebufferScreenSpace", "present"),
+                            vkrg::layout::EdgeBindings{
+                                vkrg::layout::EdgeType_Image,
+                                vkrg::layout::BindingPoint{
+                                    .type = vkrg::layout::BindingType_Framebuffer,
+                                    .attachment_index = 0
                                 },
                                 {}
                             });
@@ -2871,6 +2901,8 @@ dispatch_runtime_t ProgressiveRenderingPipeline(voxel_state_t* _state, vktk::Con
 
     BindSparseRegionRuntime(_state, _vulkan,
                             output.graph["FramebufferDispatch"]["SparseRegionSubpass"]);
+    BindGUIRuntime(_state, _vulkan,
+                   output.graph["FramebufferScreenSpace"]["GUISubpass"]);
 
     output.DestroyPayload = [](dispatch_runtime_t& _rt)
     {
@@ -3002,6 +3034,8 @@ dispatch_runtime_t ProgressiveRenderingPipeline(voxel_state_t* _state, vktk::Con
             payload.accumulated_color.image
         );
 
+        _rt.Context().BindSwapchain(_rt.graph["FramebufferScreenSpace"], _swapchain);
+
         _rt.graph.DepthFirstTraversal(
             [&]
             (uint32_t, dstk::Registry::Node node) {
@@ -3057,6 +3091,12 @@ dispatch_runtime_t ProgressiveRenderingPipeline(voxel_state_t* _state, vktk::Con
                 .blit_slot = vkrg::layout::BlitImageSlot_Sink
             },
             _swapchain.images[_swapchain.index]
+        );
+
+        _rt.Context().BindFramebufferArea(
+            _rt.graph["FramebufferScreenSpace"], {
+                _swapchain.index, scissor, viewport
+            }
         );
 
         _rt.Context().BindGraphicsCommand(
