@@ -57,6 +57,7 @@ uint interleave(uint x) {
 uint morton2D(uvec2 p) {return interleave(p.x) | (interleave(p.y) << 1);}
 uint OwenHash4(uint x, uint seed) {x = bitfieldReverse(x); x ^= x * 0x3D20ADEAu; x ^= (x >> 1) & (x << 1) & 0x55555555u; x += seed; x *= (seed >> 16) | 1u; x ^= (x >> 1) & (x << 1) & 0x55555555u; x ^= x * 0x05526c56u; x ^= x * 0x53a22864u; return 0xFFFF0000u & x;}
 uvec2 plasticSequence(uint i) {return i * uvec2(3242174889u, 2447445414u);}
+vec2 pixelPlasticSequence(uint i) { return 1.05 * fract(uint2float(plasticSequence(i)) + vec2(0.5)) -  vec2(0.5); }
 vec2 OwenPlastic(uint i, uint seed) {return uint2float(plasticSequence(bitfieldReverse(OwenHash4(i, seed ^ 0xF8ADE99Au))));}
 mat3 genTB(vec3 N) {
      float s = N.z < 0.0 ? -1.0 : 1.0;
@@ -526,8 +527,8 @@ R"(
 void main()
 {
     vec2 uv =
-        (vec2(gl_FragCoord.xy) - vec2(screen_offset.xy))
-        / vec2(screen_size.xy);
+        ((vec2(gl_FragCoord.xy) - vec2(screen_offset.xy) + pixelPlasticSequence(sample_offset))
+        / vec2(screen_size.xy));
     uint pixelID = morton2D(uvec2(gl_FragCoord.xy));
     uint pixelCount = uint(screen_size.x) * uint(screen_size.y);
 
@@ -543,9 +544,13 @@ void main()
     float entry_depth = distance(iFS_camera_position * 0.5 + vec3(0.5), iFS_volume_coords);
     float region_begin = min(max_t.x, min(max_t.y, max_t.z));
 
-    vec3 root_org = iFS_volume_coords
-        - dir * 0.00001
-        - (dir * min(entry_depth, region_begin));
+    vec3 root_org = iFS_camera_position * 0.5 + vec3(0.5);
+    if (root_org != clamp(root_org, vec3(0.0), vec3(1.0)))
+    {
+        root_org = iFS_volume_coords
+            - dir * 0.00001
+            - (dir * min(entry_depth, region_begin));
+    }
 
     entry_depth = max(entry_depth - region_begin, 0.0);
 
