@@ -78,8 +78,10 @@ struct VoxelRegionPackage
     float area_scale;
     int32_t stack_depth;
     int32_t display_depth;
+    uint32_t leaves_begin;
     std::vector<vktk::Texture> masks{};
     std::vector<vktk::Texture> offsets{};
+    std::vector<vktk::Texture> payloads{};
 };
 
 VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
@@ -175,6 +177,7 @@ struct SparseRegionPushConstants
     float node_size;
     int32_t stack_depth;
     uint32_t sample_offset;
+    uint32_t leaves_begin;
 };
 
 struct SkyboxPushConstants
@@ -816,6 +819,7 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
     vktk::CommandBuffer upload_commands = vulkan->CreateCommandBuffer(vulkan->present_queue);
     upload_commands.Begin();
 
+    package.leaves_begin = package.masks.size();
     uint32_t level1_count = 1 << shift_depth;
     for (uint32_t index = 0u; index < level1_count; ++index)
     {
@@ -830,7 +834,12 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
 
         numtk::vec3u const lod0_base = lod1_base * node_size*4u;
 
-        vktk::Texture texture = vulkan->CreateTexture(
+        vktk::Texture payload = vulkan->CreateTexture(
+            node_size * 4u, node_size * 4u, node_size * 4u,
+            VK_IMAGE_TYPE_3D, VK_FORMAT_R8G8B8A8_UNORM,
+            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+
+        vktk::Texture mask = vulkan->CreateTexture(
             node_size, node_size, node_size,
             VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
             VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
@@ -840,15 +849,21 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
             VK_PIPELINE_STAGE_TRANSFER_BIT,
             {
                 {
-                    texture.image,
+                    mask.image,
                     VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT,
                     VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                     VK_IMAGE_ASPECT_COLOR_BIT,
+                },
+                {
+                    payload.image,
+                    VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT,
+                    VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_IMAGE_ASPECT_COLOR_BIT
                 }
             });
 
         upload_commands.UpdateTexture(
-            texture,
+            mask,
             VkOffset3D{ 0, 0, 0 },
             VkExtent3D{ node_size, node_size, node_size },
             [&region, &lod0_base, node_size](void* mapped_data) {
@@ -873,19 +888,53 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
             }
         );
 
+        upload_commands.UpdateTexture(
+            payload,
+            VkOffset3D{ 0, 0, 0 },
+            VkExtent3D{ node_size * 4, node_size * 4, node_size * 4 },
+            [node_size](void* mapped_data) {
+                uint32_t extent = node_size * 4;
+                numtk::vec4<uint8_t>* output = (numtk::vec4<uint8_t>*)mapped_data;
+                for (uint32_t zindex = 0; zindex < extent; ++zindex)
+                {
+                    for (uint32_t yindex = 0; yindex < extent; ++yindex)
+                    {
+                        for (uint32_t xindex = 0; xindex < extent; ++xindex)
+                        {
+                            output[xindex
+                                   + yindex*extent
+                                   + zindex*extent*extent] = numtk::vec4<uint8_t>{
+                                (uint8_t)((xindex * 256) / extent),
+                                (uint8_t)((yindex * 256) / extent),
+                                (uint8_t)((zindex * 256) / extent),
+                                0
+                            };
+                        }
+                    }
+                }
+            }
+        );
+
         upload_commands.ImageTransitions(
             VK_PIPELINE_STAGE_TRANSFER_BIT,
             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
             {
                 {
-                    texture.image,
+                    mask.image,
+                    VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    VK_IMAGE_ASPECT_COLOR_BIT
+                },
+                {
+                    payload.image,
                     VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                     VK_IMAGE_ASPECT_COLOR_BIT
                 }
             });
 
-        package.masks.push_back(texture);
+        package.masks.push_back(mask);
+        package.payloads.push_back(payload);
 
         max_fence_count = std::max(max_fence_count, vulkan->fence_count);
     }
@@ -1538,6 +1587,13 @@ vkrg::layout::DispatchStage SparseRegionDispatchStageInfo()
         {
             { VK_SHADER_STAGE_ALL, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
               0, 1 },
+        }
+    });
+
+    output.binding_groups.push_back(vkrg::layout::StageBindingGroup{
+        {
+            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT, 512*512 },
         }
     });
 
@@ -2785,13 +2841,15 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt)
     {
         vkrg::bind::PNextMap pNext_map = {};
 
-        static uint32_t desc_counts[2] = { 0u, 0u };
+        static uint32_t desc_counts[3] = { 0u, 0u, 0u };
         desc_counts[0] = (uint32_t)_rt.state->region_package.masks.size();
         desc_counts[1] = (uint32_t)_rt.state->region_package.offsets.size();
+        desc_counts[2] = (uint32_t)_rt.state->region_package.payloads.size();
 
         static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_allocs[2];
         desc_count_allocs[0] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
         desc_count_allocs[1] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
+        desc_count_allocs[2] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
 
         desc_count_allocs[0].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
         desc_count_allocs[0].pNext = nullptr;
@@ -2803,9 +2861,15 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt)
         desc_count_allocs[1].descriptorSetCount = 1;
         desc_count_allocs[1].pDescriptorCounts = &desc_counts[1];
 
+        desc_count_allocs[2].sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+        desc_count_allocs[2].pNext = nullptr;
+        desc_count_allocs[2].descriptorSetCount = 1;
+        desc_count_allocs[2].pDescriptorCounts = &desc_counts[2];
+
         pNext_map.emplace("SparseRegion", std::vector<vkrg::bind::PNextEntry>{
             { 1, (void*)&desc_count_allocs[0] },
-            { 2, (void*)&desc_count_allocs[1] }
+            { 2, (void*)&desc_count_allocs[1] },
+            { 3, (void*)&desc_count_allocs[2] }
         });
 
         _rt.Context().ResetDynamicRuntime(pNext_map);
@@ -2815,6 +2879,7 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt)
 
     std::vector<VkDescriptorImageInfo> nodes_info{};
     std::vector<VkDescriptorImageInfo> offsets_info{};
+    std::vector<VkDescriptorImageInfo> payloads_info{};
 
     for (vktk::Texture const& node : _rt.state->region_package.masks)
     {
@@ -2823,6 +2888,15 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt)
         region_image_info.imageView = node.view;
         region_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         nodes_info.push_back(region_image_info);
+    }
+
+    for (vktk::Texture const& node_payload : _rt.state->region_package.payloads)
+    {
+        VkDescriptorImageInfo payload_image_info{};
+        payload_image_info.sampler = payload.nearest_sampler;
+        payload_image_info.imageView = node_payload.view;
+        payload_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        payloads_info.push_back(payload_image_info);
     }
 
     for (vktk::Texture const& offsets : _rt.state->region_package.offsets)
@@ -2851,7 +2925,7 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt)
             vkrg::bind::ShaderResources{
                 .buffers = { matrix_buffer_info }
             })
-        );
+    );
 
     desc_writes.push_back(
         _rt.Context().BindShaderResource(
@@ -2864,7 +2938,7 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt)
             vkrg::bind::ShaderResources{
                 .images = nodes_info
             })
-        );
+    );
 
     desc_writes.push_back(
         _rt.Context().BindShaderResource(
@@ -2877,7 +2951,20 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt)
             vkrg::bind::ShaderResources{
                 .images = offsets_info
             })
-        );
+    );
+
+    desc_writes.push_back(
+        _rt.Context().BindShaderResource(
+            sparse_region_node,
+            vkrg::layout::BindingPoint{
+                .type = vkrg::layout::BindingType_Shader,
+                .shader = { 3, 0 }
+            },
+            0,
+            vkrg::bind::ShaderResources{
+                .images = payloads_info
+            })
+    );
 
     vkUpdateDescriptorSets(_rt.vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
 }
@@ -3882,6 +3969,7 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
         push_constants->node_size = (float)_rt.state->region_package.node_size;
         push_constants->stack_depth = std::max(_rt.state->region_package.display_depth-1, 0);
         push_constants->sample_offset = _rt.state->progressive_frame_index;
+        push_constants->leaves_begin = _rt.state->region_package.leaves_begin;
     };
 
     runtime.PostSubmit = [](dispatch_runtime_t& _rt, VkFence _last_submit)

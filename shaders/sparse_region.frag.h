@@ -21,10 +21,12 @@ layout(push_constant, std430) uniform PushConstants {
     float node_size;
     int stack_depth;
     uint sample_offset;
+    uint leaves_begin;
 };
 
 layout(set = 1, binding = 0) uniform usampler3D masks[];
 layout(set = 2, binding = 0) uniform usampler3D offsets[];
+layout(set = 3, binding = 0) uniform usampler3D payloads[];
 
 #if 0
 #define NODE_SIZE 32.0
@@ -69,178 +71,7 @@ mat3 genTB(vec3 N) {
          N);
  }
 
-vec3 RegionTraversal0(vec3 org, vec3 dir)
-{
-    uvec2 data = uvec2(0);
-    uint current_tex = 0;
-    DDAContext ctx = InitDDAContext(org, dir, node_size);
-    while (ctx.mask.w == 1.0)
-    {
-        data = texture(masks[nonuniformEXT(current_tex)], ctx.voxel_coords).xy;
-        if (data != uvec2(0, 0))
-        {
-            int popcount = bitCount(data[0]) + bitCount(data[1]);
-            return vec3(float(popcount));
-        }
-        StepDDAContext(ctx);
-    }
-    return (HitNormalDDAContext(ctx) * 0.5 + vec3(0.5)) * 0.1;
-}
-
-vec3 RegionTraversal1(vec3 org, vec3 dir)
-{
-    uvec2 data = uvec2(0);
-    uint current_tex = 0;
-    DDAContext ctx = InitDDAContext(org, dir, node_size);
-    bool hit = false;
-    vec3 output_value = vec3(0.0);
-    while (ctx.mask.w == 1.0)
-    {
-        data = texture(masks[nonuniformEXT(current_tex)], ctx.voxel_coords).xy;
-        if (data != uvec2(0, 0))
-        {
-            int popcount = bitCount(data[0]) + bitCount(data[1]);
-            hit = true;
-            output_value = vec3(float(popcount));
-            break;
-        }
-        StepDDAContext(ctx);
-    }
-
-    if (hit)
-        return output_value;
-    else
-        return (HitNormalDDAContext(ctx) * 0.5 + vec3(0.5)) * 0.1;
-}
-
-vec3 RegionTraversal2(vec3 org, vec3 dir)
-{
-    uvec2 data = uvec2(0);
-    uint current_tex = 0;
-
-    int depth = 0;
-    DDAContextSave ctx_cache;
-    vec3 org_cache;
-
-    bool hit = false;
-    vec3 output_value = vec3(0.0);
-
-    DDAContext ctx = InitDDAContext(org, dir, node_size);
-
-    while (ctx.mask.w == 1.0)
-    {
-        data = texture(masks[nonuniformEXT(current_tex)], ctx.voxel_coords).xy;
-        if (data != uvec2(0, 0))
-        {
-            int popcount = bitCount(data[0]) + bitCount(data[1]);
-            hit = true;
-            output_value = vec3(float(popcount));
-
-            ctx_cache = SaveDDAContext(ctx);
-            org_cache = org;
-
-            org = RecursionPointDDAContext(ctx, org, dir, node_size);
-            ctx = InitDDAContext(org, dir, node_size);
-            ctx.mask.xyz = ctx_cache.mask.xyz;
-            ++depth;
-
-            hit = false;
-
-            while (ctx.mask.w == 1.0)
-            {
-                data = texture(masks[nonuniformEXT(current_tex)], ctx.voxel_coords).xy;
-                if (data != uvec2(0, 0))
-                {
-                    output_value = ctx.voxel_coords;
-                    hit = true;
-                    break;
-                }
-                StepDDAContext(ctx);
-            }
-
-            if (hit)
-                break;
-
-            --depth;
-            ctx = RestoreDDAContext(ctx_cache, dir, node_size);
-            org = org_cache;
-        }
-        StepDDAContext(ctx);
-    }
-
-    if (hit)
-        return output_value;
-    else
-        return (HitNormalDDAContext(ctx) * 0.5 + vec3(0.5)) * 0.1;
-}
-
-vec3 RegionTraversal3(vec3 org, vec3 dir)
-{
-    uvec2 data = uvec2(0);
-    uint current_tex = 0;
-
-    int depth = 0;
-    DDAContextSave ctx_cache;
-    vec3 org_cache;
-
-    bool hit = false;
-    vec3 output_value = vec3(0.0);
-
-    DDAContext ctx = InitDDAContext(org, dir, node_size);
-
-    while (true)
-    {
-        hit = false;
-
-        while (ctx.mask.w == 1.0)
-        {
-            data = texture(masks[nonuniformEXT(current_tex)], ctx.voxel_coords).xy;
-            if (data != uvec2(0, 0))
-            {
-                hit = true;
-                if (depth < 1)
-                {
-                    ctx_cache = SaveDDAContext(ctx);
-                    org_cache = org;
-
-                    org = RecursionPointDDAContext(ctx, org, dir, node_size);
-                    ctx = InitDDAContext(org, dir, node_size);
-                    ctx.mask.xyz = ctx_cache.mask.xyz;
-                    ++depth;
-                }
-                else
-                {
-                    output_value = ctx.voxel_coords;
-                    ++depth;
-                }
-                break;
-            }
-            StepDDAContext(ctx);
-        }
-
-        if (!hit)
-        {
-            if (depth > 0)
-            {
-                --depth;
-                ctx = RestoreDDAContext(ctx_cache, dir, node_size);
-                org = org_cache;
-                StepDDAContext(ctx);
-            }
-            else
-                break;
-        }
-        else if (depth > 1)
-            break;
-    }
-
-    if (hit)
-        return output_value;
-    else
-        return (HitNormalDDAContext(ctx) * 0.5 + vec3(0.5)) * 0.1;
-}
-
-vec4 RegionTraversal4(vec3 org, vec3 dir)
+vec4 RegionTraversal4(vec3 org, vec3 dir, out vec3 payload)
 {
     DDAContextSave ctx_cache[STACK_SIZE];
     vec3 org_cache[STACK_SIZE];
@@ -349,6 +180,8 @@ vec4 RegionTraversal4(vec3 org, vec3 dir)
                     else
                     {
                         output_value = HitNormalDDAContext(ctx);
+                        payload = texture(payloads[nonuniformEXT(current_tex - leaves_begin)],
+                                          ctx_cache[depth-1].voxel_coords).xyz;
                         ++depth;
                     }
                     break;
@@ -556,7 +389,8 @@ void main()
 
     vec3 org = root_org;
 
-    vec4 trav = RegionTraversal4(org, dir);
+    vec3 payload = vec3(0.0);
+    vec4 trav = RegionTraversal4(org, dir, payload);
     if (trav.w >= 0.0)
     {
         float frag_depth = trav.w + entry_depth;
@@ -579,7 +413,7 @@ void main()
         float avg_t = 0.0;
         if (display_mode == 0.0)
         {
-            shadow = RegionTraversal4(hitp + light_dir*0.0001, light_dir).w >= 0.0 ? 0.0 : 1.0;
+            shadow = RegionTraversal4(hitp + light_dir*0.0001, light_dir, payload).w >= 0.0 ? 0.0 : 1.0;
             diffuse = max(0.0, dot(light_dir, trav.xyz)) * AtmosphericScattering(hitp, light_dir);
         }
         else
@@ -587,7 +421,8 @@ void main()
             vec4 previous_hit = trav;
             vec3 previous_org = org;
             vec3 previous_dir = dir;
-            float current_weight = 1.0;
+            //float current_weight = 1.0;
+            vec3 current_weight = vec3(1.0);
 
 #if 1
 #define SAMPLE_COUNT 4
@@ -597,7 +432,7 @@ void main()
                 vec3 current_org = previous_hitp + previous_hit.xyz*0.0001;
                 if (dot(previous_hit.xyz, light_dir) > 0.0)
                 {
-                    float sample_t = RegionTraversal4(current_org + light_dir*0.0001, light_dir).w;
+                    float sample_t = RegionTraversal4(current_org + light_dir*0.0001, light_dir, payload).w;
                     if (sample_t < 0.0)
                     {
                         indirect += max(0.0, dot(previous_hit.xyz, light_dir))
@@ -620,13 +455,13 @@ void main()
 
                 mat3 tb_mat = genTB(trav.xyz);
                 vec3 current_ray = tb_mat * ts_sample;
-                float next_weight = max(0.0, dot(-previous_dir, current_ray));
 
                 if (dot(current_ray, previous_hit.xyz) < 0.0)
                     break;
 
-                current_weight *= next_weight;
-                vec4 current_hit = RegionTraversal4(current_org, current_ray);
+                vec4 current_hit = RegionTraversal4(current_org, current_ray, payload);
+                float next_weight = max(0.0, dot(-previous_dir, current_ray));
+                current_weight *= next_weight * payload;
                 if (current_hit.w < 0.0)
                 {
                     exit_color =

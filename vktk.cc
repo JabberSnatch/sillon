@@ -309,8 +309,15 @@ VkShaderModule Context::CompileShader_GLSL(VkShaderStageFlagBits _shaderStage,
     default: break;
     }
 
+    shaderc::CompileOptions compile_options = {};
+#ifndef _NDEBUG
+    compile_options.SetGenerateDebugInfo();
+    compile_options.SetOptimizationLevel(shaderc_optimization_level_zero);
+#endif
+
     shaderc::SpvCompilationResult compilation =
-        shaderc::Compiler{}.CompileGlslToSpv(_code, _codeSize, shader_kind, _shaderName);
+        shaderc::Compiler{}.CompileGlslToSpv(_code, _codeSize, shader_kind, _shaderName,
+                                             compile_options);
 
     if (compilation.GetCompilationStatus() != shaderc_compilation_status_success)
     {
