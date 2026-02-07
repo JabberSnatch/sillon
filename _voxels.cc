@@ -2846,7 +2846,7 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt)
         desc_counts[1] = (uint32_t)_rt.state->region_package.offsets.size();
         desc_counts[2] = (uint32_t)_rt.state->region_package.payloads.size();
 
-        static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_allocs[2];
+        static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_allocs[3];
         desc_count_allocs[0] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
         desc_count_allocs[1] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
         desc_count_allocs[2] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};

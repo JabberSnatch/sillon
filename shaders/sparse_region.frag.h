@@ -26,7 +26,7 @@ layout(push_constant, std430) uniform PushConstants {
 
 layout(set = 1, binding = 0) uniform usampler3D masks[];
 layout(set = 2, binding = 0) uniform usampler3D offsets[];
-layout(set = 3, binding = 0) uniform usampler3D payloads[];
+layout(set = 3, binding = 0) uniform sampler3D payloads[];
 
 #if 0
 #define NODE_SIZE 32.0
@@ -71,7 +71,7 @@ mat3 genTB(vec3 N) {
          N);
  }
 
-vec4 RegionTraversal4(vec3 org, vec3 dir, out vec3 payload)
+vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
 {
     DDAContextSave ctx_cache[STACK_SIZE];
     vec3 org_cache[STACK_SIZE];
@@ -114,6 +114,7 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, out vec3 payload)
                     else
                     {
                         output_value = HitNormalDDAContext(ctx);
+                        payload = vec3(0.0);
                         ++depth;
                     }
                     break;
@@ -387,10 +388,11 @@ void main()
 
     entry_depth = max(entry_depth - region_begin, 0.0);
 
+    vec3 base_color = vec3(0.0);
     vec3 org = root_org;
 
     vec3 payload = vec3(0.0);
-    vec4 trav = RegionTraversal4(org, dir, payload);
+    vec4 trav = RegionTraversal4(org, dir, base_color);
     if (trav.w >= 0.0)
     {
         float frag_depth = trav.w + entry_depth;
@@ -481,7 +483,7 @@ void main()
 
         //color.xyz = vec3(mix(shadow.xxx * diffuse + indirect.xxx * indirect_contribution, vec3(0.3, 0.5, 0.5), (1.0 - fog).xxx));
         if (display_mode < 2.0)
-            color.xyz = shadow.xxx * diffuse + indirect + exit_color;
+            color.xyz = base_color * (shadow.xxx * diffuse + indirect + exit_color);
 #if 0
         else if (display_mode == 2.0)
             color.xyz = avg_t.xxx/16.0;

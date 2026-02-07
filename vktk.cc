@@ -3165,8 +3165,8 @@ DispatchContext::BindSwapchain(dstk::Registry::Node _node,
     {
         framebuffers.push_back(
             vulkan.CreateFramebuffer(render_pass,
-                                      { _swapchain.size.width, _swapchain.size.height },
-                                      { _swapchain.views[index*2], _swapchain.views[index*2 + 1] })
+                                     { _swapchain.size.width, _swapchain.size.height },
+                                     { _swapchain.views[index*2], _swapchain.views[index*2 + 1] })
             );
     }
     registry.ComponentRequest<std::vector<VkFramebuffer>>(_node) = framebuffers;
