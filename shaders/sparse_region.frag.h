@@ -434,7 +434,8 @@ void main()
                 vec3 current_org = previous_hitp + previous_hit.xyz*0.0001;
                 if (dot(previous_hit.xyz, light_dir) > 0.0)
                 {
-                    float sample_t = RegionTraversal4(current_org + light_dir*0.0001, light_dir, payload).w;
+                    vec3 dummy = vec3(0.0);
+                    float sample_t = RegionTraversal4(current_org + light_dir*0.0001, light_dir, dummy).w;
                     if (sample_t < 0.0)
                     {
                         indirect += max(0.0, dot(previous_hit.xyz, light_dir))

@@ -904,10 +904,21 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                             output[xindex
                                    + yindex*extent
                                    + zindex*extent*extent] = numtk::vec4<uint8_t>{
+                                (uint8_t)255u,
+                                ((xindex / 16) & (yindex / 16) & (zindex / 16)) == 0
+                                ? (uint8_t)255u
+                                : (uint8_t)0,
+                                ((xindex / 16) & (yindex / 16) & (zindex / 16)) == 0
+                                ? (uint8_t)255u
+                                : (uint8_t)0,
+                                0
+
+#if 0
                                 (uint8_t)((xindex * 256) / extent),
                                 (uint8_t)((yindex * 256) / extent),
                                 (uint8_t)((zindex * 256) / extent),
                                 0
+#endif
                             };
                         }
                     }
