@@ -331,7 +331,9 @@ void DecodeChunk(voxtk::BinaryRegion& region,
                         if (palette_data[block_id] != "air"
                             && palette_data[block_id] != "glow_lichen")
                             //region.Set(point, (uint8_t)block_id);
-                            region.Set(point, true);
+                            //region.StoreData(point, 0, (uint8_t)block_id);
+                            region.StoreData(point, 0, numtk::vec3<uint8_t>{ 255, 255, 255 });
+                            //region.Set(point, true);
 
                         data_offset += bit_count;
                         ++block_index;
@@ -353,6 +355,7 @@ voxtk::BinaryRegion DeserialiseRegion(std::string const& file_path)
     std::vector<uint8_t> region_file = systk::LoadFile(file_path.c_str());
     mctk::MCAFileData mca_data = mctk::MCADecode(region_file.data(), region_file.size());
     voxtk::BinaryRegion output{ { 512u, 512u, 512u } };
+    output.DeclareLayer(0, numtk::vec3<uint8_t>{ 0, 0, 0 });
 
     for (uint32_t index = 0; index < 1024; ++index)
     {
@@ -892,7 +895,7 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
             payload,
             VkOffset3D{ 0, 0, 0 },
             VkExtent3D{ node_size * 4, node_size * 4, node_size * 4 },
-            [node_size](void* mapped_data) {
+            [&region, node_size](void* mapped_data) {
                 uint32_t extent = node_size * 4;
                 numtk::vec4<uint8_t>* output = (numtk::vec4<uint8_t>*)mapped_data;
                 for (uint32_t zindex = 0; zindex < extent; ++zindex)
@@ -901,6 +904,10 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                     {
                         for (uint32_t xindex = 0; xindex < extent; ++xindex)
                         {
+                            numtk::vec3<uint8_t> const& data =
+                                region.LoadData<numtk::vec3<uint8_t>>(
+                                    { xindex, yindex, zindex }, 0);
+
                             output[xindex
                                    + yindex*extent
                                    + zindex*extent*extent] = numtk::vec4<uint8_t>{
