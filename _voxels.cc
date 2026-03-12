@@ -216,6 +216,8 @@ vkrg::layout::DispatchGraph PixelCyclingRenderGraph(dstk::Registry& _registry);
 vkrg::layout::DispatchGraph SparseRegionRenderGraph(dstk::Registry& _registry);
 vkrg::layout::DispatchGraph GUIRenderGraph(dstk::Registry& _registry);
 
+std::unordered_map<std::string, numtk::vec3<uint8_t>> const& BlockColorMap();
+
 void DecodeChunk(voxtk::BinaryRegion& region,
                  mctk::MCAChunkData const& chunk_data,
                  numtk::vec2u const& chunk_xz)
@@ -226,6 +228,7 @@ void DecodeChunk(voxtk::BinaryRegion& region,
     if (chunk_fields.empty())
         return;
 
+    std::unordered_map<std::string, numtk::vec3<uint8_t>> const& block_color = BlockColorMap();
     NBTCompound const& root = *(NBTCompound const*)chunk_fields[0].payload;
     for (NBTField const& field0 : root)
     {
@@ -328,12 +331,18 @@ void DecodeChunk(voxtk::BinaryRegion& region,
                         uint32_t y = (block_index / 256) % 16;
 
                         numtk::vec3u point = section_begin + numtk::vec3u{ x, y, z };
+#if 0
                         if (palette_data[block_id] != "air"
                             && palette_data[block_id] != "glow_lichen")
-                            //region.Set(point, (uint8_t)block_id);
-                            //region.StoreData(point, 0, (uint8_t)block_id);
-                            region.StoreData(point, 0, numtk::vec3<uint8_t>{ 255, 255, 255 });
-                            //region.Set(point, true);
+                        {
+                            numtk::vec3<uint8_t> color = { 255, 255, 255 };
+                            if (block_color.count(palette_data[block_id]))
+                                color = block_color.at(palette_data[block_id]);
+                            region.StoreData(point, 0, color);
+                        }
+#endif
+                        if (block_color.count(palette_data[block_id]))
+                            region.StoreData(point, 0, block_color.at(palette_data[block_id]));
 
                         data_offset += bit_count;
                         ++block_index;
@@ -895,7 +904,7 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
             payload,
             VkOffset3D{ 0, 0, 0 },
             VkExtent3D{ node_size * 4, node_size * 4, node_size * 4 },
-            [&region, node_size](void* mapped_data) {
+            [&region, &lod0_base, node_size](void* mapped_data) {
                 uint32_t extent = node_size * 4;
                 numtk::vec4<uint8_t>* output = (numtk::vec4<uint8_t>*)mapped_data;
                 for (uint32_t zindex = 0; zindex < extent; ++zindex)
@@ -906,11 +915,13 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                         {
                             numtk::vec3<uint8_t> const& data =
                                 region.LoadData<numtk::vec3<uint8_t>>(
-                                    { xindex, yindex, zindex }, 0);
+                                    lod0_base + numtk::vec3u{ xindex, yindex, zindex }, 0);
 
                             output[xindex
                                    + yindex*extent
                                    + zindex*extent*extent] = numtk::vec4<uint8_t>{
+                                data.x, data.y, data.z, 0
+#if 0
                                 (uint8_t)255u,
                                 ((xindex / 16) & (yindex / 16) & (zindex / 16)) == 0
                                 ? (uint8_t)255u
@@ -919,6 +930,7 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                                 ? (uint8_t)255u
                                 : (uint8_t)0,
                                 0
+#endif
 
 #if 0
                                 (uint8_t)((xindex * 256) / extent),
@@ -3994,6 +4006,12 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
     {};
 
     runtime.registry->BindComponent(_subpass_node, runtime);
+}
+
+std::unordered_map<std::string, numtk::vec3<uint8_t>> const& BlockColorMap()
+{
+#include "mcblocks.hh"
+    return kBlockColors;
 }
 
 }
