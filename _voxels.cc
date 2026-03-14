@@ -343,6 +343,12 @@ void DecodeChunk(voxtk::BinaryRegion& region,
 #endif
                         if (block_color.count(palette_data[block_id]))
                             region.StoreData(point, 0, block_color.at(palette_data[block_id]));
+#if 0
+                        else if (palette_data[block_id] != "air"
+                                 && palette_data[block_id] != "glow_lichen"
+                                 && palette_data[block_id] != "water")
+                            std::cout << palette_data[block_id]  << std::endl;
+#endif
 
                         data_offset += bit_count;
                         ++block_index;
@@ -364,7 +370,7 @@ voxtk::BinaryRegion DeserialiseRegion(std::string const& file_path)
     std::vector<uint8_t> region_file = systk::LoadFile(file_path.c_str());
     mctk::MCAFileData mca_data = mctk::MCADecode(region_file.data(), region_file.size());
     voxtk::BinaryRegion output{ { 512u, 512u, 512u } };
-    output.DeclareLayer(0, numtk::vec3<uint8_t>{ 0, 0, 0 });
+    output.DeclareLayer(0, numtk::vec3<uint8_t>{ 255, 255, 255 });
 
     for (uint32_t index = 0; index < 1024; ++index)
     {
@@ -915,12 +921,15 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                         {
                             numtk::vec3<uint8_t> const& data =
                                 region.LoadData<numtk::vec3<uint8_t>>(
-                                    lod0_base + numtk::vec3u{ xindex, yindex, zindex }, 0);
+                                    lod0_base - numtk::vec3u::Constant(2) + numtk::vec3u{ xindex, yindex, zindex }, 0);
 
                             output[xindex
                                    + yindex*extent
                                    + zindex*extent*extent] = numtk::vec4<uint8_t>{
+#if 1
                                 data.x, data.y, data.z, 0
+#endif
+
 #if 0
                                 (uint8_t)255u,
                                 ((xindex / 16) & (yindex / 16) & (zindex / 16)) == 0
