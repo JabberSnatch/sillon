@@ -921,7 +921,7 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                         {
                             numtk::vec3<uint8_t> const& data =
                                 region.LoadData<numtk::vec3<uint8_t>>(
-                                    lod0_base - numtk::vec3u::Constant(2) + numtk::vec3u{ xindex, yindex, zindex }, 0);
+                                    lod0_base + numtk::vec3u{ xindex, yindex, zindex }, 0);
 
                             output[xindex
                                    + yindex*extent
