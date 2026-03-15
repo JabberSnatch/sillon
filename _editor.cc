@@ -41,10 +41,7 @@ struct state_t
 
     VkRenderPass viewport_render_pass;
 
-    voxtk::Region<numtk::vec4<uint8_t>> voxel_region{
-        { (uint32_t)kGridSize, (uint32_t)kGridSize, (uint32_t)kGridSize },
-        numtk::vec4<uint8_t>{ 0, 0, 0, 0 }
-    };
+    voxtk::BinaryRegion voxel_region;
     VkSampler sampler;
     vktk::Texture voxel_texture;
     vktk::DescriptorPool voxel_desc_pool;
@@ -89,6 +86,11 @@ void ConstantResources(void* _pstate,
 {
     state_t* _state = (state_t*)_pstate;
 
+    _state->voxel_region = voxtk::BinaryRegion{
+        { (uint32_t)state_t::kGridSize, (uint32_t)state_t::kGridSize, (uint32_t)state_t::kGridSize }
+    };
+    _state->voxel_region.DeclareLayer(0, numtk::vec4<uint8_t>::Constant(0));
+
     {
         _state->voxel_texture = _vulkan->CreateTexture(
             state_t::kGridSize, state_t::kGridSize, state_t::kGridSize,
@@ -97,7 +99,13 @@ void ConstantResources(void* _pstate,
             [_state](void* mapped_data) {
                 numtk::vec4<uint8_t>* pixels = (numtk::vec4<uint8_t>*)mapped_data;
                 for (uint32_t index = 0; index < state_t::kGridVolume; ++index) {
-                    pixels[index] = _state->voxel_region[index];
+                    numtk::vec3u point = {
+                        index % (uint32_t)state_t::kGridSize,
+                        (index / (uint32_t)state_t::kGridSize) % (uint32_t)state_t::kGridSize,
+                        index / ((uint32_t)(state_t::kGridSize * state_t::kGridSize))
+                    };
+
+                    pixels[index] = _state->voxel_region.LoadData<numtk::vec4<uint8_t>>(point, 0);
                 }
             });
 
@@ -665,7 +673,13 @@ void Draw(void* _pstate,
         [_state](void* mapped_data) {
             numtk::vec4<uint8_t>* pixels = (numtk::vec4<uint8_t>*)mapped_data;
             for (uint32_t index = 0; index < state_t::kGridVolume; ++index) {
-                pixels[index] = _state->voxel_region[index];
+                    numtk::vec3u point = {
+                        index % (uint32_t)state_t::kGridSize,
+                        (index / (uint32_t)state_t::kGridSize) % (uint32_t)state_t::kGridSize,
+                        index / ((uint32_t)(state_t::kGridSize * state_t::kGridSize))
+                    };
+
+                pixels[index] = _state->voxel_region.LoadData<numtk::vec4<uint8_t>>(point, 0);
             }
         });
 
@@ -856,15 +870,19 @@ bool Update(void* _pstate,
                 + point.y*state_t::kGridSize
                 + point.z*state_t::kGridSize*state_t::kGridSize;
 
-            if (_state->voxel_region[point].w() == 0)
+            if (_state->voxel_region.LoadData<numtk::vec4<uint8_t>>(point, 0).w() == 0)
             {
                 numtk::vec3<uint8_t> rgb8_color = (_state->current_color * 255.f).cast<uint8_t>();
-                _state->voxel_region.Set(point, numtk::vec4<uint8_t>{
+                _state->voxel_region.StoreData(point, (uint8_t)0, numtk::vec4<uint8_t>{
                     rgb8_color.x, rgb8_color.y, rgb8_color.z, 255
                 });
             }
             else
-                _state->voxel_region.Set(point, { 0, 0, 0, 0 });
+            {
+                _state->voxel_region.StoreData(point,
+                                               (uint8_t)0,
+                                               numtk::vec4<uint8_t>::Constant(0));
+            }
         }
 
         if (next_mode != RegionMode::Disabled && _state->region_mode == RegionMode::Disabled)
@@ -891,12 +909,25 @@ bool Update(void* _pstate,
             if (_state->region_mode == RegionMode::Set)
             {
                 numtk::vec3<uint8_t> rgb8_color = (_state->current_color * 255.f).cast<uint8_t>();
-                _state->voxel_region.Set(begin, end, numtk::vec4<uint8_t>{
-                    rgb8_color.x, rgb8_color.y, rgb8_color.z, 255
-                });
+                for (uint32_t z_index = begin.z; z_index < end.z; ++z_index)
+                {
+                    for (uint32_t y_index = begin.y; y_index < end.y; ++y_index)
+                    {
+                        for (uint32_t x_index = begin.x; x_index < end.x; ++x_index)
+                        {
+                            _state->voxel_region.StoreData(
+                                numtk::vec3u{ x_index, y_index, z_index },
+                                (uint8_t)0,
+                                numtk::vec4<uint8_t>{
+                                    rgb8_color.x, rgb8_color.y, rgb8_color.z, 255
+                                }
+                            );
+                        }
+                    }
+                }
             }
             if (_state->region_mode == RegionMode::Clear)
-                _state->voxel_region.Clear(begin, end);
+                _state->voxel_region.Clear({ begin, (end-begin) });
         }
 
         _state->region_mode = next_mode;
