@@ -393,8 +393,8 @@ void main()
     vec3 base_color = vec3(0.0);
     vec3 org = root_org;
 
-    vec3 payload = vec3(0.0);
     vec4 trav = RegionTraversal4(org, dir, base_color);
+    vec3 payload = base_color;
     if (trav.w >= 0.0)
     {
         float frag_depth = trav.w + entry_depth;
@@ -425,8 +425,7 @@ void main()
             vec4 previous_hit = trav;
             vec3 previous_org = org;
             vec3 previous_dir = dir;
-            //float current_weight = 1.0;
-            vec3 current_weight = vec3(1.0);
+            vec3 current_weight = vec3(1.0) * payload;
 
 #if 1
 #define SAMPLE_COUNT 4
@@ -434,6 +433,7 @@ void main()
             {
                 vec3 previous_hitp = previous_org + previous_dir*previous_hit.w;
                 vec3 current_org = previous_hitp + previous_hit.xyz*0.0001;
+
                 if (dot(previous_hit.xyz, light_dir) > 0.0)
                 {
                     vec3 dummy = vec3(0.0);
@@ -464,16 +464,18 @@ void main()
                 if (dot(current_ray, previous_hit.xyz) < 0.0)
                     break;
 
-                vec4 current_hit = RegionTraversal4(current_org, current_ray, payload);
+                vec3 next_payload = vec3(0.0);
+                vec4 current_hit = RegionTraversal4(current_org, current_ray, next_payload);
                 float next_weight = max(0.0, dot(-previous_dir, current_ray));
-                current_weight *= next_weight * payload;
                 if (current_hit.w < 0.0)
                 {
                     exit_color =
-                        AtmosphericScattering(current_org, current_ray) * current_weight;
+                        AtmosphericScattering(current_org, current_ray) * current_weight * next_weight;
                     break;
                 }
 
+                payload = next_payload;
+                current_weight *= next_weight * payload;
                 previous_org = current_org;
                 previous_dir = current_ray;
                 previous_hit = current_hit;
@@ -486,7 +488,7 @@ void main()
 
         //color.xyz = vec3(mix(shadow.xxx * diffuse + indirect.xxx * indirect_contribution, vec3(0.3, 0.5, 0.5), (1.0 - fog).xxx));
         if (display_mode < 2.0)
-            color.xyz = base_color * (shadow.xxx * diffuse + indirect + exit_color);
+            color.xyz = base_color * (shadow.xxx * diffuse) + indirect + exit_color;
 #if 0
         else if (display_mode == 2.0)
             color.xyz = avg_t.xxx/16.0;
