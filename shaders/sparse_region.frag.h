@@ -362,6 +362,9 @@ vec3 AtmosphericScattering(vec3 position, vec3 direction)
 R"(
 void main()
 {
+    vec3 local_camera = (iFS_camera_position * 0.5 + vec3(0.5)) * 0.5;
+    vec3 local_coords = iFS_volume_coords * 0.5;
+
     vec2 uv =
         ((vec2(gl_FragCoord.xy) - vec2(screen_offset.xy) + pixelPlasticSequence(sample_offset))
         / vec2(screen_size.xy));
@@ -375,15 +378,15 @@ void main()
     dir = normalize(dir);
 
     vec3 step_sign = sign(-dir);
-    vec3 max_t = abs(((step_sign * 0.5 + vec3(0.5)) - (step_sign * iFS_volume_coords)) / dir);
+    vec3 max_t = abs(((step_sign * 0.5 + vec3(0.5)) - (step_sign * local_coords)) / dir);
 
-    float entry_depth = distance(iFS_camera_position * 0.5 + vec3(0.5), iFS_volume_coords);
+    float entry_depth = distance(local_camera, local_coords);
     float region_begin = min(max_t.x, min(max_t.y, max_t.z));
 
-    vec3 root_org = iFS_camera_position * 0.5 + vec3(0.5);
-    if (root_org != clamp(root_org, vec3(0.0), vec3(1.0)))
+    vec3 root_org = local_camera;
+    if (root_org != clamp(root_org, vec3(0.0), vec3(1.0) * 0.5))
     {
-        root_org = iFS_volume_coords
+        root_org = local_coords
             - dir * 0.00001
             - (dir * min(entry_depth, region_begin));
     }

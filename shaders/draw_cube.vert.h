@@ -3,6 +3,7 @@ layout(std140, set = 0, binding = 0) uniform MatrixBlock {
     mat4 projection;
     mat4 view_model;
     mat4 view;
+    vec2 screen_offset;
     ivec2 screen_size;
 };
 
