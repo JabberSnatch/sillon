@@ -292,6 +292,12 @@ enum StateOverrideTag {
     DepthWriteEnable,
 };
 
+struct ImageSyncTriplet {
+    VkPipelineStageFlags stage;
+    VkAccessFlags access;
+    VkImageLayout layout;
+};
+
 struct Context
 {
     Context(uint64_t _hinstance, uint64_t _hwindow);
@@ -419,6 +425,12 @@ struct Context
     Texture CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
                           VkImageType _type, VkFormat _format, VkImageUsageFlags _usage,
                           std::function<void(void*)> const& _upload_callback);
+
+    Texture CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
+                          VkImageType _type, VkFormat _format, VkImageUsageFlags _usage,
+                          ImageSyncTriplet const& _sync,
+                          std::function<void(void*)> const& _upload_callback);
+
     void DestroyTexture(Texture const& _texture);
 
     VkImageView CreateImageView(Texture const& _texture) const;
@@ -472,6 +484,7 @@ struct RenderAttachment {
     VkFormat format;
     ClearValue clear_value;
     VkAttachmentLoadOp load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    VkImageLayout initial_layout = VK_IMAGE_LAYOUT_UNDEFINED;
 };
 
 enum DispatchMode {

@@ -2085,7 +2085,10 @@ vkrg::layout::DispatchGraph ProgressiveRenderGraph(dstk::Registry& _registry)
         .graphics = {
             .attachments = {
                 { VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
-                  numtk::vec4f{ 0.f, 0.f, 0.f, 0.f }, VK_ATTACHMENT_LOAD_OP_LOAD }
+                  numtk::vec4f{ 0.f, 0.f, 0.f, 0.f },
+                  VK_ATTACHMENT_LOAD_OP_LOAD,
+                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                }
             }
         }
     });
@@ -3105,7 +3108,16 @@ dispatch_runtime_t ProgressiveRenderingPipeline(voxel_state_t* _state, vktk::Con
                 VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
                 VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
                 | VK_IMAGE_USAGE_TRANSFER_SRC_BIT
-                | VK_IMAGE_USAGE_SAMPLED_BIT
+                | VK_IMAGE_USAGE_SAMPLED_BIT,
+                {
+                    VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    VK_ACCESS_COLOR_ATTACHMENT_READ_BIT,
+                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                },
+                [&_swapchain](void* buffer) {
+                    std::memset(buffer, 0,
+                                _swapchain.size.width * _swapchain.size.height * 16);
+                }
             );
         }
 

@@ -1776,7 +1776,9 @@ Buffer Context::CreateBuffer(uint32_t _size,
 {
     Buffer result = CreateBuffer(_size, _usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, _memory_flags);
 
-    Buffer staging = CreateBuffer(_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+    Buffer staging = CreateBuffer(_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                                  | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     void* mapped_data = staging.alloc.map;
     _upload_callback(mapped_data);
 
@@ -1866,6 +1868,21 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
                                VkImageType _type, VkFormat _format, VkImageUsageFlags _usage,
                                std::function<void(void*)> const& _upload_callback)
 {
+    return CreateTexture(_width, _height, _depth,
+                         _type, _format, _usage,
+                         ImageSyncTriplet{
+                             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                             VK_ACCESS_SHADER_READ_BIT,
+                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                         },
+                         _upload_callback);
+}
+
+Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
+                               VkImageType _type, VkFormat _format, VkImageUsageFlags _usage,
+                               ImageSyncTriplet const& _sync,
+                               std::function<void(void*)> const& _upload_callback)
+{
     Texture result = CreateTexture(_width, _height, _depth, _type, _format,
                                    _usage | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
@@ -1931,13 +1948,13 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
                            &copy_region);
 
     image_memory_barrier.oldLayout = image_memory_barrier.newLayout;
-    image_memory_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    image_memory_barrier.newLayout = _sync.layout;
     image_memory_barrier.srcAccessMask = image_memory_barrier.dstAccessMask;
-    image_memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    image_memory_barrier.dstAccessMask = _sync.access;
 
     vkCmdPipelineBarrier(command_buffer,
                          VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         _sync.stage,
                          0u,
                          0u, nullptr,
                          0u, nullptr,
@@ -3030,7 +3047,7 @@ DispatchContext::RenderPassDescription(
 
         output.push_back(vktk::Context::RenderPassAttachment{
             dispatch_pass.graphics.attachments[index].format,
-            VK_IMAGE_LAYOUT_UNDEFINED,
+            dispatch_pass.graphics.attachments[index].initial_layout,
             sync_reqs.layout,
             dispatch_pass.graphics.attachments[index].load_op
         });
