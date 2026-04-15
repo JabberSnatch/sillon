@@ -431,20 +431,20 @@ VkShaderModule Context::CompileShader_GLSL(VkShaderStageFlagBits _shaderStage,
     shader.setStringsWithLengthsAndNames(&_code, (int const*)&_codeSize, &_shaderName, 1);
     shader.setEnvInput(glslang::EShSourceGlsl, shader_kind, glslang::EShClientVulkan, 450);
     shader.setEnvClient(glslang::EShClientVulkan, glslang::EShTargetVulkan_1_4);
-    shader.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetSpv_1_6);
+    shader.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetSpv_1_5);
 
     glslang::SpvOptions options = {};
 #ifdef _NDEBUG
     options.generateDebugInfo = false;
     options.disableOptimizer = false;
-    options.optimizeSize = false;
+    options.optimizeSize = true;
     options.emitNonSemanticShaderDebugInfo = false;
     options.emitNonSemanticShaderDebugSource = false;
     shader.setDebugInfo(false);
 #else
     options.generateDebugInfo = true;
-    options.disableOptimizer = true;
-    options.optimizeSize = false;
+    options.disableOptimizer = false;
+    options.optimizeSize = true;
     options.emitNonSemanticShaderDebugInfo = true;
     options.emitNonSemanticShaderDebugSource = true;
     shader.setDebugInfo(true);
