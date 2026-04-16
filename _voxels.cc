@@ -2124,6 +2124,19 @@ vkrg::layout::DispatchGraph ProgressiveRenderGraph(dstk::Registry& _registry)
                                 }
                             });
 
+    _registry.BindComponent(graph.MakeWeakEdge("FramebufferBlit", "FramebufferResolve"),
+                            vkrg::layout::EdgeBindings{
+                                vkrg::layout::EdgeType_Image,
+                                vkrg::layout::BindingPoint{
+                                    .type = vkrg::layout::BindingType_BlitImage,
+                                    .blit_slot = vkrg::layout::BlitImageSlot_Source
+                                },
+                                vkrg::layout::BindingPoint{
+                                    .type = vkrg::layout::BindingType_Framebuffer,
+                                    .attachment_index = 0
+                                }
+                            });
+
     _registry.BindComponent(graph["swapchain_input"], vkrg::layout::NodeTag_Input);
     _registry.BindComponent(graph.MakeEdge("swapchain_input", "FramebufferBlit"),
                             vkrg::layout::EdgeBindings{
@@ -2142,6 +2155,10 @@ vkrg::layout::DispatchGraph ProgressiveRenderGraph(dstk::Registry& _registry)
                 {
                     VK_IMAGE_TYPE_2D, VK_FORMAT_B8G8R8A8_SRGB,
                     numtk::vec4f::Constant(0.f), VK_ATTACHMENT_LOAD_OP_LOAD
+                },
+                {
+                    VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
+                    vkrg::layout::ClearValue{ 1.f, 0u }
                 }
             }
         }
@@ -3112,7 +3129,7 @@ dispatch_runtime_t ProgressiveRenderingPipeline(voxel_state_t* _state, vktk::Con
                 {
                     VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                     VK_ACCESS_COLOR_ATTACHMENT_READ_BIT,
-                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
                 },
                 [&_swapchain](void* buffer) {
                     std::memset(buffer, 0,

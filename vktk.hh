@@ -558,6 +558,7 @@ enum NodeTag {
     NodeTag_Input,
     NodeTag_Present,
     NodeTag_BlitImage,
+    NodeTag_WeakEdge,
 };
 
 enum BindingType {
@@ -672,6 +673,12 @@ struct DispatchGraph
         return edge;
     }
 
+    dstk::Registry::Node MakeWeakEdge(std::string const& source, std::string const& sink) {
+        dstk::Registry::Node edge = MakeEdge(source, sink);
+        data->registry->BindComponent(edge, NodeTag_WeakEdge);
+        return edge;
+    }
+
     DispatchGraph const& Subgraph(std::string const& name) const {
         return *data->registry->ComponentLookup<DispatchGraph>((*this)[name]);
     }
@@ -680,8 +687,23 @@ struct DispatchGraph
         std::vector<dstk::Registry::Node> result = {};
         for (auto const& pair : data->name_lookup.pairs)
         {
-            if (data->edges_in.count(pair.first) == 0
-                || data->edges_in.at(pair.first).empty())
+            bool is_input =
+                data->edges_in.count(pair.first) == 0
+                || data->edges_in.at(pair.first).empty();
+
+            if (!is_input)
+            {
+                std::vector<dstk::Registry::Node> const& edges = data->edges_in.at(pair.first);
+
+                is_input =
+                    std::all_of(edges.begin(), edges.end(), [this](dstk::Registry::Node edge) {
+                        vkrg::layout::NodeTag* tag =
+                            data->registry->ComponentLookup<vkrg::layout::NodeTag>(edge);
+                        return tag && *tag == vkrg::layout::NodeTag_WeakEdge;
+                    });
+            }
+
+            if (is_input)
                 result.push_back(pair.first);
         }
         return result;
@@ -691,8 +713,23 @@ struct DispatchGraph
         std::vector<dstk::Registry::Node> result = {};
         for (auto const& pair : data->name_lookup.pairs)
         {
-            if (data->edges_out.count(pair.first) == 0
-                || data->edges_out.at(pair.first).empty())
+            bool is_output =
+                data->edges_out.count(pair.first) == 0
+                || data->edges_out.at(pair.first).empty();
+
+            if (!is_output)
+            {
+                std::vector<dstk::Registry::Node> const& edges = data->edges_out.at(pair.first);
+
+                is_output =
+                    std::all_of(edges.begin(), edges.end(), [this](dstk::Registry::Node edge) {
+                        vkrg::layout::NodeTag* tag =
+                            data->registry->ComponentLookup<vkrg::layout::NodeTag>(edge);
+                        return tag && *tag == vkrg::layout::NodeTag_WeakEdge;
+                    });
+            }
+
+            if (is_output)
                 result.push_back(pair.first);
         }
         return result;
@@ -753,6 +790,11 @@ struct DispatchGraph
 
                     for (dstk::Registry::Node edge : graph->data->edges_in.at(node))
                     {
+                        vkrg::layout::NodeTag* tag =
+                            graph->data->registry->ComponentLookup<vkrg::layout::NodeTag>(edge);
+                        if (tag && *tag == vkrg::layout::NodeTag_WeakEdge)
+                            continue;
+
                         EdgeDesc const* edge_desc =
                             graph->data->registry->ComponentLookup<EdgeDesc>(edge);
                         next_nodes.push_back(edge_desc->source);
@@ -818,6 +860,11 @@ struct DispatchGraph
                 {
                     for (dstk::Registry::Node edge : current_graph->data->edges_out.at(current_node))
                     {
+                        vkrg::layout::NodeTag* tag =
+                            root->data->registry->ComponentLookup<vkrg::layout::NodeTag>(edge);
+                        if (tag && *tag == vkrg::layout::NodeTag_WeakEdge)
+                            continue;
+
                         vkrg::layout::DispatchGraph::EdgeDesc const* edge_desc =
                             root->data->registry->ComponentLookup<vkrg::layout::DispatchGraph::EdgeDesc>(edge);
                         node_stack.push_back(edge_desc->sink);
