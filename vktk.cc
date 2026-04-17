@@ -908,6 +908,19 @@ void Allocator::Free(Allocation const& _alloc)
         range_iterator->second = std::next(range_iterator)->second;
         storage.free_list.erase(std::next(range_iterator));
     }
+
+    for (size_t index = 0; index < storage.free_list.size(); ++index)
+    {
+        auto range = storage.free_list[index];
+        for (size_t comp_index = index+1; comp_index < storage.free_list.size(); ++comp_index)
+        {
+            auto comp_range = storage.free_list[comp_index];
+            assert(!(range.first >= comp_range.first && range.first < comp_range.second));
+            assert(!(range.second >= comp_range.first && range.second < comp_range.second));
+            assert(!(comp_range.first >= range.first && comp_range.first < range.second));
+            assert(!(comp_range.second >= range.first && comp_range.second < range.second));
+        }
+    }
 }
 
 uint32_t Allocator::SelectMemoryType(VkMemoryPropertyFlags _flags, uint32_t _required_size)
