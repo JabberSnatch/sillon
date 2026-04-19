@@ -572,6 +572,61 @@ void CommandBuffer::Submit(VkSemaphore* _signal_semaphore,
         [handle = this->handle,
          command_pool = this->queue.command_pool,
          pending_destroys = std::move(pending_destroys)](Context& context) {
+
+#ifndef _NDEBUG
+            using RangeVector = std::vector<std::tuple<uint64_t, uint64_t, uint64_t>>;
+            std::unordered_map<uint64_t, RangeVector> ranges_map = {};
+
+            std::unordered_set<uint64_t> handles = {};
+            std::unordered_map<uint64_t, std::unordered_set<uint64_t>> allocs = {};
+            for (Buffer const& buffer : pending_destroys)
+            {
+                assert(!handles.count((uint64_t)buffer.buffer));
+                handles.emplace((uint64_t)buffer.buffer);
+
+                assert(!allocs[(uint64_t)buffer.alloc.memory].count(buffer.alloc.offset));
+                allocs[(uint64_t)buffer.alloc.memory].emplace(buffer.alloc.offset);
+
+                RangeVector& ranges = ranges_map[(uint64_t)buffer.alloc.memory];
+
+                auto range_iterator = std::lower_bound(
+                    ranges.begin(), ranges.end(),
+                    buffer.alloc.offset,
+                    [](auto const& _lhs, auto _rhs) -> bool {
+                        return std::get<0>(_lhs) < _rhs;
+                    });
+
+                auto range_begin = (uint64_t)buffer.alloc.offset;
+                auto range_end = (uint64_t)(buffer.alloc.size + buffer.alloc.offset);
+
+                if (range_iterator != ranges.end())
+                {
+                    auto comp_begin = std::get<0>(*range_iterator);
+                    auto comp_end = std::get<1>(*range_iterator);
+                    assert(!(range_begin >= comp_begin && range_begin < comp_end));
+                    assert(!(range_end > comp_begin && range_end <= comp_end));
+                    assert(!(comp_begin >= range_begin && comp_begin < range_end));
+                    assert(!(comp_end > range_begin && comp_end <= range_end));
+                }
+
+                if (range_iterator != ranges.begin())
+                {
+                    auto comp_begin = std::get<0>(*std::prev(range_iterator));
+                    auto comp_end = std::get<1>(*std::prev(range_iterator));
+                    assert(!(range_begin >= comp_begin && range_begin < comp_end));
+                    assert(!(range_end > comp_begin && range_end <= comp_end));
+                    assert(!(comp_begin >= range_begin && comp_begin < range_end));
+                    assert(!(comp_end > range_begin && comp_end <= range_end));
+                }
+
+                ranges.insert(range_iterator, {
+                    (uint64_t)buffer.alloc.offset,
+                    (uint64_t)(buffer.alloc.size + buffer.alloc.offset),
+                    (uint64_t)buffer.buffer
+                });
+            }
+#endif
+
             for (Buffer const& buffer : pending_destroys)
             {
 #if 0
@@ -885,7 +940,14 @@ void Allocator::Free(Allocation const& _alloc)
     assert(heap_iterator != heaps.end());
 
     ChunkStorage& storage = *heap_iterator;
-    uint64_t alloc_begin = _alloc.offset / kBlockSize;
+    uint32_t chunk_index = std::distance(
+        storage.chunks.begin(),
+        std::find_if(storage.chunks.begin(), storage.chunks.end(),
+                     [&_alloc](VkDeviceMemory _memory){
+                         return _memory == _alloc.memory;
+                     })
+    );
+    uint64_t alloc_begin = (_alloc.offset / kBlockSize) + chunk_index * kChunkBlockCount;
     uint64_t alloc_end = alloc_begin + (_alloc.size / kBlockSize) + ((_alloc.size % kBlockSize != 0) ? 1 : 0);
 
     auto range_iterator = std::lower_bound(storage.free_list.begin(), storage.free_list.end(), alloc_begin,
@@ -909,6 +971,7 @@ void Allocator::Free(Allocation const& _alloc)
         storage.free_list.erase(std::next(range_iterator));
     }
 
+#ifndef _NDEBUG
     for (size_t index = 0; index < storage.free_list.size(); ++index)
     {
         auto range = storage.free_list[index];
@@ -921,6 +984,7 @@ void Allocator::Free(Allocation const& _alloc)
             assert(!(comp_range.second >= range.first && comp_range.second < range.second));
         }
     }
+#endif
 }
 
 uint32_t Allocator::SelectMemoryType(VkMemoryPropertyFlags _flags, uint32_t _required_size)
