@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
 project(sillon-package)
 
-find_package(Vulkan COMPONENTS shaderc_combined glslang)
+find_package(Vulkan COMPONENTS shaderc_combined)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/loader/cmake")
 include(loader)
@@ -10,7 +10,7 @@ add_subdirectory(loader)
 target_include_directories(loader_interface INTERFACE toolkits)
 
 add_library(vktk STATIC vktk.cc)
-target_link_libraries(vktk PUBLIC Vulkan::Vulkan PRIVATE Vulkan::shaderc_combined Vulkan::glslang)
+target_link_libraries(vktk PUBLIC Vulkan::Vulkan PRIVATE Vulkan::shaderc_combined)
 set_property(TARGET vktk PROPERTY CXX_STANDARD 20)
 
 add_library(sillon MODULE engine.cc _glyphs.cc _icosphere.cc _voxels.cc _editor.cc)
