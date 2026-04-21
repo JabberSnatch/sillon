@@ -59,8 +59,8 @@ struct FlightCamera
     numtk::vec2f forward_spherical = { .5f, -0.25f };
     numtk::vec3f position = { 16.f, -0.3f, 16.f };
 #elif defined(TRAVERSAL_V2)
-    numtk::vec2f forward_spherical = { 0.f, 0.f };
-    numtk::vec3f position = { 0.f, 512.f, 0.f };
+    numtk::vec2f forward_spherical = { 0.710f, -0.260f };
+    numtk::vec3f position = { 37.025f, -36.243f, -18.561f };
 #endif
 
     float velocity = 5.f;
@@ -1137,6 +1137,21 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         guitk::BeginRecord(_state->gui_context, _input, _past_input);
         guitk::BeginFrame(_state->gui_context, _state->framerate_frame);
         guitk::Label(_state->gui_context, _state->framerate_label.c_str());
+
+        {
+            std::string posstr = "position : "
+                + std::to_string(_state->camera.position.x) + " "
+                + std::to_string(_state->camera.position.y) + " "
+                + std::to_string(_state->camera.position.z);
+            guitk::Label(_state->gui_context, posstr.c_str());
+        }
+
+        {
+            std::string rotstr = "forward : "
+                + std::to_string(_state->camera.forward_spherical.x()) + " "
+                + std::to_string(_state->camera.forward_spherical.y());
+            guitk::Label(_state->gui_context, rotstr.c_str());
+        }
 
 #if defined(TRAVERSAL_V1)
         guitk::Checkbox(_state->gui_context, &_state->pixel_cycling_enabled, "Pixel Cycling");
@@ -3980,9 +3995,9 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
             matrix->view_model =
                 matrix->view
                 * numtk::mat4f{
-                131072.f, 0.f, 0.f, 0.f,
-                0.f, 131072.f, 0.f, 0.f,
-                0.f, 0.f, 131072.f, 0.f,
+                256.f, 0.f, 0.f, 0.f,
+                0.f, 256.f, 0.f, 0.f,
+                0.f, 0.f, 256.f, 0.f,
                 0.f, 0.f, 0.f, 1.f };
             matrix->screen_offset = numtk::vec2f{ 0.f, 0.f };
             matrix->screen_size = swapchain_size.cast<int32_t>();

@@ -362,8 +362,9 @@ vec3 AtmosphericScattering(vec3 position, vec3 direction)
 R"(
 void main()
 {
-    vec3 local_camera = (iFS_camera_position * 0.5 + vec3(0.5)) * 0.5;
-    vec3 local_coords = iFS_volume_coords * 0.5;
+    float box_scale = 0.5;
+    vec3 local_camera = (iFS_camera_position * 0.5 + vec3(0.5)) * box_scale;
+    vec3 local_coords = iFS_volume_coords * box_scale;
 
     vec2 uv =
         ((vec2(gl_FragCoord.xy) - vec2(screen_offset.xy) + pixelPlasticSequence(sample_offset))
@@ -384,11 +385,32 @@ void main()
     float region_begin = min(max_t.x, min(max_t.y, max_t.z));
 
     vec3 root_org = local_camera;
-    if (root_org != clamp(root_org, vec3(0.0), vec3(1.0) * 0.5))
+    if (root_org != clamp(root_org, vec3(0.0), vec3(1.0) * box_scale))
     {
+#if 0
         root_org = local_coords
             - dir * 0.00001
             - (dir * min(entry_depth, region_begin));
+#endif
+
+        vec3 alt_org = root_org - vec3(0.5) * box_scale;
+        vec3 abs_org = abs(alt_org) * (2.0 / box_scale);
+        float winding = max(abs_org.x, max(abs_org.y, abs_org.z)) < 1.0 ? -1.0 : 1.0;
+        vec3 sign_bit = -sign(dir);
+        vec3 d = (0.5 * box_scale * winding * sign_bit - alt_org) / dir;
+
+#define TEST(U, VW) (d.U > 0.0) && all(lessThan(abs(alt_org.VW + dir.VW * d.U), vec2(0.5 * box_scale)))
+
+        bvec3 test = bvec3(TEST(x, yz), TEST(y, zx), TEST(z, xy));
+        sign_bit = test.x
+            ? vec3(sign_bit.x, 0.0, 0.0)
+            : (test.y
+                ? vec3(0.0, sign_bit.y, 0.0)
+                : vec3(0.0, 0.0, test.z ? sign_bit.z : 0.0));
+#undef TEST
+
+        float distance = (sign_bit.x != 0.0) ? d.x : ((sign_bit.y != 0.0) ? d.y : d.z);
+        root_org = local_camera + dir * distance;
     }
 
     entry_depth = max(entry_depth - region_begin, 0.0);
