@@ -316,6 +316,20 @@ struct Context
                                       char const* _code,
                                       size_t _codeSize);
 
+    static std::vector<uint32_t> CompileShader_GLSLtoSPIRV(VkShaderStageFlagBits _shaderStage,
+                                                           char const* _shaderName,
+                                                           std::vector<std::string> const& _code);
+
+    static std::vector<uint32_t> CompileShader_GLSLtoSPIRV(VkShaderStageFlagBits _shaderStage,
+                                                           char const* _shaderName,
+                                                           char const* _code,
+                                                           size_t _codeSize);
+
+    VkShaderModule CompileShader_SPIRV(std::vector<uint32_t> const& _code);
+
+    VkShaderModule CompileShader_SPIRV(uint32_t const* _code,
+                                       size_t _codeSize);
+
     CommandBuffer CreateCommandBuffer(Queue const& queue);
 
     struct RenderPassAttachment {
@@ -509,7 +523,7 @@ struct BindingPointSync {
 
 struct ShaderStage {
     VkShaderStageFlagBits stage;
-    std::vector<std::string> source;
+    std::vector<uint32_t> binary;
 };
 
 struct StageBinding {

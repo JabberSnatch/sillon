@@ -280,16 +280,39 @@ VkShaderModule Context::CompileShader_GLSL(VkShaderStageFlagBits _shaderStage,
                                            char const* _shaderName,
                                            std::vector<std::string> const& _code)
 {
-    std::string full_source =
-        std::accumulate(_code.begin(), _code.end(), std::string(""),
-                        [](std::string const& a, std::string const& b){ return a + "\n" + b; });
-    return CompileShader_GLSL(_shaderStage, _shaderName, full_source.c_str(), full_source.size());
+    return CompileShader_SPIRV(
+        CompileShader_GLSLtoSPIRV(
+            _shaderStage, _shaderName, _code));
 }
 
 VkShaderModule Context::CompileShader_GLSL(VkShaderStageFlagBits _shaderStage,
                                            char const* _shaderName,
                                            char const* _code,
                                            size_t _codeSize)
+{
+    return CompileShader_SPIRV(
+        CompileShader_GLSLtoSPIRV(
+            _shaderStage, _shaderName, _code, _codeSize));
+}
+
+
+std::vector<uint32_t> Context::CompileShader_GLSLtoSPIRV(VkShaderStageFlagBits _shaderStage,
+                                                         char const* _shaderName,
+                                                         std::vector<std::string> const& _code)
+{
+    std::string full_source =
+        std::accumulate(_code.begin(), _code.end(), std::string(""),
+                        [](std::string const& a, std::string const& b){ return a + "\n" + b; });
+    return CompileShader_GLSLtoSPIRV(_shaderStage,
+                                     _shaderName,
+                                     full_source.c_str(),
+                                     full_source.size());
+}
+
+std::vector<uint32_t> Context::CompileShader_GLSLtoSPIRV(VkShaderStageFlagBits _shaderStage,
+                                                         char const* _shaderName,
+                                                         char const* _code,
+                                                         size_t _codeSize)
 {
     shaderc_shader_kind shader_kind = shaderc_glsl_infer_from_source;
     switch (_shaderStage)
@@ -322,15 +345,26 @@ VkShaderModule Context::CompileShader_GLSL(VkShaderStageFlagBits _shaderStage,
     if (compilation.GetCompilationStatus() != shaderc_compilation_status_success)
     {
         std::cout << compilation.GetErrorMessage() << std::endl;
-        return VK_NULL_HANDLE;
+        return {};
     }
 
+    return { compilation.begin(), compilation.end() };
+}
+
+VkShaderModule Context::CompileShader_SPIRV(std::vector<uint32_t> const& _code)
+{
+    return CompileShader_SPIRV(_code.data(), _code.size() * 4);
+}
+
+VkShaderModule Context::CompileShader_SPIRV(uint32_t const* _code,
+                                            size_t _codeSize)
+{
     VkShaderModuleCreateInfo create_info{};
     create_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
     create_info.pNext = nullptr;
     create_info.flags = 0u;
-    create_info.codeSize = (compilation.end() - compilation.begin()) * 4;
-    create_info.pCode = compilation.begin();
+    create_info.codeSize = _codeSize;
+    create_info.pCode = _code;
 
     VkShaderModule output{};
     CHECKCALL(vkCreateShaderModule, device, &create_info, nullptr, &output);
@@ -2523,7 +2557,7 @@ DispatchContext::GenerateFramebufferRuntime(VkFormat const* _swapchain_format)
                 }
 
                 VkShaderModule shader_module =
-                    vulkan.CompileShader_GLSL(shader.stage, shader_name.c_str(), shader.source);
+                    vulkan.CompileShader_SPIRV(shader.binary);
 
                 pipeline_stages.push_back(vktk::Context::PipelineStage{ shader_module, shader.stage });
             }

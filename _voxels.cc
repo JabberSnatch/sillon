@@ -1573,19 +1573,25 @@ vkrg::layout::DispatchStage RegionPassDispatchStageInfo()
 
     output.shaders = std::vector<vkrg::layout::ShaderStage>{
         { VK_SHADER_STAGE_VERTEX_BIT,
-          { "#version 450",
-            "#define CW_CUBE",
-            #include "shaders/cube_vertices.vert.h"
-            ,
-            #include "shaders/draw_cube.vert.h"
-          }
+          vktk::Context::CompileShader_GLSLtoSPIRV(
+              VK_SHADER_STAGE_VERTEX_BIT, "render_region_vertex",
+              { "#version 450",
+                "#define CW_CUBE",
+                #include "shaders/cube_vertices.vert.h"
+                ,
+                #include "shaders/draw_cube.vert.h"
+              }
+          )
         },
         { VK_SHADER_STAGE_FRAGMENT_BIT,
-          { "#version 450",
-            #include "shaders/voxel_traversal.h"
-            ,
-            #include "shaders/render_region.frag.h"
-          }
+          vktk::Context::CompileShader_GLSLtoSPIRV(
+              VK_SHADER_STAGE_FRAGMENT_BIT, "render_region_fragment",
+              { "#version 450",
+                #include "shaders/voxel_traversal.h"
+                ,
+                #include "shaders/render_region.frag.h"
+              }
+          )
         }
     };
 
@@ -1619,18 +1625,18 @@ vkrg::layout::DispatchStage SparseRegionDispatchStageInfo()
 
     output.shaders = std::vector<vkrg::layout::ShaderStage>{
         { VK_SHADER_STAGE_VERTEX_BIT,
-          { "#version 450",
-            "#define CW_CUBE",
-            #include "shaders/cube_vertices.vert.h"
-            ,
-            #include "shaders/draw_cube.vert.h"
-          }
+          vktk::Context::CompileShader_GLSLtoSPIRV(
+              VK_SHADER_STAGE_VERTEX_BIT, "sparse_region_vertex",
+              { "#version 450",
+                "#define CW_CUBE",
+                #include "shaders/cube_vertices.vert.h"
+                ,
+                #include "shaders/draw_cube.vert.h"
+              }
+          )
         },
-        { VK_SHADER_STAGE_FRAGMENT_BIT,
-          { "#version 450",
-            #include "shaders/voxel_traversal.h"
-            ,
-            #include "shaders/sparse_region.frag.h"
+        { VK_SHADER_STAGE_FRAGMENT_BIT, {
+            #include "shaders/sparse_region.frag.glsl.spv"
           }
         }
     };
@@ -1683,14 +1689,20 @@ vkrg::layout::DispatchStage SkyboxDispatchStageInfo()
 
     output.shaders = std::vector<vkrg::layout::ShaderStage>{
         { VK_SHADER_STAGE_VERTEX_BIT,
-          { "#version 450",
-            #include "shaders/full_screen.vert.h"
-          }
+          vktk::Context::CompileShader_GLSLtoSPIRV(
+              VK_SHADER_STAGE_VERTEX_BIT, "skybox_vertex",
+              { "#version 450",
+                #include "shaders/full_screen.vert.h"
+              }
+          )
         },
         { VK_SHADER_STAGE_FRAGMENT_BIT,
-          { "#version 450",
-            #include "shaders/skybox.frag.h"
-          }
+          vktk::Context::CompileShader_GLSLtoSPIRV(
+              VK_SHADER_STAGE_FRAGMENT_BIT, "skybox_fragment",
+              { "#version 450",
+                #include "shaders/skybox.frag.h"
+              }
+          )
         }
     };
 
@@ -1714,14 +1726,20 @@ vkrg::layout::DispatchStage ResolveDispatchStageInfo()
 
     output.shaders = std::vector<vkrg::layout::ShaderStage>{
         { VK_SHADER_STAGE_VERTEX_BIT,
-          { "#version 450",
-            #include "shaders/full_screen.vert.h"
-          }
+          vktk::Context::CompileShader_GLSLtoSPIRV(
+              VK_SHADER_STAGE_VERTEX_BIT, "resolve_vertex",
+              { "#version 450",
+                #include "shaders/full_screen.vert.h"
+              }
+          )
         },
         { VK_SHADER_STAGE_FRAGMENT_BIT,
-          { "#version 450",
-            #include "shaders/resolve.frag.h"
-          }
+          vktk::Context::CompileShader_GLSLtoSPIRV(
+              VK_SHADER_STAGE_FRAGMENT_BIT, "resolve_fragment",
+              { "#version 450",
+                #include "shaders/resolve.frag.h"
+              }
+          )
         }
     };
 
@@ -1751,31 +1769,37 @@ vkrg::layout::DispatchStage GUIFramesDispatchStageInfo()
 
     output.shaders = std::vector<vkrg::layout::ShaderStage>{
         { VK_SHADER_STAGE_VERTEX_BIT,
-          { "#version 450",
-            "layout(location = 0) in vec2 iVS_point;"
-            "layout(location = 1) in vec2 iVS_uv;"
-            "layout(location = 0) out vec2 iFS_point;"
-            "layout(push_constant, std430) uniform PushConstants { vec2 viewport_size; };"
-            "void main() {"
-            "gl_Position = vec4((iVS_point / viewport_size) * vec2(2.0) - vec2(1.0), 0.0, 1.0);"
-            "iFS_point = iVS_uv;"
-            "}"
-          }
+          vktk::Context::CompileShader_GLSLtoSPIRV(
+              VK_SHADER_STAGE_VERTEX_BIT, "guiframes_vertex",
+              { "#version 450",
+                "layout(location = 0) in vec2 iVS_point;"
+                "layout(location = 1) in vec2 iVS_uv;"
+                "layout(location = 0) out vec2 iFS_point;"
+                "layout(push_constant, std430) uniform PushConstants { vec2 viewport_size; };"
+                "void main() {"
+                "gl_Position = vec4((iVS_point / viewport_size) * vec2(2.0) - vec2(1.0), 0.0, 1.0);"
+                "iFS_point = iVS_uv;"
+                "}"
+              }
+          )
         },
 
         { VK_SHADER_STAGE_FRAGMENT_BIT,
-          { "#version 450",
-            "layout(location = 0) in vec2 iFS_point;"
-            "layout(location = 0) out vec4 color;"
-            "layout(push_constant, std430) uniform PushConstants { vec2 viewport_size; };"
+          vktk::Context::CompileShader_GLSLtoSPIRV(
+              VK_SHADER_STAGE_FRAGMENT_BIT, "guiframes_fragment",
+              { "#version 450",
+                "layout(location = 0) in vec2 iFS_point;"
+                "layout(location = 0) out vec4 color;"
+                "layout(push_constant, std430) uniform PushConstants { vec2 viewport_size; };"
 
-            "void main() {"
-            "vec2 frame_coords = iFS_point - vec2(0.5);"
-            "float border_distance = length(frame_coords);"
-            "float border_color = min(smoothstep(0.0, 0.25, border_distance), smoothstep(0.5, 0.25, border_distance));"
-            "color = vec4(border_color.xxx, 1.0);"
-            "}"
-          }
+                "void main() {"
+                "vec2 frame_coords = iFS_point - vec2(0.5);"
+                "float border_distance = length(frame_coords);"
+                "float border_color = min(smoothstep(0.0, 0.25, border_distance), smoothstep(0.5, 0.25, border_distance));"
+                "color = vec4(border_color.xxx, 1.0);"
+                "}"
+              }
+          )
         }
     };
 
@@ -1807,29 +1831,35 @@ vkrg::layout::DispatchStage GUIGlyphsDispatchStageInfo()
 
     output.shaders = std::vector<vkrg::layout::ShaderStage>{
         { VK_SHADER_STAGE_VERTEX_BIT,
-          { "#version 450",
-            "layout(location = 0) in vec2 iVS_point;"
-            "layout(location = 1) in vec2 iVS_uv;"
-            "layout(location = 0) out vec2 iFS_uv;"
-            "layout(push_constant, std430) uniform PushConstants { vec2 viewport_size; };"
-            "void main() {"
-            "gl_Position = vec4((iVS_point / viewport_size) * vec2(2.0) - vec2(1.0), 0.0, 1.0);"
-            "iFS_uv = iVS_uv;"
-            "}"
-          }
+          vktk::Context::CompileShader_GLSLtoSPIRV(
+              VK_SHADER_STAGE_VERTEX_BIT, "guiglyphs_vertex",
+              { "#version 450",
+                "layout(location = 0) in vec2 iVS_point;"
+                "layout(location = 1) in vec2 iVS_uv;"
+                "layout(location = 0) out vec2 iFS_uv;"
+                "layout(push_constant, std430) uniform PushConstants { vec2 viewport_size; };"
+                "void main() {"
+                "gl_Position = vec4((iVS_point / viewport_size) * vec2(2.0) - vec2(1.0), 0.0, 1.0);"
+                "iFS_uv = iVS_uv;"
+                "}"
+              }
+          )
         },
 
         { VK_SHADER_STAGE_FRAGMENT_BIT,
-          { "#version 450",
-            "layout(location = 0) in vec2 iFS_uv;"
-            "layout(location = 0) out vec4 color;"
-            "layout(set = 0, binding = 0) uniform usampler2D glyph_atlas;"
-            "void main() {"
-            "uint glyph_pixel = texture(glyph_atlas, iFS_uv).x;"
-            "if (glyph_pixel == 0) discard;"
-            "color = vec4(1.0);"
-            "}"
-          }
+          vktk::Context::CompileShader_GLSLtoSPIRV(
+              VK_SHADER_STAGE_FRAGMENT_BIT, "guiglyphs_fragment",
+              { "#version 450",
+                "layout(location = 0) in vec2 iFS_uv;"
+                "layout(location = 0) out vec4 color;"
+                "layout(set = 0, binding = 0) uniform usampler2D glyph_atlas;"
+                "void main() {"
+                "uint glyph_pixel = texture(glyph_atlas, iFS_uv).x;"
+                "if (glyph_pixel == 0) discard;"
+                "color = vec4(1.0);"
+                "}"
+              }
+          )
         }
     };
 
@@ -1863,22 +1893,28 @@ vkrg::layout::DispatchStage ProgressiveResolveStageInfo()
 
     output.shaders = std::vector<vkrg::layout::ShaderStage>{
         { VK_SHADER_STAGE_VERTEX_BIT,
-          { "#version 450",
-            #include "shaders/full_screen.vert.h"
-          }
+          vktk::Context::CompileShader_GLSLtoSPIRV(
+              VK_SHADER_STAGE_VERTEX_BIT, "progressive-resolve_vertex",
+              { "#version 450",
+                #include "shaders/full_screen.vert.h"
+              }
+          )
         },
         { VK_SHADER_STAGE_FRAGMENT_BIT,
-          { "#version 450",
-            "layout(location = 0) in vec3 iFS_csPosition;"
-            "layout(location = 0) out vec4 oFS_color;"
-            "layout(set = 0, binding = 0) uniform sampler2D framebuffer;"
-            "layout(push_constant, std430) uniform PushConstant {"
-            "float sample_weight;"
-            "};"
-            "void main() {"
-            "oFS_color = vec4(texelFetch(framebuffer, ivec2(gl_FragCoord.xy), 0).xyz, sample_weight);"
-            "}"
-          }
+          vktk::Context::CompileShader_GLSLtoSPIRV(
+              VK_SHADER_STAGE_FRAGMENT_BIT, "progressive-resolve_fragment",
+              { "#version 450",
+                "layout(location = 0) in vec3 iFS_csPosition;"
+                "layout(location = 0) out vec4 oFS_color;"
+                "layout(set = 0, binding = 0) uniform sampler2D framebuffer;"
+                "layout(push_constant, std430) uniform PushConstant {"
+                "float sample_weight;"
+                "};"
+                "void main() {"
+                "oFS_color = vec4(texelFetch(framebuffer, ivec2(gl_FragCoord.xy), 0).xyz, sample_weight);"
+                "}"
+              }
+          )
         }
     };
 
