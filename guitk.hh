@@ -27,14 +27,12 @@ struct GlyphInfo
     numtk::bounds2u bounds;
     numtk::bounds2f uv;
     GlyphPage glyph_page;
-    //uint32_t index;
 };
 
 struct FrameData
 {
     numtk::bounds2u bounds;
     std::array<std::pair<uint32_t, uint32_t>, GlyphPage_COUNT> glyph_range;
-    //std::pair<uint32_t, uint32_t> glyph_range;
 };
 
 struct WidgetStates
@@ -57,13 +55,20 @@ void EndFrame(Context);
 void Label(Context, std::string const& label_);
 void Checkbox(Context, bool* state_, std::string const& label_);
 
-uint64_t const* FontData();
-uint64_t const* SymbolsData();
+struct TextureData
+{
+    numtk::vec2u size;
+    std::vector<uint8_t> pixels;
+};
+
+TextureData const& FontBitmap();
+TextureData const& SymbolsBitmap();
 
 enum SymbolTag
 {
     SymbolTag_CheckboxClear = 0,
     SymbolTag_CheckboxTicked = 1,
+    SymbolTag_RadioClear = 2,
     SymbolTag_COUNT
 };
 
@@ -99,6 +104,11 @@ struct Context_t
 };
 
 void _PushText(FrameInfo& frame_info_, std::string const& string_, numtk::vec2u& glyph_max_);
+
+numtk::bounds2f SymbolBounds(SymbolTag tag_, bool hover_);
+
+uint64_t const* FontData();
+uint64_t const* SymbolsData();
 
 Context CreateContext() { return new Context_t{}; }
 void DeleteContext(Context context_) { delete context_; }
@@ -245,18 +255,13 @@ void Checkbox(Context context_, bool* state_, std::string const& label_)
         };
 
         bool hover = box_bounds.Contains(*(numtk::vec2u*)context_->input->cursor);
-        float uv_y = hover ? 0.5f : 0.0f;
 
         if (hover
             && iotk::MouseRelease(iotk::kLeftBtn, *context_->input, *context_->past_input))
             *state_ = !(*state_);
 
-        numtk::bounds2f box_uv{
-            !(*state_)
-            ? numtk::vec2f{ 0.f, uv_y }
-            : numtk::vec2f{ 0.5f, uv_y },
-            { 0.5f, .5f }
-        };
+        SymbolTag symbol_tag = !(*state_) ? SymbolTag_CheckboxClear : SymbolTag_CheckboxTicked;
+        numtk::bounds2f box_uv = SymbolBounds(symbol_tag, hover);
 
         frame_info.glyphs[GlyphPage_Symbols].push_back(
             GlyphInfo{ box_bounds, box_uv, GlyphPage_Symbols });
@@ -296,6 +301,104 @@ void _PushText(FrameInfo& frame_info_, std::string const& string_, numtk::vec2u&
     }
 }
 
+TextureData const& FontBitmap()
+{
+    static TextureData kBitmap = [](){
+        TextureData output = {};
+        output.size = numtk::vec2u{ 96, 60 };
+        output.pixels.resize(output.size.x() * output.size.y());
+
+        uint64_t const* font_data = guitk::FontData();
+        uint8_t* texture_buffer = (uint8_t*)output.pixels.data();
+        for (uint32_t index = 0; index < 95; ++index)
+        {
+            uint32_t glyph_x = index % 16;
+            uint32_t glyph_y = index / 16;
+            uint64_t glyph = font_data[index];
+            for (uint32_t dot_y = 0; dot_y < 10; ++dot_y)
+            {
+                for (uint32_t dot_x = 0; dot_x < 6; ++dot_x)
+                {
+                    uint32_t dot_index = (5 - dot_x) + dot_y * 6;
+                    bool dot_value = ((glyph >> dot_index) & 1) != 0;
+
+                    uint32_t texel_x = glyph_x * 6 + dot_x;
+                    uint32_t texel_y = glyph_y * 10 + dot_y;
+                    texture_buffer[texel_x + texel_y*96] = dot_value
+                        ? '\255'
+                        : '\0';
+                }
+            }
+        }
+
+        return output;
+    }();
+
+    return kBitmap;
+}
+
+TextureData const& SymbolsBitmap()
+{
+    static TextureData kBitmap = [](){
+        TextureData output = {};
+        output.size = numtk::vec2u{ 8*SymbolTag_COUNT, 8*2 };
+        output.pixels.resize(output.size.x() * output.size.y());
+
+        uint64_t const* symbols_data = guitk::SymbolsData();
+        uint8_t* texture_buffer = (uint8_t*)output.pixels.data();
+        for (uint32_t index = 0; index < guitk::SymbolTag_COUNT; ++index)
+        {
+            uint64_t glyph = symbols_data[index];
+            for (uint32_t dot_y = 0; dot_y < 8; ++dot_y)
+            {
+                for (uint32_t dot_x = 0; dot_x < 8; ++dot_x)
+                {
+                    uint32_t dot_index = dot_x + dot_y*8;
+                    bool dot_value = ((glyph >> dot_index) & 1) != 0;
+
+                    uint32_t texel_x = index*8 + dot_x;
+                    uint32_t texel_y = dot_y;
+                    texture_buffer[texel_x + texel_y*guitk::SymbolTag_COUNT*8] = dot_value
+                        ? '\255'
+                        : '\0';
+                }
+            }
+        }
+
+        for (uint32_t index = 0; index < guitk::SymbolTag_COUNT; ++index)
+        {
+            uint64_t glyph = symbols_data[index];
+            for (uint32_t dot_y = 0; dot_y < 8; ++dot_y)
+            {
+                for (uint32_t dot_x = 0; dot_x < 8; ++dot_x)
+                {
+                    uint32_t dot_index = dot_x + dot_y*8;
+                    bool dot_value = ((glyph >> dot_index) & 1) == 0;
+
+                    uint32_t texel_x = index*8 + dot_x;
+                    uint32_t texel_y = 8 + dot_y;
+                    texture_buffer[texel_x + texel_y*guitk::SymbolTag_COUNT*8] = dot_value
+                        ? '\255'
+                        : '\0';
+                }
+            }
+        }
+
+        return output;
+    }();
+
+    return kBitmap;
+}
+
+numtk::bounds2f SymbolBounds(SymbolTag tag_, bool hover_)
+{
+    float uv_y = hover_ ? .5f : .0f;
+    return {
+        numtk::vec2f{ (float)tag_ / (float)SymbolTag_COUNT, uv_y },
+        numtk::vec2f{ 1.f / (float)SymbolTag_COUNT, .5f }
+    };
+}
+
 uint64_t const* FontData()
 {
     static constexpr uint64_t kFontData[95] = {
@@ -332,6 +435,7 @@ uint64_t const* SymbolsData()
 {
     static constexpr uint64_t kSymbolsData[SymbolTag_COUNT] = {
         0xff818181818181ffull, 0xff81bdbdbdbd81ffull,
+        0x1866428181426618ull
     };
 
     return kSymbolsData;

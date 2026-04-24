@@ -3388,82 +3388,27 @@ void BindGUIRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
         CHECKCALL(vkCreateSampler, _rt.vulkan->device,
                   &sampler_create, nullptr, &payload.nearest_sampler);
 
+        guitk::TextureData const& font_glyphs = guitk::FontBitmap();
         payload.gui_font_texture = _rt.vulkan->CreateTexture(
-            96, 60, 1,
+            font_glyphs.size.x(), font_glyphs.size.y(), 1,
             VK_IMAGE_TYPE_2D,
             VK_FORMAT_R8_UINT,
             VK_IMAGE_USAGE_SAMPLED_BIT,
-            [](void* buffer) {
-                uint64_t const* font_data = guitk::FontData();
+            [&font_glyphs](void* buffer) {
                 uint8_t* texture_buffer = (uint8_t*)buffer;
-                for (uint32_t index = 0; index < 95; ++index)
-                {
-                    uint32_t glyph_x = index % 16;
-                    uint32_t glyph_y = index / 16;
-                    uint64_t glyph = font_data[index];
-                    for (uint32_t dot_y = 0; dot_y < 10; ++dot_y)
-                    {
-                        for (uint32_t dot_x = 0; dot_x < 6; ++dot_x)
-                        {
-                            uint32_t dot_index = (5 - dot_x) + dot_y * 6;
-                            bool dot_value = ((glyph >> dot_index) & 1) != 0;
-
-                            uint32_t texel_x = glyph_x * 6 + dot_x;
-                            uint32_t texel_y = glyph_y * 10 + dot_y;
-                            texture_buffer[texel_x + texel_y*96] = dot_value
-                                ? '\255'
-                                : '\0';
-                        }
-                    }
-                }
+                std::copy(font_glyphs.pixels.begin(), font_glyphs.pixels.end(), texture_buffer);
             }
         );
 
+        guitk::TextureData const& symbols = guitk::SymbolsBitmap();
         payload.gui_symbols_texture = _rt.vulkan->CreateTexture(
-            8*guitk::SymbolTag_COUNT, 8*2, 1,
+            symbols.size.x(), symbols.size.y(), 1,
             VK_IMAGE_TYPE_2D,
             VK_FORMAT_R8_UINT,
             VK_IMAGE_USAGE_SAMPLED_BIT,
-            [](void* buffer) {
-                uint64_t const* symbols_data = guitk::SymbolsData();
+            [&symbols](void* buffer) {
                 uint8_t* texture_buffer = (uint8_t*)buffer;
-                for (uint32_t index = 0; index < guitk::SymbolTag_COUNT; ++index)
-                {
-                    uint64_t glyph = symbols_data[index];
-                    for (uint32_t dot_y = 0; dot_y < 8; ++dot_y)
-                    {
-                        for (uint32_t dot_x = 0; dot_x < 8; ++dot_x)
-                        {
-                            uint32_t dot_index = dot_x + dot_y*8;
-                            bool dot_value = ((glyph >> dot_index) & 1) != 0;
-
-                            uint32_t texel_x = index*8 + dot_x;
-                            uint32_t texel_y = dot_y;
-                            texture_buffer[texel_x + texel_y*guitk::SymbolTag_COUNT*8] = dot_value
-                                ? '\255'
-                                : '\0';
-                        }
-                    }
-                }
-
-                for (uint32_t index = 0; index < guitk::SymbolTag_COUNT; ++index)
-                {
-                    uint64_t glyph = symbols_data[index];
-                    for (uint32_t dot_y = 0; dot_y < 8; ++dot_y)
-                    {
-                        for (uint32_t dot_x = 0; dot_x < 8; ++dot_x)
-                        {
-                            uint32_t dot_index = dot_x + dot_y*8;
-                            bool dot_value = ((glyph >> dot_index) & 1) == 0;
-
-                            uint32_t texel_x = index*8 + dot_x;
-                            uint32_t texel_y = 8 + dot_y;
-                            texture_buffer[texel_x + texel_y*guitk::SymbolTag_COUNT*8] = dot_value
-                                ? '\255'
-                                : '\0';
-                        }
-                    }
-                }
+                std::copy(symbols.pixels.begin(), symbols.pixels.end(), texture_buffer);
             }
         );
     };
