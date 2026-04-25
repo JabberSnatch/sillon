@@ -1136,6 +1136,10 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
         guitk::BeginRecord(_state->gui_context, _input, _past_input);
         guitk::BeginFrame(_state->gui_context, _state->framerate_frame);
+
+        static float value = 0.f;
+        guitk::Slider(_state->gui_context, &value, "TestSlider", 0.f, 1.f);
+
         guitk::Label(_state->gui_context, _state->framerate_label.c_str());
 
         {
