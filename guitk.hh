@@ -177,6 +177,13 @@ void BeginFrame(Context context_, Frame& frame_) {
 
     FrameInfo& frame_info = context_->registered_frames[frame_];
 
+    if (iotk::MouseHold(iotk::kLeftBtn, *context_->input, *context_->past_input)
+        && frame_ == context_->grabbed_frame)
+    {
+        frame_info.bounds.min += iotk::MouseDelta(*context_->input, *context_->past_input).cast<uint32_t>();
+        states.mouse_over = true;
+    }
+
     for (uint32_t page_index = 0u; page_index < GlyphPage_COUNT; ++page_index)
         frame_info.glyphs[page_index].clear();
     frame_info.next_row = numtk::vec2u{ 15, 15 };
@@ -211,13 +218,6 @@ void EndFrame(Context context_) {
                 context_->grabbed_frame = current_frame;
             }
         }
-    }
-
-    if (iotk::MouseHold(iotk::kLeftBtn, *context_->input, *context_->past_input)
-        && current_frame == context_->grabbed_frame)
-    {
-        frame_info.bounds.min += iotk::MouseDelta(*context_->input, *context_->past_input).cast<uint32_t>();
-        states.mouse_over = true;
     }
 
     if (iotk::MouseRelease(iotk::kLeftBtn, *context_->input, *context_->past_input))
