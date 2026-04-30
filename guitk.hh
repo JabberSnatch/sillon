@@ -1,8 +1,10 @@
 #pragma once
 
 #include <vector>
-#include <numtk.hh>
+
 #include <dstk.hh>
+#include <hshtk.hh>
+#include <numtk.hh>
 
 namespace guitk
 {
@@ -55,8 +57,8 @@ void BeginFrame(Context, Frame&);
 void EndFrame(Context);
 
 void Label(Context, std::string const& label_);
-void Checkbox(Context, bool* state_, std::string const& label_);
-void Slider(Context, float* state_, std::string const& label_, float min_, float max_);
+void Checkbox(Context, bool* state_, std::string const& label_, std::string const& id_ = "");
+void Slider(Context, float* state_, std::string const& label_, float min_, float max_, std::string const& id_ = "");
 
 struct TextureData
 {
@@ -106,12 +108,18 @@ struct Context_t
     Handle_t next_id = 1u;
 };
 
+Handle_t GenerateHandle(std::string const& id_);
+
 void _PushText(FrameInfo& frame_info_, std::string const& string_, numtk::vec2u& glyph_max_);
 
 numtk::bounds2f SymbolBounds(SymbolTag tag_, bool hover_);
 
 uint64_t const* FontData();
 uint64_t const* SymbolsData();
+
+// =============================================================================
+// Context
+// =============================================================================
 
 Context CreateContext() { return new Context_t{}; }
 void DeleteContext(Context context_) { delete context_; }
@@ -246,7 +254,7 @@ void Label(Context context_, std::string const& label_)
     frame_info.next_row += numtk::vec2u{ 0, 22 };
 }
 
-void Checkbox(Context context_, bool* state_, std::string const& label_)
+void Checkbox(Context context_, bool* state_, std::string const& label_, std::string const& id_)
 {
     WidgetStates& states = context_->current_record;
 
@@ -282,12 +290,14 @@ void Checkbox(Context context_, bool* state_, std::string const& label_)
     frame_info.next_row += numtk::vec2u{ -20u, 22u };
 }
 
-void Slider(Context context_, float* state_, std::string const& label_, float min_, float max_)
+void Slider(Context context_, float* state_, std::string const& label_, float min_, float max_, std::string const& id_)
 {
     WidgetStates& states = context_->current_record;
 
     if (states.current_frame == kNullHandle)
         return;
+
+    Handle_t slider_handle = GenerateHandle(label_);
 
     numtk::vec2u glyph_max = numtk::vec2u{ 0, 0 };
     FrameInfo& frame_info = context_->registered_frames[states.current_frame];
@@ -321,6 +331,10 @@ void Slider(Context context_, float* state_, std::string const& label_, float mi
     }
 
     frame_info.next_row += numtk::vec2u{ 0u, 22u };
+}
+
+Handle_t GenerateHandle(std::string const& id_) {
+    return hshtk::Hash32_Murmur3((uint8_t const*)id_.c_str(), id_.size());
 }
 
 void _PushText(FrameInfo& frame_info_, std::string const& string_, numtk::vec2u& glyph_max_)
