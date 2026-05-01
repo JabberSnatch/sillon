@@ -123,7 +123,6 @@ struct voxel_state_t
 
     float time = 0.f;
 
-    guitk::Frame framerate_frame;
     float framerate_average = 0.f;
     std::string framerate_label;
     bool enable_indirect_light = false;
@@ -1135,7 +1134,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         _state->framerate_average += _input->time_delta / 10.f;
 
         guitk::BeginRecord(_state->gui_context, _input, _past_input);
-        guitk::BeginFrame(_state->gui_context, _state->framerate_frame);
+        guitk::BeginFrame(_state->gui_context, "MainFrame");
 
         static float value = 0.f;
         guitk::Slider(_state->gui_context, &value, "TestSlider", 0.f, 1.f);

@@ -39,12 +39,9 @@ struct FrameData
 
 struct WidgetStates
 {
-    Frame current_frame;
     std::vector<FrameData> frames;
     std::vector<GlyphInfo> glyphs;
     bool mouse_over;
-
-    bool _mouse_captured = false;
 };
 
 Context CreateContext();
@@ -97,18 +94,17 @@ struct Context_t
     bool record_open;
     WidgetStates current_record;
     WidgetStates last_record;
+    Frame current_frame;
 
     iotk::input_t const* input = nullptr;
     iotk::input_t const* past_input = nullptr;
 
     dstk::FlatMap<Frame, FrameInfo> registered_frames = {};
     std::vector<Frame> frame_order = {};
-    Frame grabbed_frame = {};
-
-    Handle_t next_id = 1u;
+    Handle_t grabbed_widget = kNullHandle;
 };
 
-Handle_t GenerateHandle(std::string const& id_);
+Handle_t GenerateHandle(std::string const& id_, Handle_t parent_handle_ = kNullHandle);
 
 void _PushText(FrameInfo& frame_info_, std::string const& string_, numtk::vec2u& glyph_max_);
 
@@ -135,6 +131,7 @@ void BeginRecord(Context context_, iotk::input_t const* input_, iotk::input_t co
 WidgetStates const* EndRecord(Context context_)
 {
     WidgetStates& states = context_->current_record;
+    states.mouse_over = context_->grabbed_widget != kNullHandle;
     states.frames.reserve(context_->frame_order.size());
     for (uint32_t index = 0; index < (uint32_t)context_->frame_order.size(); ++index)
     {
@@ -161,17 +158,18 @@ WidgetStates const* EndRecord(Context context_)
     return &context_->last_record;
 }
 
-void BeginFrame(Context context_, Frame& frame_) {
+void BeginFrame(Context context_, std::string const& id_) {
     WidgetStates& states = context_->current_record;
 
-    if (states.current_frame)
+    if (context_->current_frame)
         return;
 
-    if (!context_->registered_frames.contains(frame_))
+    Handle_t frame = GenerateHandle(id_);
+
+    if (!context_->registered_frames.contains(frame))
     {
-        frame_ = context_->next_id++;
         context_->registered_frames.insert(
-            frame_,
+            frame,
             FrameInfo{
                 {
                     FrameInfo::kOffsetIncrement * (context_->frame_order.size() + 1),
@@ -180,39 +178,34 @@ void BeginFrame(Context context_, Frame& frame_) {
                 {},
                 { 15, 15 }
             });
-        context_->frame_order.push_back(frame_);
+        context_->frame_order.push_back(frame);
     }
 
-    FrameInfo& frame_info = context_->registered_frames[frame_];
+    FrameInfo& frame_info = context_->registered_frames[frame];
 
-    if (iotk::MouseHold(iotk::kLeftBtn, *context_->input, *context_->past_input)
-        && frame_ == context_->grabbed_frame)
-    {
-        frame_info.bounds.min += iotk::MouseDelta(*context_->input, *context_->past_input).cast<uint32_t>();
-        states.mouse_over = true;
-    }
+    if (context_->grabbed_widget == frame)
+        frame_info.bounds.min +=
+            iotk::MouseDelta(*context_->input, *context_->past_input).cast<uint32_t>();
 
     for (uint32_t page_index = 0u; page_index < GlyphPage_COUNT; ++page_index)
         frame_info.glyphs[page_index].clear();
     frame_info.next_row = numtk::vec2u{ 15, 15 };
 
-    states.current_frame = frame_;
+    context_->current_frame = frame;
 }
 
 void EndFrame(Context context_) {
     WidgetStates& states = context_->current_record;
 
-    if (states.current_frame == kNullHandle)
+    if (context_->current_frame == kNullHandle)
         return;
 
-    Frame& current_frame = states.current_frame;
+    Frame& current_frame = context_->current_frame;
 
     FrameInfo& frame_info = context_->registered_frames[current_frame];
     if (frame_info.bounds.Contains(*(numtk::vec2u*)context_->input->cursor))
     {
-        states.mouse_over = true;
-
-        if (!states._mouse_captured
+        if (context_->grabbed_widget == kNullHandle
             && iotk::MousePress(iotk::kLeftBtn, *context_->input, *context_->past_input))
         {
             auto frame_it = std::find(context_->frame_order.begin(), context_->frame_order.end(), current_frame);
@@ -223,15 +216,16 @@ void EndFrame(Context context_) {
             {
                 context_->frame_order.erase(frame_it);
                 context_->frame_order.push_back(current_frame);
-                context_->grabbed_frame = current_frame;
+                context_->grabbed_widget = current_frame;
             }
         }
     }
 
-    if (iotk::MouseRelease(iotk::kLeftBtn, *context_->input, *context_->past_input))
-        context_->grabbed_frame = 0;
+    if (context_->grabbed_widget == current_frame
+        && iotk::MouseRelease(iotk::kLeftBtn, *context_->input, *context_->past_input))
+        context_->grabbed_widget = kNullHandle;
 
-    states.current_frame = kNullHandle;
+    context_->current_frame = kNullHandle;
 }
 
 static inline uint32_t GetGlyphIndex(char character_)
@@ -243,11 +237,11 @@ void Label(Context context_, std::string const& label_)
 {
     WidgetStates& states = context_->current_record;
 
-    if (states.current_frame == kNullHandle)
+    if (context_->current_frame == kNullHandle)
         return;
 
     numtk::vec2u glyph_max = numtk::vec2u{ 0, 0 };
-    FrameInfo& frame_info = context_->registered_frames[states.current_frame];
+    FrameInfo& frame_info = context_->registered_frames[context_->current_frame];
     _PushText(frame_info, label_, glyph_max);
 
     frame_info.bounds = frame_info.bounds.Expand(glyph_max + numtk::vec2u{ 15, 15 });
@@ -258,11 +252,11 @@ void Checkbox(Context context_, bool* state_, std::string const& label_, std::st
 {
     WidgetStates& states = context_->current_record;
 
-    if (states.current_frame == kNullHandle)
+    if (context_->current_frame == kNullHandle)
         return;
 
     numtk::vec2u glyph_max = numtk::vec2u{ 0, 0 };
-    FrameInfo& frame_info = context_->registered_frames[states.current_frame];
+    FrameInfo& frame_info = context_->registered_frames[context_->current_frame];
 
     {
         numtk::bounds2u box_bounds {
@@ -294,35 +288,36 @@ void Slider(Context context_, float* state_, std::string const& label_, float mi
 {
     WidgetStates& states = context_->current_record;
 
-    if (states.current_frame == kNullHandle)
+    if (context_->current_frame == kNullHandle)
         return;
 
-    Handle_t slider_handle = GenerateHandle(label_);
-
     numtk::vec2u glyph_max = numtk::vec2u{ 0, 0 };
-    FrameInfo& frame_info = context_->registered_frames[states.current_frame];
+    FrameInfo& frame_info = context_->registered_frames[context_->current_frame];
+
+    Handle_t widget_handle = GenerateHandle(label_, context_->current_frame);
 
     _PushText(frame_info, label_, glyph_max);
-
-    {
-        numtk::bounds2u box_bounds{ glyph_max - numtk::vec2u{ 0, 11 }, { 128, 6 } };
-        numtk::bounds2f box_uv = SymbolBounds(SymbolTag_RadioClear, false);
-        frame_info.glyphs[GlyphPage_Symbols].push_back(
-            GlyphInfo{ box_bounds, box_uv, GlyphPage_Symbols });
-    }
 
     {
         int32_t offset = (int32_t)(((*state_ - min_) / (max_ - min_)) * 128.f);
 
         numtk::bounds2u box_bounds{ glyph_max + numtk::vec2u{ (uint32_t)offset, (uint32_t)-16 }, { 16, 16 } };
-        bool hover = box_bounds.Contains(*(numtk::vec2u*)context_->input->cursor);
-        states._mouse_captured = states._mouse_captured || hover;
 
-        if (hover && iotk::MouseHold(iotk::kLeftBtn, *context_->input, *context_->past_input))
+        bool hover = box_bounds.Contains(*(numtk::vec2u*)context_->input->cursor);
+
+        if (hover
+            && context_->grabbed_widget == kNullHandle
+            && iotk::MousePress(iotk::kLeftBtn, *context_->input, *context_->past_input))
+            context_->grabbed_widget = widget_handle;
+
+        if (context_->grabbed_widget == widget_handle)
         {
             numtk::vec2i mouse_delta = iotk::MouseDelta(*context_->input, *context_->past_input);
             offset += mouse_delta.x();
             *state_ = (float)(offset / 128.f) * (max_ - min_) + min_;
+
+            if (iotk::MouseRelease(iotk::kLeftBtn, *context_->input, *context_->past_input))
+                context_->grabbed_widget = kNullHandle;
         }
 
         numtk::bounds2f box_uv = SymbolBounds(SymbolTag_RadioClear, hover);
@@ -333,8 +328,8 @@ void Slider(Context context_, float* state_, std::string const& label_, float mi
     frame_info.next_row += numtk::vec2u{ 0u, 22u };
 }
 
-Handle_t GenerateHandle(std::string const& id_) {
-    return hshtk::Hash32_Murmur3((uint8_t const*)id_.c_str(), id_.size());
+Handle_t GenerateHandle(std::string const& id_, Handle_t parent_handle_) {
+    return hshtk::Hash32_Murmur3((uint8_t const*)id_.c_str(), id_.size(), parent_handle_);
 }
 
 void _PushText(FrameInfo& frame_info_, std::string const& string_, numtk::vec2u& glyph_max_)
