@@ -316,6 +316,9 @@ void Slider(Context context_, float* state_, std::string const& label_, float mi
             offset += mouse_delta.x();
             *state_ = (float)(offset / 128.f) * (max_ - min_) + min_;
 
+            if (*state_ > max_) *state_ = max_;
+            if (*state_ < min_) *state_ = min_;
+
             if (iotk::MouseRelease(iotk::kLeftBtn, *context_->input, *context_->past_input))
                 context_->grabbed_widget = kNullHandle;
         }
