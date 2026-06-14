@@ -17,11 +17,15 @@
 #include "voxtk-importers/voxtk_import.hh"
 
 #include <bit>
+#include <chrono>
+#include <future>
 #include <memory>
 #include <unordered_map>
 
 //#define TRAVERSAL_V1
 #define TRAVERSAL_V2
+
+#define SYNC_LOAD
 
 namespace {
 
@@ -116,6 +120,13 @@ struct dispatch_runtime_t
 
 void SparseRegionUpdateBindings(dispatch_runtime_t& _rt);
 
+struct VoxelRegionFuture
+{
+    voxtk::BinaryRegion region;
+    uint32_t area_size = 0u;
+    uint32_t node_size = 0u;
+};
+
 struct voxel_state_t
 {
     guitk::Context gui_context;
@@ -157,6 +168,8 @@ struct voxel_state_t
     voxtk::BinaryRegion initial_region;
     voxtk::BinaryRegion voxel_region{ { 512u, 512u, 512u } };
     VoxelRegionPackage region_package;
+
+    mutable std::future<VoxelRegionFuture> region_future = {};
 };
 
 struct MatrixBlock
@@ -1022,9 +1035,10 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
     uint32_t area_size = 0u;
     uint32_t node_size = 0u;
-#if 1
+#if 0
     {
         voxtk::BinaryRegion src{ numtk::vec3u{ 16, 16, 16 } };
+        src.DeclareLayer(0, numtk::vec3<uint8_t>{ 255, 255, 255 });
         for (uint32_t z = 0; z < 16; ++z)
             for (uint32_t y = 0; y < 16; ++y)
                 for (uint32_t x = 0; x < 16; ++x)
@@ -1034,7 +1048,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         mask.Set(numtk::bounds3u{{ 0, 0, 0 }, { 2, 2, 2 }}, true);
 
         voxtk::BinaryRegion src_shifted = src.Shift(numtk::vec3i{ 0, -7, 0 });
-
         _state->voxel_region = src.BitwiseAnd(numtk::vec3i{ 0, 7, 0 }, mask);
         //_state->voxel_region = src_shifted;
         //_state->voxel_region = src;
@@ -1058,9 +1071,33 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
 #if 1
 #if 1
+
+#if 0
     _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
     area_size = 128u;
     node_size = 8u;
+#endif
+    _state->region_future = std::async(
+        std::launch::async,
+        []() -> VoxelRegionFuture {
+            VoxelRegionFuture output = {};
+            output.region = DeserialiseRegion("../r.-1.6.mca");
+            output.area_size = 128u;
+            output.node_size = 8u;
+            return std::move(output);
+        }
+    );
+
+#ifdef SYNC_LOAD
+    _state->region_future.wait();
+    {
+        VoxelRegionFuture voxel_region = _state->region_future.get();
+        _state->region_package = UploadVoxelRegion(_vulkan,
+                                                   voxel_region.region,
+                                                   voxel_region.area_size,
+                                                   voxel_region.node_size);
+    }
+#endif
 
 #else
     area_size = 1024u;
@@ -1081,9 +1118,10 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
 #endif
 
+#if 0
     _state->initial_region = _state->voxel_region;
     _state->region_package = UploadVoxelRegion(_vulkan, _state->voxel_region, area_size, node_size);
-
+#endif
 #endif
 
 #ifdef TRAVERSAL_V1
@@ -1247,7 +1285,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
     stencil_delta *= shift_factor;
 
-    if (stencil_delta != numtk::vec3i::Constant(0))
+    if (false && stencil_delta != numtk::vec3i::Constant(0))
     {
         _state->stencil_location += stencil_delta;
 
@@ -2825,6 +2863,7 @@ dispatch_runtime_t DensePixelCyclingRenderingPipeline(
 
 struct SparsePipelinePayload
 {
+    bool region_ready = false;
     VkSampler nearest_sampler;
     vktk::Buffer matrix_buffer;
     vktk::Buffer staging_buffer;
@@ -2947,7 +2986,7 @@ dispatch_runtime_t SparseRenderingPipeline(
     return output;
 }
 
-void SparseRegionUpdateBindings(dispatch_runtime_t& _rt)
+void SparseRegionUpdateBindings(dispatch_runtime_t& _rt, VoxelRegionPackage const& _region_package)
 {
     SparsePipelinePayload& payload = *(SparsePipelinePayload*)_rt.payload;
 
@@ -2955,9 +2994,9 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt)
         vkrg::bind::PNextMap pNext_map = {};
 
         static uint32_t desc_counts[3] = { 0u, 0u, 0u };
-        desc_counts[0] = (uint32_t)_rt.state->region_package.masks.size();
-        desc_counts[1] = (uint32_t)_rt.state->region_package.offsets.size();
-        desc_counts[2] = (uint32_t)_rt.state->region_package.payloads.size();
+        desc_counts[0] = (uint32_t)_region_package.masks.size();
+        desc_counts[1] = (uint32_t)_region_package.offsets.size();
+        desc_counts[2] = (uint32_t)_region_package.payloads.size();
 
         static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_allocs[3];
         desc_count_allocs[0] = VkDescriptorSetVariableDescriptorCountAllocateInfo{};
@@ -2994,7 +3033,7 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt)
     std::vector<VkDescriptorImageInfo> offsets_info{};
     std::vector<VkDescriptorImageInfo> payloads_info{};
 
-    for (vktk::Texture const& node : _rt.state->region_package.masks)
+    for (vktk::Texture const& node : _region_package.masks)
     {
         VkDescriptorImageInfo region_image_info{};
         region_image_info.sampler = payload.nearest_sampler;
@@ -3003,7 +3042,7 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt)
         nodes_info.push_back(region_image_info);
     }
 
-    for (vktk::Texture const& node_payload : _rt.state->region_package.payloads)
+    for (vktk::Texture const& node_payload : _region_package.payloads)
     {
         VkDescriptorImageInfo payload_image_info{};
         payload_image_info.sampler = payload.nearest_sampler;
@@ -3012,7 +3051,7 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt)
         payloads_info.push_back(payload_image_info);
     }
 
-    for (vktk::Texture const& offsets : _rt.state->region_package.offsets)
+    for (vktk::Texture const& offsets : _region_package.offsets)
     {
         VkDescriptorImageInfo offsets_image_info{};
         offsets_image_info.sampler = payload.nearest_sampler;
@@ -3080,6 +3119,8 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt)
     );
 
     vkUpdateDescriptorSets(_rt.vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
+
+    payload.region_ready = true;
 }
 
 struct ProgressivePipelinePayload
@@ -3952,7 +3993,9 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
             command_buffer.Submit();
         }
 
-        SparseRegionUpdateBindings(_rt);
+#ifdef SYNC_LOAD
+        SparseRegionUpdateBindings(_rt, _rt.state->region_package);
+#endif
     };
 
     runtime.RenderResources = [](dispatch_runtime_t& _rt,
@@ -3960,13 +4003,30 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
     {};
 
     runtime.Update = [](dispatch_runtime_t& _rt)
-    {};
+    {
+#ifndef SYNC_LOAD
+        if (_rt.state->region_future.valid()
+            && (_rt.state->region_future.wait_for(std::chrono::seconds(0))
+                == std::future_status::ready))
+        {
+            VoxelRegionFuture voxel_region = _rt.state->region_future.get();
+            VoxelRegionPackage region_package = UploadVoxelRegion(_rt.vulkan,
+                                                                  voxel_region.region,
+                                                                  voxel_region.area_size,
+                                                                  voxel_region.node_size);
+            SparseRegionUpdateBindings(_rt, region_package);
+        }
+#endif
+    };
 
     runtime.Dispatch = [](dispatch_runtime_t& _rt,
                           vktk::CommandBuffer& _command_buffer,
                           vktk::Swapchain const& _swapchain)
     {
         SparsePipelinePayload& payload = *(SparsePipelinePayload*)_rt.payload;
+
+        if (!payload.region_ready)
+            return;
 
         numtk::vec2f swapchain_size{ (float)_swapchain.size.width, (float)_swapchain.size.height };
         float how = (float)_swapchain.size.height / (float)_swapchain.size.width;
