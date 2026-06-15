@@ -25,7 +25,7 @@
 //#define TRAVERSAL_V1
 #define TRAVERSAL_V2
 
-#define SYNC_LOAD
+//#define SYNC_LOAD
 
 namespace {
 
@@ -118,7 +118,7 @@ struct dispatch_runtime_t
     void (*PostSubmit)(dispatch_runtime_t&, VkFence);
 };
 
-void SparseRegionUpdateBindings(dispatch_runtime_t& _rt);
+void SparseRegionUpdateBindings(dispatch_runtime_t& _rt, VoxelRegionPackage const& _region_package);
 
 struct VoxelRegionFuture
 {
@@ -167,8 +167,8 @@ struct voxel_state_t
     numtk::vec3i stencil_location{ 0, 0, 0 };
     voxtk::BinaryRegion initial_region;
     voxtk::BinaryRegion voxel_region{ { 512u, 512u, 512u } };
-    VoxelRegionPackage region_package;
 
+    mutable VoxelRegionPackage region_package;
     mutable std::future<VoxelRegionFuture> region_future = {};
 };
 
@@ -1285,7 +1285,8 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
     stencil_delta *= shift_factor;
 
-    if (false && stencil_delta != numtk::vec3i::Constant(0))
+#if 0
+    if (stencil_delta != numtk::vec3i::Constant(0))
     {
         _state->stencil_location += stencil_delta;
 
@@ -1325,6 +1326,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         }
 #endif
     }
+#endif
 
     if (!_state->current_gui_record->mouse_over)
         _state->camera.Update(_input, _past_input);
@@ -4010,11 +4012,11 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
                 == std::future_status::ready))
         {
             VoxelRegionFuture voxel_region = _rt.state->region_future.get();
-            VoxelRegionPackage region_package = UploadVoxelRegion(_rt.vulkan,
-                                                                  voxel_region.region,
-                                                                  voxel_region.area_size,
-                                                                  voxel_region.node_size);
-            SparseRegionUpdateBindings(_rt, region_package);
+            _rt.state->region_package = UploadVoxelRegion(_rt.vulkan,
+                                                          voxel_region.region,
+                                                          voxel_region.area_size,
+                                                          voxel_region.node_size);
+            SparseRegionUpdateBindings(_rt, _rt.state->region_package);
         }
 #endif
     };
