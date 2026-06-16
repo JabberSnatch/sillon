@@ -791,6 +791,7 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                     VK_IMAGE_USAGE_SAMPLED_BIT,
                     [&lod, &lod_base, &level_offsets, &valid_range, &current_offset, lod_index, node_size](void* mapped_data) {
                         uint64_t* output = (uint64_t*)mapped_data;
+
                         for (uint32_t zindex = 0; zindex < valid_range.z; ++zindex)
                         {
                             for (uint32_t yindex = 0; yindex < valid_range.y; ++yindex)
@@ -811,21 +812,45 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                                 }
 
                                 if (valid_range.x != node_size)
+                                {
                                     level_offsets.resize(level_offsets.size()
                                                          + (node_size-valid_range.x),
                                                          level_offsets.back());
+
+                                    std::memset(output +
+                                                valid_range.x +
+                                                yindex*node_size +
+                                                zindex*node_size*node_size,
+                                                0,
+                                                sizeof(uint64_t) * (node_size-valid_range.x));
+                                }
                             }
 
                             if (valid_range.y != node_size)
+                            {
                                 level_offsets.resize(level_offsets.size()
                                                      + (node_size-valid_range.y)*node_size,
                                                      level_offsets.back());
+
+                                std::memset(output +
+                                            valid_range.y*node_size +
+                                            zindex*node_size*node_size,
+                                            0,
+                                            sizeof(uint64_t) * (node_size-valid_range.y)*node_size);
+                            }
                         }
 
                         if (valid_range.z != node_size)
+                        {
                             level_offsets.resize(level_offsets.size()
                                                  + (node_size-valid_range.z)*node_size*node_size,
                                                  level_offsets.back());
+
+                            std::memset(output +
+                                        valid_range.z*node_size*node_size,
+                                        0,
+                                        sizeof(uint64_t) * (node_size-valid_range.z)*node_size*node_size);
+                        }
                     }
                 )
             );
