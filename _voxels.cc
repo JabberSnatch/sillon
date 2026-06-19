@@ -1095,13 +1095,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 #elif defined(TRAVERSAL_V2)
 
 #if 1
-#if 1
 
-#if 0
-    _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
-    area_size = 128u;
-    node_size = 8u;
-#endif
     _state->region_future = std::async(
         std::launch::async,
         []() -> VoxelRegionFuture {
@@ -1112,6 +1106,34 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
             return std::move(output);
         }
     );
+
+#else
+
+    _state->region_future = std::async(
+        std::launch::async,
+        []() -> VoxelRegionFuture {
+            VoxelRegionFuture output = {};
+
+            output.area_size = 1024u;
+            output.node_size = 32u;
+
+            {
+                systk::Timer scope_time{ "COPC import",
+                    [](std::string const& tag, float time) {
+                        std::cout << "[" << tag << "] " << time << " s" << std::endl;
+                    }
+                };
+
+                output.region =
+                    voxtk::importer::ImportCOPC(
+                        "../LHD_FXX_0697_6520_PTS_C_LAMB93_IGN69.copc.laz",
+                        output.area_size * 4);
+            }
+
+            return std::move(output);
+        }
+    );
+#endif
 
 #ifdef SYNC_LOAD
     _state->region_future.wait();
@@ -1124,24 +1146,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     }
 #endif
 
-#else
-    area_size = 1024u;
-    node_size = 32u;
-
-    {
-        systk::Timer scope_time{ "COPC import",
-            [](std::string const& tag, float time) {
-                std::cout << "[" << tag << "] " << time << " s" << std::endl;
-            }
-        };
-
-        _state->voxel_region = voxtk::importer::ImportCOPC("../LHD_FXX_0697_6520_PTS_C_LAMB93_IGN69.copc.laz", area_size * 4);
-        //_state->voxel_region = voxtk::importer::ImportCOPC("../LHD_FXX_0704_6519_PTS_C_LAMB93_IGN69.copc.laz", 4096);
-        //_state->voxel_region = voxtk::importer::ImportCOPC("../LHD_FXX_0697_6520_PTS_C_LAMB93_IGN69.copc.laz", 512);
-    }
-#endif
-
-#endif
 
 #if 0
     _state->initial_region = _state->voxel_region;
