@@ -889,33 +889,56 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
 
         numtk::vec3u const lod0_base = lod1_base * node_size*4u;
 
-        vktk::Texture payload = vulkan->CreateTexture(
-            node_size * 4u, node_size * 4u, node_size * 4u,
-            VK_IMAGE_TYPE_3D, VK_FORMAT_R8G8B8A8_UNORM,
-            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+        std::vector<vktk::ImageTransition> pre_transitions = {};
+        std::vector<vktk::ImageTransition> post_transitions = {};
 
         vktk::Texture mask = vulkan->CreateTexture(
             node_size, node_size, node_size,
             VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
             VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+        package.masks.push_back(mask);
 
-        upload_commands.ImageTransitions(
-            VK_PIPELINE_STAGE_HOST_BIT,
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            {
-                {
-                    mask.image,
-                    VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT,
-                    VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                    VK_IMAGE_ASPECT_COLOR_BIT,
-                },
-                {
-                    payload.image,
-                    VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT,
-                    VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                    VK_IMAGE_ASPECT_COLOR_BIT
-                }
+        pre_transitions.push_back(vktk::ImageTransition{
+            mask.image,
+            VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_IMAGE_ASPECT_COLOR_BIT,
+        });
+
+        post_transitions.push_back(vktk::ImageTransition{
+            mask.image,
+            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_IMAGE_ASPECT_COLOR_BIT,
+        });
+
+        vktk::Texture payload = {};
+        if (region.HasLayer(0))
+        {
+            payload = vulkan->CreateTexture(
+                node_size * 4u, node_size * 4u, node_size * 4u,
+                VK_IMAGE_TYPE_3D, VK_FORMAT_R8G8B8A8_UNORM,
+                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+            package.payloads.push_back(payload);
+
+            pre_transitions.push_back(vktk::ImageTransition{
+                payload.image,
+                VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT,
+                VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_ASPECT_COLOR_BIT
             });
+
+            post_transitions.push_back(vktk::ImageTransition{
+                payload.image,
+                VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_IMAGE_ASPECT_COLOR_BIT
+            });
+        }
+
+        upload_commands.ImageTransitions(VK_PIPELINE_STAGE_HOST_BIT,
+                                         VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                         pre_transitions);
 
         upload_commands.UpdateTexture(
             mask,
@@ -943,74 +966,38 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
             }
         );
 
-        upload_commands.UpdateTexture(
-            payload,
-            VkOffset3D{ 0, 0, 0 },
-            VkExtent3D{ node_size * 4, node_size * 4, node_size * 4 },
-            [&region, &lod0_base, node_size](void* mapped_data) {
-                uint32_t extent = node_size * 4;
-                numtk::vec4<uint8_t>* output = (numtk::vec4<uint8_t>*)mapped_data;
-                for (uint32_t zindex = 0; zindex < extent; ++zindex)
-                {
-                    for (uint32_t yindex = 0; yindex < extent; ++yindex)
+        if (payload.image != VK_NULL_HANDLE)
+            upload_commands.UpdateTexture(
+                payload,
+                VkOffset3D{ 0, 0, 0 },
+                VkExtent3D{ node_size * 4, node_size * 4, node_size * 4 },
+                [&region, &lod0_base, node_size](void* mapped_data) {
+                    uint32_t extent = node_size * 4;
+                    numtk::vec4<uint8_t>* output = (numtk::vec4<uint8_t>*)mapped_data;
+                    for (uint32_t zindex = 0; zindex < extent; ++zindex)
                     {
-                        for (uint32_t xindex = 0; xindex < extent; ++xindex)
+                        for (uint32_t yindex = 0; yindex < extent; ++yindex)
                         {
-                            numtk::vec3<uint8_t> const& data =
-                                region.LoadData<numtk::vec3<uint8_t>>(
-                                    lod0_base + numtk::vec3u{ xindex, yindex, zindex }, 0);
+                            for (uint32_t xindex = 0; xindex < extent; ++xindex)
+                            {
+                                numtk::vec3<uint8_t> const& data =
+                                    region.LoadData<numtk::vec3<uint8_t>>(
+                                        lod0_base + numtk::vec3u{ xindex, yindex, zindex }, 0);
 
-                            output[xindex
-                                   + yindex*extent
-                                   + zindex*extent*extent] = numtk::vec4<uint8_t>{
-#if 1
-                                data.x, data.y, data.z, 0
-#endif
-
-#if 0
-                                (uint8_t)255u,
-                                ((xindex / 16) & (yindex / 16) & (zindex / 16)) == 0
-                                ? (uint8_t)255u
-                                : (uint8_t)0,
-                                ((xindex / 16) & (yindex / 16) & (zindex / 16)) == 0
-                                ? (uint8_t)255u
-                                : (uint8_t)0,
-                                0
-#endif
-
-#if 0
-                                (uint8_t)((xindex * 256) / extent),
-                                (uint8_t)((yindex * 256) / extent),
-                                (uint8_t)((zindex * 256) / extent),
-                                0
-#endif
-                            };
+                                output[xindex
+                                       + yindex*extent
+                                       + zindex*extent*extent] = numtk::vec4<uint8_t>{
+                                    data.x, data.y, data.z, 0
+                                };
+                            }
                         }
                     }
                 }
-            }
-        );
+            );
 
-        upload_commands.ImageTransitions(
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            {
-                {
-                    mask.image,
-                    VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                    VK_IMAGE_ASPECT_COLOR_BIT
-                },
-                {
-                    payload.image,
-                    VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                    VK_IMAGE_ASPECT_COLOR_BIT
-                }
-            });
-
-        package.masks.push_back(mask);
-        package.payloads.push_back(payload);
+        upload_commands.ImageTransitions(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                         post_transitions);
 
         max_fence_count = std::max(max_fence_count, vulkan->fence_count);
     }
