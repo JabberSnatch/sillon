@@ -1054,6 +1054,13 @@ struct DispatchContext {
     void ResetDynamicRuntime(bind::PNextMap const& _pNext_map = {});
     void Dispatch(vktk::CommandBuffer& _command_buffer) const;
 
+    void AllocateRenderPasses(VkFormat const* _swapchain_format = nullptr);
+    void FreeRenderPasses();
+
+    void BindSpecializationConstants();
+    void AllocateRenderPipelines();
+    void FreeRenderPipelines();
+
     std::vector<vktk::Context::RenderPassAttachment> RenderPassDescription(
         dstk::Registry::Node _node,
         VkFormat const* _swapchain_format = nullptr) const;

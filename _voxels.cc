@@ -1081,7 +1081,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
 #elif defined(TRAVERSAL_V2)
 
-#if 1
+#if 0
 
     _state->region_future = std::async(
         std::launch::async,
@@ -1113,7 +1113,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
                 output.region =
                     voxtk::importer::ImportCOPC(
-                        "../LHD_FXX_0697_6520_PTS_C_LAMB93_IGN69.copc.laz",
+                        "../LHD_FXX_0697_6520_PTS_LAMB93_IGN69.copc.laz",
                         output.area_size * 4);
             }
 

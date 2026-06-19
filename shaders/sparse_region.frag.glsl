@@ -186,8 +186,11 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
                         output_value = HitNormalDDAContext(ctx);
                         vec3 chunk_coords =
                             (vec3(int_coords) + vec3(0.5)) / (CHUNK_SIZE * node_size);
+#if 0
                         payload = texture(payloads[nonuniformEXT(current_tex - leaves_begin)],
                                           ctx_cache[depth-1].voxel_coords - vec3(0.5) / node_size + chunk_coords).xyz;
+#endif
+                        payload = vec3(1.0);
                         ++depth;
                     }
                     break;
