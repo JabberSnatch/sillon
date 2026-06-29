@@ -312,8 +312,7 @@ void DecodeChunk(voxtk::BinaryRegion& region,
 
                     if (palette_size == 1)
                     {
-                        //region.Set(section_begin, section_end, (uint8_t)0);
-                        region.Set(numtk::bounds3u{ section_begin, section_end-section_begin }, true);
+                        region.Set(numtk::bounds3u{ section_begin, section_end }, true);
                         continue;
                     }
 

@@ -927,7 +927,7 @@ bool Update(void* _pstate,
                 }
             }
             if (_state->region_mode == RegionMode::Clear)
-                _state->voxel_region.Clear({ begin, (end-begin) });
+                _state->voxel_region.Clear({ begin, end });
         }
 
         _state->region_mode = next_mode;

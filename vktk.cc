@@ -2892,9 +2892,9 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
         {
             auto const* blit_bindings = registry.ComponentLookup<bind::BlitBindings>(node);
             numtk::vec3i src_min = blit_bindings->command.source_bounds.min.cast<int32_t>();
-            numtk::vec3i src_max = blit_bindings->command.source_bounds.max().cast<int32_t>();
+            numtk::vec3i src_max = blit_bindings->command.source_bounds.max.cast<int32_t>();
             numtk::vec3i dst_min = blit_bindings->command.sink_bounds.min.cast<int32_t>();
-            numtk::vec3i dst_max = blit_bindings->command.sink_bounds.max().cast<int32_t>();
+            numtk::vec3i dst_max = blit_bindings->command.sink_bounds.max.cast<int32_t>();
 
             VkImageBlit blit_region = {};
             blit_region.srcSubresource = VkImageSubresourceLayers{
