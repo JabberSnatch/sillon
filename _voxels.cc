@@ -314,7 +314,8 @@ void DecodeChunk(VOXEL_FIELD_TYPE& region,
 
                     if (palette_size == 1)
                     {
-                        region.Set(numtk::bounds3u{ section_begin, section_end }, true);
+                        if (palette_data[0] != "air")
+                            region.Set(numtk::bounds3u{ section_begin, section_end }, true);
                         continue;
                     }
 
