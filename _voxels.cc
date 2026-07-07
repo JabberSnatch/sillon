@@ -27,7 +27,8 @@
 
 //#define SYNC_LOAD
 
-#define VOXEL_FIELD_TYPE voxtk::BinaryRegion
+#define VOXEL_FIELD_TYPE voxtk::VoxelFieldCompat
+//#define VOXEL_FIELD_TYPE voxtk::BinaryRegion
 
 namespace {
 
@@ -665,6 +666,12 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                                      uint32_t area_size,
                                      uint32_t node_size)
 {
+    systk::Timer scope_time{ "UploadVoxelRegion",
+        [](std::string const& tag, float time) {
+            std::cout << "[" << tag << "] " << time << " s" << std::endl;
+        }
+    };
+
     VoxelRegionPackage package = {};
     package.area_size = area_size;
     package.node_size = node_size;
