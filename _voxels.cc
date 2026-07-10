@@ -412,13 +412,13 @@ VOXEL_FIELD_TYPE DeserialiseRegion(std::string const& file_path)
                 }
             };
 
-            //VOXEL_FIELD_TYPE thread_output{ { 512u, 512u, 512u } };
             VOXEL_FIELD_TYPE& thread_output = workers_outputs[worker_index];
             thread_output.DeclareLayer(0, numtk::vec3<uint8_t>{ 0, 0, 0 });
 
-            for (uint32_t local_index = 0; local_index < (1024 / WORKER_COUNT); ++local_index)
+            uint32_t job_size = 1024 / WORKER_COUNT;
+            for (uint32_t local_index = 0; local_index < job_size; ++local_index)
             {
-                uint32_t global_index = local_index + worker_index*WORKER_COUNT;
+                uint32_t global_index = local_index + worker_index*job_size;
                 uint32_t chunk_x = global_index % 32;
                 uint32_t chunk_z = global_index / 32;
                 DecodeChunk(thread_output,
