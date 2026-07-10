@@ -387,12 +387,56 @@ VOXEL_FIELD_TYPE DeserialiseRegion(std::string const& file_path)
 
     VOXEL_FIELD_TYPE output{ { 512u, 512u, 512u } };
     output.DeclareLayer(0, numtk::vec3<uint8_t>{ 0, 0, 0 });
+
+#if 0
     for (uint32_t index = 0; index < 1024; ++index)
     {
         uint32_t chunk_x = index % 32;
         uint32_t chunk_z = index / 32;
         DecodeChunk(output, mca_data.chunks[index], numtk::vec2u{ chunk_x, chunk_z });
     }
+
+#else
+
+#define WORKER_COUNT 16
+    std::vector<std::thread> workers{};
+    std::vector<VOXEL_FIELD_TYPE> workers_outputs{};
+    workers_outputs.reserve(WORKER_COUNT);
+    for (uint32_t worker_index = 0; worker_index < WORKER_COUNT; ++worker_index)
+    {
+        workers_outputs.emplace_back(numtk::vec3u{ 512u, 512u, 512u });
+        workers.emplace_back([&, worker_index](){
+            systk::Timer thread_time{ "WorkerTime",
+                [](std::string const& tag, float time) {
+                    std::cout << "[" << tag << "] " << time << " s" << std::endl;
+                }
+            };
+
+            //VOXEL_FIELD_TYPE thread_output{ { 512u, 512u, 512u } };
+            VOXEL_FIELD_TYPE& thread_output = workers_outputs[worker_index];
+            thread_output.DeclareLayer(0, numtk::vec3<uint8_t>{ 0, 0, 0 });
+
+            for (uint32_t local_index = 0; local_index < (1024 / WORKER_COUNT); ++local_index)
+            {
+                uint32_t global_index = local_index + worker_index*WORKER_COUNT;
+                uint32_t chunk_x = global_index % 32;
+                uint32_t chunk_z = global_index / 32;
+                DecodeChunk(thread_output,
+                            mca_data.chunks[global_index],
+                            numtk::vec2u{ chunk_x, chunk_z });
+            }
+        });
+    }
+
+    for (uint32_t worker_index = 0u; worker_index < WORKER_COUNT; ++worker_index)
+    {
+        std::thread& worker = workers[worker_index];
+        if (worker.joinable())
+            worker.join();
+        output.SetField({ 0, 0, 0 }, workers_outputs[worker_index]);
+    }
+
+#endif
 
     return output;
 }
