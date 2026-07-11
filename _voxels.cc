@@ -140,6 +140,7 @@ struct voxel_state_t
     float framerate_average = 0.f;
     std::string framerate_label;
     bool enable_indirect_light = false;
+    float sun_power = 0.f;
 
     //TurntableCamera camera;
     FlightCamera camera;
@@ -193,6 +194,7 @@ struct SparseRegionPushConstants
     int32_t stack_depth;
     uint32_t sample_offset;
     uint32_t leaves_begin;
+    float sun_power;
 };
 
 struct SkyboxPushConstants
@@ -1243,9 +1245,6 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         guitk::BeginRecord(_state->gui_context, _input, _past_input);
         guitk::BeginFrame(_state->gui_context, "MainFrame");
 
-        static float value = 0.f;
-        guitk::Slider(_state->gui_context, &value, "TestSlider", 0.f, 1.f);
-
         guitk::Label(_state->gui_context, _state->framerate_label.c_str());
 
         {
@@ -1268,6 +1267,9 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 #elif defined(TRAVERSAL_V2)
         guitk::Checkbox(_state->gui_context, &_state->enable_indirect_light, "Indirect Lighting");
 #endif
+
+        if (guitk::Slider(_state->gui_context, &_state->sun_power, "Sun Power", 0.f, 1.f))
+            reset_progressive_counter = true;
 
 #if 0
         for (uint32_t i = 0; i < 4; ++i)
@@ -4168,6 +4170,7 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
         push_constants->stack_depth = std::max(_rt.state->region_package.display_depth-1, 0);
         push_constants->sample_offset = _rt.state->progressive_frame_index;
         push_constants->leaves_begin = _rt.state->region_package.leaves_begin;
+        push_constants->sun_power = _rt.state->sun_power;
     };
 
     runtime.PostSubmit = [](dispatch_runtime_t& _rt, VkFence _last_submit)

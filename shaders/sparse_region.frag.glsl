@@ -25,6 +25,7 @@ layout(push_constant, std430) uniform PushConstants {
     int stack_depth;
     uint sample_offset;
     uint leaves_begin;
+    float sun_power;
 };
 
 layout(set = 1, binding = 0) uniform usampler3D masks[];
@@ -346,7 +347,7 @@ vec3 AtmosphericScattering(vec3 position, vec3 direction)
         vec3 rayleigh_transmittance = densities.x * transmittance;
         vec3 mie_transmittance = densities.y * transmittance;
 
-        inscattering += 40.0 * step_size *
+        inscattering += (20.0 + pow(20.0, sun_power*2.0+1.0)) * step_size *
             (rayleigh_scattering * RayleighPhase(light_angle) * rayleigh_transmittance
              + mie_scattering * MiePhase(light_angle) * mie_transmittance);
 
