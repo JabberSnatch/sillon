@@ -55,7 +55,7 @@ void EndFrame(Context);
 
 void Label(Context, std::string const& label_);
 void Checkbox(Context, bool* state_, std::string const& label_, std::string const& id_ = "");
-void Slider(Context, float* state_, std::string const& label_, float min_, float max_, std::string const& id_ = "");
+bool Slider(Context, float* state_, std::string const& label_, float min_, float max_, std::string const& id_ = "");
 
 struct TextureData
 {
@@ -284,12 +284,14 @@ void Checkbox(Context context_, bool* state_, std::string const& label_, std::st
     frame_info.next_row += numtk::vec2u{ -20u, 22u };
 }
 
-void Slider(Context context_, float* state_, std::string const& label_, float min_, float max_, std::string const& id_)
+bool Slider(Context context_, float* state_, std::string const& label_, float min_, float max_, std::string const& id_)
 {
+    bool value_changed = false;
+
     WidgetStates& states = context_->current_record;
 
     if (context_->current_frame == kNullHandle)
-        return;
+        return value_changed;
 
     numtk::vec2u glyph_max = numtk::vec2u{ 0, 0 };
     FrameInfo& frame_info = context_->registered_frames[context_->current_frame];
@@ -313,6 +315,7 @@ void Slider(Context context_, float* state_, std::string const& label_, float mi
         if (context_->grabbed_widget == widget_handle)
         {
             numtk::vec2i mouse_delta = iotk::MouseDelta(*context_->input, *context_->past_input);
+            value_changed = (mouse_delta != numtk::vec2i::Constant(0));
             offset += mouse_delta.x();
             *state_ = (float)(offset / 128.f) * (max_ - min_) + min_;
 
@@ -329,6 +332,9 @@ void Slider(Context context_, float* state_, std::string const& label_, float mi
     }
 
     frame_info.next_row += numtk::vec2u{ 0u, 22u };
+    frame_info.bounds = frame_info.bounds.Expand(glyph_max + numtk::vec2u{ 128u, 16u });
+
+    return value_changed;
 }
 
 Handle_t GenerateHandle(std::string const& id_, Handle_t parent_handle_) {
