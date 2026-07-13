@@ -82,7 +82,7 @@ struct VoxelRegionPackage
 {
     uint32_t area_size;
     uint32_t node_size;
-    float area_scale;
+    numtk::vec3f area_scale;
     int32_t stack_depth;
     int32_t display_depth;
     uint32_t leaves_begin;
@@ -190,6 +190,7 @@ struct SparseRegionPushConstants
 {
     numtk::vec3f light_dir;
     float display_mode;
+    numtk::vec3f region_scale;
     float node_size;
     int32_t stack_depth;
     uint32_t sample_offset;
@@ -440,6 +441,19 @@ VOXEL_FIELD_TYPE DeserialiseRegion(std::string const& file_path)
 
 #endif
 
+#if 0
+    VOXEL_FIELD_TYPE copy{ { 512u, 512u, 512u } };
+    copy.DeclareLayer(0, numtk::vec3<uint8_t>{ 0, 0, 0 });
+    copy.SetField({ 0, 0, 0 }, output);
+    output.SetField({ 512, 0, 0 }, output);
+    for (int32_t index = 1; index < 16; ++index)
+    {
+        output.SetField({ 512 * (index%4), 0, 512 * (index/4) }, copy);
+        if (((index%4) & (index/4)) & 1)
+            output.SetField({ 0, 512 * 3, 0 }, copy);
+    }
+    output.size = numtk::vec3u{ 2048u, 2048u, 2048u };
+#endif
     return output;
 }
 
@@ -718,16 +732,42 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
         }
     };
 
+    node_size = 16u;
+    numtk::vec3u _area_size = region.bounds.extent().cast<uint32_t>();
+
     VoxelRegionPackage package = {};
     package.area_size = area_size;
     package.node_size = node_size;
 
+    uint32_t log_node_size = (uint32_t)numtk::BitTrailingZeroCount(package.node_size*4);
+    numtk::vec3u log_area_size{
+        (uint32_t)(64 - numtk::BitLeadingZeroCount(_area_size.x - 1)),
+        (uint32_t)(64 - numtk::BitLeadingZeroCount(_area_size.y - 1)),
+        (uint32_t)(64 - numtk::BitLeadingZeroCount(_area_size.z - 1))
+    };
+    uint32_t max_log_area_size = std::max(log_area_size.x,
+                                          std::max(log_area_size.y, log_area_size.z));
+    area_size = (std::max(_area_size.x, std::max(_area_size.y, _area_size.z)) + 3) / 4;
+
+    uint32_t depth = (uint32_t)((max_log_area_size + (log_node_size-1)) / log_node_size);
+
+    package.stack_depth = depth*2;
+    package.display_depth = package.stack_depth;
+    //package.area_scale = 1.f / (float)(1u << ((log_node_size * depth) - log_area_size));
+    package.area_scale = numtk::vec3f::Constant(1.f) / numtk::vec3f{
+        (float)(1u << ((log_node_size * depth) - log_area_size.x)),
+        (float)(1u << ((log_node_size * depth) - log_area_size.y)),
+        (float)(1u << ((log_node_size * depth) - log_area_size.z))
+    };
+
+#if 0
     package.stack_depth = 0;
     for (uint32_t region_size = package.area_size*4;
          region_size > 1;
          region_size /= package.node_size*4)
         package.stack_depth += 2;
     package.display_depth = package.stack_depth;
+#endif
 
     uint32_t kScaleRatio = area_size / node_size;
     uint32_t kLogScale = (uint32_t)std::popcount((node_size*4) - 1u);
@@ -1144,7 +1184,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
             VoxelRegionFuture output = {};
             output.region = DeserialiseRegion("../r.-1.6.mca");
             output.area_size = 128u;
-            output.node_size = 8u;
+            output.node_size = 16u;
             return std::move(output);
         }
     );
@@ -4167,6 +4207,7 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
         push_constants->light_dir = sun_dir;
         push_constants->display_mode = _rt.state->enable_indirect_light ? 1.f : 0.f;
         push_constants->node_size = (float)_rt.state->region_package.node_size;
+        push_constants->region_scale = _rt.state->region_package.area_scale;
         push_constants->stack_depth = std::max(_rt.state->region_package.display_depth-1, 0);
         push_constants->sample_offset = _rt.state->progressive_frame_index;
         push_constants->leaves_begin = _rt.state->region_package.leaves_begin;

@@ -21,6 +21,7 @@ layout(push_constant, std430) uniform PushConstants {
     vec3 light_dir;
 
     float display_mode;
+    vec3 region_scale;
     float node_size;
     int stack_depth;
     uint sample_offset;
@@ -362,7 +363,7 @@ vec3 AtmosphericScattering(vec3 position, vec3 direction)
 
 void main()
 {
-    float box_scale = 0.5;
+    vec3 box_scale = region_scale;
     vec3 local_camera = (iFS_camera_position * 0.5 + vec3(0.5)) * box_scale;
     vec3 local_coords = iFS_volume_coords * box_scale;
 
