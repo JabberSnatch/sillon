@@ -22,9 +22,6 @@
 #include <memory>
 #include <unordered_map>
 
-//#define TRAVERSAL_V1
-#define TRAVERSAL_V2
-
 //#define SYNC_LOAD
 
 #define VOXEL_FIELD_TYPE voxtk::VoxelFieldCompat
@@ -62,13 +59,8 @@ struct TurntableCamera
 
 struct FlightCamera
 {
-#if defined(TRAVERSAL_V1)
-    numtk::vec2f forward_spherical = { .5f, -0.25f };
-    numtk::vec3f position = { 16.f, -0.3f, 16.f };
-#elif defined(TRAVERSAL_V2)
     numtk::vec2f forward_spherical = { 0.710f, -0.260f };
     numtk::vec3f position = { 37.025f, -36.243f, -18.561f };
-#endif
 
     float velocity = 5.f;
 
@@ -148,13 +140,10 @@ struct voxel_state_t
     numtk::vec2f sun_spherical = { -2.f, 0.25f };
 
     uint32_t frame_index = 0;
-    bool pixel_cycling_enabled = false;
 
     uint32_t progressive_frame_index = 0;
 
     dstk::Registry core_registry;
-    dispatch_runtime_t forward_runtime;
-    dispatch_runtime_t pixel_cycling_runtime;
     dispatch_runtime_t* current_runtime;
     dispatch_runtime_t sparse_runtime;
     dispatch_runtime_t progressive_runtime;
@@ -206,10 +195,6 @@ struct SkyboxPushConstants
     numtk::vec3f light_dir;
 };
 
-dispatch_runtime_t DenseRenderingPipeline(
-    voxel_state_t* _state, vktk::Context* _vulkan);
-dispatch_runtime_t DensePixelCyclingRenderingPipeline(
-    voxel_state_t* _state, vktk::Context* _vulkan);
 dispatch_runtime_t SparseRenderingPipeline(
     voxel_state_t* _state, vktk::Context* _vulkan);
 dispatch_runtime_t ProgressiveRenderingPipeline(
@@ -455,270 +440,6 @@ VOXEL_FIELD_TYPE DeserialiseRegion(std::string const& file_path)
     output.size = numtk::vec3u{ 2048u, 2048u, 2048u };
 #endif
     return output;
-}
-
-void LoadSection(voxel_state_t* state, vktk::Context* vulkan, vktk::CommandBuffer& update_commands,
-                 numtk::vec3<int32_t> const& coords)
-{
-    std::vector<std::unique_ptr<uint8_t[]>> mip_levels = {};
-
-    VOXEL_FIELD_TYPE const& region = state->voxel_region;
-    uint16_t section_count = state->section_map[coords[0] + coords[1]*32 + coords[2]*32*32];
-    if (section_count != 0u && section_count != 4096u)
-    {
-        state->section_textures.push_back(
-            vulkan->CreateTexture(16, 16, 16, 5,
-                                  VK_IMAGE_TYPE_3D, VK_FORMAT_R8_UNORM,
-                                  VK_IMAGE_USAGE_TRANSFER_DST_BIT
-                                  | VK_IMAGE_USAGE_SAMPLED_BIT));
-
-        update_commands.ImageTransitions(
-            VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-            {
-                {
-                    state->section_textures.back().image,
-                    VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT,
-                    VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                    VK_IMAGE_ASPECT_COLOR_BIT,
-                }
-            }
-        );
-
-        mip_levels.emplace_back(new uint8_t[4096]);
-        {
-            uint8_t* blocks = mip_levels.back().get();
-            for (uint32_t pointz = 0; pointz < 16; ++pointz)
-            {
-                for (uint32_t pointy = 0; pointy < 16; ++pointy)
-                {
-                    for (uint32_t pointx = 0; pointx < 16; ++pointx)
-                    {
-                        uint32_t index = pointx + pointy*16u + pointz*256u;
-                        numtk::vec3u point {
-                            (uint32_t)coords.x * 16u + pointx,
-                            (uint32_t)coords.y * 16u + pointy,
-                            (uint32_t)coords.z * 16u + pointz
-                        };
-                        blocks[index] = (region.Test(point) ? 255u : 0u);
-                    }
-                }
-            }
-
-            update_commands.UpdateTexture(
-                state->section_textures.back(), { 0, 0, 0 }, { 16, 16, 16 }, 0,
-                [blocks](void* mapped_data) {
-                    std::memcpy(mapped_data, blocks, 4096);
-                }
-            );
-        }
-
-        for (uint32_t mip_index = 0; mip_index < 4; ++mip_index)
-        {
-            uint32_t src_mip_size = 16 >> mip_index;
-            uint32_t dst_mip_size = 8 >> mip_index;
-            uint32_t block_count = 4096 / (8 << (3*mip_index));
-            mip_levels.emplace_back(new uint8_t[block_count]);
-
-            uint8_t* src = mip_levels[mip_index].get();
-            uint8_t* dst = mip_levels[mip_index+1].get();
-            for (uint32_t index = 0u; index < block_count; ++index)
-            {
-                uint32_t x = index % dst_mip_size;
-                uint32_t y = (index / dst_mip_size) % dst_mip_size;
-                uint32_t z = (index / (dst_mip_size*dst_mip_size));
-
-                uint8_t v = 0;
-                //uint8_t v = 255;
-                for (uint32_t sample = 0u; sample < 8; ++sample)
-                {
-                    uint32_t sample_x = x*2 + (sample&1);
-                    uint32_t sample_y = y*2 + ((sample>>1)&1);
-                    uint32_t sample_z = z*2 + ((sample>>2)&1);
-                    uint32_t input_index =
-                        sample_x
-                        + sample_y * src_mip_size
-                        + sample_z * src_mip_size * src_mip_size;
-
-                    uint8_t block = src[input_index];
-                    v = std::max(v, block);
-                    //v = std::min(v, block);
-                }
-                dst[index] = v;
-            }
-
-            update_commands.UpdateTexture(
-                state->section_textures.back(),
-                { 0, 0, 0 }, { dst_mip_size, dst_mip_size, dst_mip_size },
-                mip_index + 1,
-                [dst, block_count](void* mapped_data) {
-                    std::memcpy(mapped_data, dst, block_count);
-                }
-            );
-        }
-
-        update_commands.ImageTransitions(
-            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            {
-                {
-                    state->section_textures.back().image,
-                    VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                    VK_IMAGE_ASPECT_COLOR_BIT,
-                }
-            }
-        );
-    }
-
-    update_commands.ImageTransitions(
-        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        VK_PIPELINE_STAGE_TRANSFER_BIT,
-        {
-            {
-                state->region_texture.image,
-                VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
-                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                VK_IMAGE_ASPECT_COLOR_BIT,
-            }
-        });
-
-    if (state->section_textures.size() > state->section_index)
-    {
-        update_commands.UpdateTexture(
-            state->region_texture,
-            VkOffset3D{ coords[0], coords[1], coords[2] },
-            VkExtent3D{ 1, 1, 1 },
-            [section_index = state->section_index,
-             &mip_levels](void* mapped_data) {
-                uint16_t* section_info = (uint16_t*)mapped_data;
-                section_info[1] = (uint16_t)section_index;
-            });
-
-        state->section_index++;
-    }
-    else
-    {
-        update_commands.UpdateTexture(
-            state->region_texture,
-            VkOffset3D{ coords[0], coords[1], coords[2] },
-            VkExtent3D{ 1, 1, 1 },
-            [section_count](void* mapped_data) {
-                uint16_t* section_info = (uint16_t*)mapped_data;
-                if (section_count == 0)
-                    section_info[1] = 0x8000;
-                else
-                    section_info[1] = 0x80ff;
-            });
-    }
-
-    update_commands.ImageTransitions(
-        VK_PIPELINE_STAGE_TRANSFER_BIT,
-        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        {
-            {
-                state->region_texture.image,
-                VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                VK_IMAGE_ASPECT_COLOR_BIT,
-            }
-        });
-}
-
-void LoadArea(voxel_state_t* _state, vktk::Context* _vulkan,
-              numtk::vec3<int32_t> const& _begin,
-              numtk::vec3<int32_t> const& _end)
-{
-    systk::Timer scope_time{ "LoadArea",
-        [](std::string const& tag, float time) {
-            std::cout << "[" << tag << "] " << time << " s" << std::endl;
-        }
-    };
-
-    vktk::CommandBuffer update_commands = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
-    update_commands.Begin();
-
-    uint32_t sync_counter = 0;
-    for (int32_t x = _begin.x; x < _end.x; ++x)
-    {
-        for (int32_t y = _begin.y; y < _end.y; ++y)
-        {
-            for (int32_t z = _begin.z; z < _end.z; ++z)
-            {
-                LoadSection(_state, _vulkan, update_commands, { x, y, z });
-            }
-        }
-    }
-
-    update_commands.End();
-    update_commands.Submit();
-}
-
-void LoadRegion(voxel_state_t* state, vktk::Context* vulkan)
-{
-    systk::Timer scope_time{ "LoadRegion",
-        [](std::string const& tag, float time) {
-            std::cout << "[" << tag << "] " << time << " s" << std::endl;
-        }
-    };
-
-    VOXEL_FIELD_TYPE const& region = state->voxel_region;
-
-    state->section_map.resize(32*32*32);
-
-    for (uint32_t zindex = 0; zindex < 32; ++zindex)
-    {
-        for (uint32_t yindex = 0; yindex < 32; ++yindex)
-        {
-            for (uint32_t xindex = 0; xindex < 32; ++xindex)
-            {
-                uint32_t index = xindex + yindex*32 + zindex*32*32;
-                state->section_map[index] = 0;
-                if (yindex < 24)
-                {
-                    uint16_t count = 0;
-
-                    for (uint32_t pointz = 0; pointz < 16; ++pointz)
-                    {
-                        for (uint32_t pointy = 0; pointy < 16; ++pointy)
-                        {
-                            for (uint32_t pointx = 0; pointx < 16; ++pointx)
-                            {
-                                numtk::vec3u point{
-                                    xindex * 16u + pointx,
-                                    yindex * 16u + pointy,
-                                    zindex * 16u + pointz
-                                };
-                                if (region.Test(point))
-                                    ++count;
-                            }
-                        }
-                    }
-
-                    state->section_map[index] = count;
-                }
-            }
-        }
-    }
-
-    state->region_texture = vulkan->CreateTexture(
-        32, 32, 32,
-        VK_IMAGE_TYPE_3D, VK_FORMAT_R16G16_UINT,
-        VK_IMAGE_USAGE_SAMPLED_BIT,
-        [state](void* mapped_data) {
-            uint16_t* sections = (uint16_t*)mapped_data;
-
-            for (uint32_t zindex = 0; zindex < 32; ++zindex)
-            {
-                for (uint32_t yindex = 0; yindex < 32; ++yindex)
-                {
-                    for (uint32_t xindex = 0; xindex < 32; ++xindex)
-                    {
-                        uint32_t index = xindex + yindex*32 + zindex*32*32;
-                        sections[index * 2+1] = 0xffff;
-                        sections[index * 2] = (uint16_t)(((float)state->section_map[index] / 4096.f) * 65535.f);
-                    }
-                }
-            }
-        });
 }
 
 VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
@@ -1158,16 +879,8 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     }
 #endif
 
-    _state->forward_runtime = DenseRenderingPipeline(_state, _vulkan);
-    _state->pixel_cycling_runtime = DensePixelCyclingRenderingPipeline(_state, _vulkan);
     _state->sparse_runtime = SparseRenderingPipeline(_state, _vulkan);
-
     _state->progressive_runtime = ProgressiveRenderingPipeline(_state, _vulkan);
-
-#if defined(TRAVERSAL_V1)
-    _state->voxel_region = DeserialiseRegion("../r.-1.6.mca");
-
-#elif defined(TRAVERSAL_V2)
 
 #if 1
 
@@ -1226,19 +939,10 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->initial_region = _state->voxel_region;
     _state->region_package = UploadVoxelRegion(_vulkan, _state->voxel_region, area_size, node_size);
 #endif
-#endif
-
-#ifdef TRAVERSAL_V1
-    LoadRegion(_state, _vulkan);
-    LoadArea(_state, _vulkan, { 0, 0, 0 }, { 32, 16, 32 });
-#endif
 
 #if 0
-    _state->forward_runtime.ConstantResources(_state->forward_runtime);
-    _state->pixel_cycling_runtime.ConstantResources(_state->pixel_cycling_runtime);
     _state->sparse_runtime.ConstantResources(_state->sparse_runtime);
 #endif
-
     _state->progressive_runtime.ConstantResources(_state->progressive_runtime);
 
     return;
@@ -1251,11 +955,8 @@ void RenderResources(void* _pstate,
     voxel_state_t* _state = (voxel_state_t*)_pstate;
 
 #if 0
-    _state->forward_runtime.RenderResources(_state->forward_runtime, _swapchain);
-    _state->pixel_cycling_runtime.RenderResources(_state->pixel_cycling_runtime, _swapchain);
     _state->sparse_runtime.RenderResources(_state->sparse_runtime, _swapchain);
 #endif
-
     _state->progressive_runtime.RenderResources(_state->progressive_runtime, _swapchain);
 }
 
@@ -1295,11 +996,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
             guitk::Label(_state->gui_context, rotstr.c_str());
         }
 
-#if defined(TRAVERSAL_V1)
-        guitk::Checkbox(_state->gui_context, &_state->pixel_cycling_enabled, "Pixel Cycling");
-#elif defined(TRAVERSAL_V2)
         guitk::Checkbox(_state->gui_context, &_state->enable_indirect_light, "Indirect Lighting");
-#endif
 
         if (guitk::Slider(_state->gui_context, &_state->sun_power, "Sun Power", 0.f, 1.f))
             reset_progressive_counter = true;
@@ -1330,8 +1027,6 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
 #if 0
         _state->sparse_runtime.Update(_state->sparse_runtime);
-        _state->forward_runtime.Update(_state->forward_runtime);
-        _state->pixel_cycling_runtime.Update(_state->pixel_cycling_runtime);
 #endif
         _state->progressive_runtime.Update(_state->progressive_runtime);
     }
@@ -1359,10 +1054,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
     }
 
     if (!_input->key_down['c'] && _past_input->key_down['c'])
-    {
-        _state->pixel_cycling_enabled = !_state->pixel_cycling_enabled;
         _state->enable_indirect_light = !_state->enable_indirect_light;
-    }
 
     if (_input->key_down['p'] && !_past_input->key_down['p'])
         _state->region_package.display_depth = std::min(_state->region_package.display_depth+1, _state->region_package.stack_depth);
@@ -1450,20 +1142,11 @@ void Draw(void* _pstate,
 {
     voxel_state_t* _state = (voxel_state_t*)_pstate;
 
-    if (_state->pixel_cycling_enabled)
-        _state->current_runtime = &_state->pixel_cycling_runtime;
-    else
-        _state->current_runtime = &_state->forward_runtime;
-
     vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
     command_buffer.Begin();
 
-#if defined(TRAVERSAL_V1)
-    _state->current_runtime->Dispatch(*_state->current_runtime, command_buffer, _swapchain);
-#elif defined(TRAVERSAL_V2)
     //_state->sparse_runtime.Dispatch(_state->sparse_runtime, command_buffer, _swapchain);
     _state->progressive_runtime.Dispatch(_state->progressive_runtime, command_buffer, _swapchain);
-#endif
 
     command_buffer.End();
 
@@ -2407,563 +2090,6 @@ vkrg::layout::DispatchGraph GUIRenderGraph(dstk::Registry& _registry)
     _registry.BindComponent(output["GUIFrames"], GUIFramesDispatchStageInfo());
     _registry.BindComponent(output["GUIGlyphs"], GUIGlyphsDispatchStageInfo());
     output.MakeEdge("GUIFrames", "GUIGlyphs");
-    return output;
-}
-
-struct DensePipelinePayload
-{
-    vktk::Buffer matrix_buffer;
-    vktk::Buffer staging_buffer;
-    VkSampler nearest_sampler;
-};
-
-dispatch_runtime_t DenseRenderingPipeline(
-    voxel_state_t* _state, vktk::Context* _vulkan)
-{
-    dispatch_runtime_t output = {};
-    output.graph = FullFrameRenderGraph(_state->core_registry);
-    output.vulkan = _vulkan;
-    output.registry = &_state->core_registry;
-    output.state = _state;
-    output.payload = new DensePipelinePayload{};
-
-    BindGUIRuntime(_state, _vulkan, output.graph["FramebufferDispatch"]["GUISubpass"]);
-
-    output.ConstantResources = [](dispatch_runtime_t& _rt)
-    {
-        _rt.graph.DepthFirstTraversal(
-            [&]
-            (uint32_t, dstk::Registry::Node node) {
-                dispatch_runtime_t* runtime =
-                    _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
-                if (runtime && runtime->ConstantResources)
-                    runtime->ConstantResources(*runtime);
-            });
-
-        DensePipelinePayload& payload = *(DensePipelinePayload*)_rt.payload;
-
-        vkrg::bind::PNextMap pNext_map = {};
-
-        static uint32_t desc_count = 0u;
-        static VkDescriptorSetVariableDescriptorCountAllocateInfo desc_count_alloc = {};
-        desc_count = (uint32_t)_rt.state->section_textures.size();
-        desc_count_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
-        desc_count_alloc.pNext = nullptr;
-        desc_count_alloc.descriptorSetCount = 1;
-        desc_count_alloc.pDescriptorCounts = &desc_count;
-        void* pnext_begin = &desc_count_alloc;
-
-        pNext_map.emplace("RegionPass", std::vector<vkrg::bind::PNextEntry>{
-            vkrg::bind::PNextEntry{ 0, (void*)&desc_count_alloc }
-        });
-
-        _rt.Context().GenerateStaticRuntime();
-        _rt.Context().ClearDynamicRuntime();
-        _rt.Context().ResetDynamicRuntime(pNext_map);
-
-        payload.staging_buffer = _rt.vulkan->CreateBuffer(
-            sizeof(MatrixBlock) * 64,
-            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
-            | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-        payload.matrix_buffer = _rt.vulkan->CreateBuffer(
-            sizeof(MatrixBlock) * 64,
-            VK_BUFFER_USAGE_TRANSFER_DST_BIT
-            | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
-
-        MatrixBlock* matrices = (MatrixBlock*)payload.staging_buffer.alloc.map;
-        for (uint32_t index = 0; index < 64; ++index)
-        {
-            matrices[index].projection = numtk::mat4f::Constant(0.f);
-            matrices[index].view_model = numtk::mat4f::Constant(0.f);
-            matrices[index].view = numtk::mat4f::Constant(0.f);
-            matrices[index].screen_size = numtk::vec2<int32_t>::Constant(1);
-        }
-
-        {
-            VkSamplerCreateInfo sampler_create{};
-            sampler_create.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-            sampler_create.pNext = nullptr;
-            sampler_create.flags = 0u;
-            sampler_create.magFilter = VK_FILTER_NEAREST;
-            sampler_create.minFilter = VK_FILTER_NEAREST;
-            sampler_create.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-            sampler_create.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-            sampler_create.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-            sampler_create.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-            sampler_create.minLod = 0.0;
-            sampler_create.maxLod = 4.0;
-            CHECKCALL(vkCreateSampler, _rt.vulkan->device,
-                      &sampler_create, nullptr, &payload.nearest_sampler);
-        }
-
-        VkDescriptorImageInfo region_image_info{};
-        region_image_info.sampler = payload.nearest_sampler;
-        region_image_info.imageView = _rt.state->region_texture.view;
-        region_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-        dstk::Registry::Node main_world_node =
-            _rt.graph["FramebufferDispatch"]["RegionPass"];
-
-        for (uint32_t index = 0; index < 64; ++index)
-        {
-            std::vector<VkWriteDescriptorSet> desc_writes = {};
-
-            VkWriteDescriptorSet region_binding =
-                _rt.Context().BindShaderResource(
-                    main_world_node,
-                    vkrg::layout::BindingPoint{
-                        .type = vkrg::layout::BindingType_Shader,
-                        .shader = { 0, 1 }
-                    },
-                    index,
-                    vkrg::bind::ShaderResources{
-                        .images = { region_image_info }
-                    });
-
-            VkDescriptorBufferInfo buffer_info = {};
-            buffer_info.buffer = payload.matrix_buffer;
-            buffer_info.offset = sizeof(MatrixBlock) * index;
-            buffer_info.range = sizeof(MatrixBlock);
-            VkWriteDescriptorSet matrix_binding =
-                _rt.Context().BindShaderResource(
-                    main_world_node,
-                    vkrg::layout::BindingPoint{
-                        .type = vkrg::layout::BindingType_Shader,
-                        .shader = { 0, 0 }
-                    },
-                    index,
-                    vkrg::bind::ShaderResources{
-                        .buffers = { buffer_info }
-                    });
-
-            std::vector<VkDescriptorImageInfo> section_images_info(
-                _rt.state->section_textures.size());
-            for (uint32_t section_index = 0u;
-                 section_index < _rt.state->section_textures.size();
-                 ++section_index)
-            {
-                VkDescriptorImageInfo& image_info = section_images_info[section_index];
-                image_info.sampler = payload.nearest_sampler;
-                image_info.imageView = _rt.state->section_textures[section_index].view;
-                image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            }
-
-            VkWriteDescriptorSet section_bindings =
-                _rt.Context().BindShaderResource(
-                    main_world_node,
-                    vkrg::layout::BindingPoint{
-                        .type = vkrg::layout::BindingType_Shader,
-                        .shader = { 0, 2 }
-                    },
-                    index,
-                    vkrg::bind::ShaderResources{
-                        .images = section_images_info
-                    });
-
-            if (region_image_info.imageView)
-                desc_writes.push_back(region_binding);
-            desc_writes.push_back(matrix_binding);
-            if (!section_images_info.empty())
-                desc_writes.push_back(section_bindings);
-
-            vkUpdateDescriptorSets(_rt.vulkan->device, desc_writes.size(), desc_writes.data(), 0u, nullptr);
-        }
-
-        vktk::CommandBuffer command_buffer =
-            _rt.vulkan->CreateCommandBuffer(_rt.vulkan->present_queue);
-        command_buffer.Begin();
-
-        command_buffer.BufferTransitions(
-            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            {
-                { payload.matrix_buffer,
-                  VK_ACCESS_NONE,
-                  VK_ACCESS_TRANSFER_WRITE_BIT },
-            });
-
-        command_buffer.BufferCopy(payload.matrix_buffer, 0, payload.staging_buffer, 0,
-                                  sizeof(MatrixBlock) * 64);
-
-        command_buffer.BufferTransitions(
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
-            {
-                { payload.matrix_buffer,
-                  VK_ACCESS_TRANSFER_WRITE_BIT,
-                  VK_ACCESS_UNIFORM_READ_BIT }
-            });
-
-        command_buffer.End();
-        command_buffer.Submit();
-    };
-
-    output.RenderResources = [](dispatch_runtime_t& _rt,
-                                vktk::Swapchain const& _swapchain)
-    {
-        _rt.graph.DepthFirstTraversal(
-            [&]
-            (uint32_t, dstk::Registry::Node node) {
-                dispatch_runtime_t* runtime =
-                    _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
-                if (runtime && runtime->RenderResources)
-                    runtime->RenderResources(*runtime, _swapchain);
-            });
-
-        _rt.Context().ClearFramebufferRuntime();
-        _rt.Context().GenerateFramebufferRuntime(&_swapchain.format);
-        _rt.Context().BindSwapchain(_rt.graph["FramebufferDispatch"], _swapchain);
-    };
-
-    output.Update = [](dispatch_runtime_t& _rt)
-    {
-        _rt.graph.DepthFirstTraversal(
-            [&]
-            (uint32_t, dstk::Registry::Node node) {
-                dispatch_runtime_t* runtime =
-                    _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
-                if (runtime && runtime->Update)
-                    runtime->Update(*runtime);
-            });
-    };
-
-    output.Dispatch = [](dispatch_runtime_t& _rt,
-                         vktk::CommandBuffer& _command_buffer,
-                         vktk::Swapchain const& _swapchain)
-    {
-        _rt.graph.DepthFirstTraversal(
-            [&]
-            (uint32_t, dstk::Registry::Node node) {
-                dispatch_runtime_t* runtime =
-                    _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
-                if (runtime && runtime->Dispatch)
-                    runtime->Dispatch(*runtime, _command_buffer, _swapchain);
-            });
-
-        DensePipelinePayload& payload = *(DensePipelinePayload*)_rt.payload;
-
-        float how = (float)_swapchain.size.height / (float)_swapchain.size.width;
-        numtk::vec2u sample_index{
-            (_rt.state->frame_index%4)/2,
-            _rt.state->frame_index%2 };
-        numtk::bounds2u scissor{ { 0, 0 }, { _swapchain.size.width, _swapchain.size.height } };
-        numtk::bounds2f viewport{ { 0.f, 0.f }, { (float)scissor.extent.x(), (float)scissor.extent.y() } };
-
-        if (_rt.state->pixel_cycling_enabled)
-        {
-            scissor = numtk::bounds2u{
-                { ((_swapchain.size.width) / 2) * sample_index.x(),
-                  ((_swapchain.size.height) / 2) * sample_index.y() },
-                { (_swapchain.size.width) / 2,
-                  (_swapchain.size.height) / 2 },
-            };
-
-            viewport = numtk::bounds2f{
-                { 0.f + float(sample_index.x()) * ((float)scissor.extent.x() - 0.5f),
-                  0.f + float(sample_index.y()) * ((float)scissor.extent.y() - 0.5f) },
-                { (float)scissor.extent.x(),
-                  (float)scissor.extent.y() }
-            };
-        }
-
-        MatrixBlock* matrices = (MatrixBlock*)payload.staging_buffer.alloc.map;
-        for (uint32_t index = 0; index < 64; ++index)
-        {
-            matrices[index].view = _rt.state->camera.Matrix();
-
-            matrices[index].projection =
-                numtk::mat4f::Perspective_VulkanNDC(0.1f, 1000.f, 90.f*numtk::kDegrees, how);
-
-            matrices[index].view_model =
-                matrices[index].view
-                * numtk::mat4f{
-                2.f, 0.f, 0.f, 0.f,
-                0.f, 2.f, 0.f, 0.f,
-                0.f, 0.f, 2.f, 0.f,
-                0.f, 0.f, 0.f, 1.f}
-                * numtk::mat4f{
-                1.f, 0.f, 0.f, 0.f,
-                0.f, 1.f, 0.f, 0.f,
-                0.f, 0.f, 1.f, 0.f,
-                (float)(index/8) * 2.f, 0.f, (float)(index%8) * 2.f, 1.f};
-
-            matrices[index].screen_offset = viewport.min;
-            matrices[index].screen_size = scissor.extent.cast<int32_t>();
-        }
-
-        _command_buffer.BufferTransitions(
-            VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            {
-                { payload.matrix_buffer, VK_ACCESS_UNIFORM_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT }
-            });
-
-        _command_buffer.BufferCopy(payload.matrix_buffer, 0,
-                                   payload.staging_buffer, 0,
-                                   sizeof(MatrixBlock) * 64);
-
-        _command_buffer.BufferTransitions(
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
-            {
-                { payload.matrix_buffer, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_UNIFORM_READ_BIT }
-            });
-
-        numtk::vec3f sun_dir = numtk::vec3f{
-            std::cos(_rt.state->sun_spherical[1]) * std::cos(_rt.state->sun_spherical[0]),
-            std::sin(_rt.state->sun_spherical[1]),
-            std::cos(_rt.state->sun_spherical[1]) * std::sin(_rt.state->sun_spherical[0])
-        }.normalise();
-
-        SkyboxPushConstants skybox_params = {};
-        skybox_params.projection = numtk::mat4f::Perspective_VulkanNDC(0.1f, 100.f, 90.f*numtk::kDegrees, how);
-        skybox_params.view = _rt.state->camera.Matrix();
-        skybox_params.position = numtk::vec4f{ 0.f, 20.f, 0.f };
-        skybox_params.light_dir = sun_dir;
-
-        dstk::Registry::Node main_world_node =
-            _rt.graph["FramebufferDispatch"]["RegionPass"];
-        dstk::Registry::Node skybox_node =
-            _rt.graph["FramebufferDispatch"]["SkyboxPass"];
-
-        _rt.Context().BindFramebufferArea(
-            _rt.graph["FramebufferDispatch"], {
-                !_rt.state->pixel_cycling_enabled
-                ? _swapchain.index
-                : 0,
-                scissor,
-                viewport
-            });
-
-        {
-            vkrg::bind::GraphicsCommand command = {};
-            command.command = vkrg::bind::DispatchCommand_Draw;
-            command.vertex_count = 36;
-            command.instance_count = 1;
-
-            for (uint32_t index = 0; index < 64; ++index)
-            {
-                _rt.Context().BindGraphicsCommand(main_world_node, index, command);
-
-                numtk::vec3f* push_constants =
-                    (numtk::vec3f*)_rt.Context().BindPushConstants(
-                        main_world_node,
-                        {
-                            .type = vkrg::layout::BindingType_PushConstantRange,
-                            .push_constant_range = 0
-                        }, index);
-                *push_constants = sun_dir;
-            }
-        }
-
-        {
-            vkrg::bind::GraphicsCommand command = {};
-            command.command = vkrg::bind::DispatchCommand_Draw;
-            command.vertex_count = 3;
-            command.instance_count = 1;
-
-            _rt.Context().BindGraphicsCommand(skybox_node, 0, command);
-            SkyboxPushConstants* push_constants =
-                (SkyboxPushConstants*)_rt.Context().BindPushConstants(
-                    skybox_node,
-                    {
-                        .type = vkrg::layout::BindingType_PushConstantRange,
-                        .push_constant_range = 0
-                    }, 0);
-            *push_constants = skybox_params;
-        }
-
-        if (_rt.state->pixel_cycling_enabled)
-        {
-            dstk::Registry::Node resolve_node =
-                _rt.graph["FramebufferResolve"]["ResolvePass"];
-
-            vkrg::bind::GraphicsCommand command = {};
-            command.command = vkrg::bind::DispatchCommand_Draw;
-            command.vertex_count = 3;
-            command.instance_count = 1;
-
-            _rt.Context().BindGraphicsCommand(resolve_node, 0, command);
-            _rt.Context().BindFramebufferArea(
-                _rt.graph["FramebufferResolve"], {
-                    _swapchain.index,
-                    numtk::bounds2u{
-                        { 0, 0 },
-                        { _swapchain.size.width, _swapchain.size.height }
-                    },
-                    numtk::bounds2f{
-                        { 0.f, 0.f },
-                        { (float)_swapchain.size.width, (float)_swapchain.size.height }
-                    }
-                });
-        }
-
-        _rt.Context().Dispatch(_command_buffer);
-    };
-
-    output.PostSubmit = [](dispatch_runtime_t& _rt, VkFence _last_submit)
-    {
-        _rt.graph.DepthFirstTraversal(
-            [&]
-            (uint32_t, dstk::Registry::Node node) {
-                dispatch_runtime_t* runtime =
-                    _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
-                if (runtime && runtime->PostSubmit)
-                    runtime->PostSubmit(*runtime, _last_submit);
-            });
-    };
-
-    return output;
-}
-
-struct DensePixelCyclingPipelinePayload
-{
-    DensePipelinePayload base;
-
-    vktk::Texture primary_pass_color;
-    vktk::Texture primary_pass_depth;
-};
-
-dispatch_runtime_t DensePixelCyclingRenderingPipeline(
-    voxel_state_t* _state, vktk::Context* _vulkan)
-{
-    dispatch_runtime_t output = {};
-    output.graph = PixelCyclingRenderGraph(_state->core_registry);
-    output.vulkan = _vulkan;
-    output.registry = &_state->core_registry;
-    output.state = _state;
-    output.payload = new DensePixelCyclingPipelinePayload{};
-
-    BindGUIRuntime(_state, _vulkan, output.graph["FramebufferResolve"]["GUISubpass"]);
-
-    output.ConstantResources = _state->forward_runtime.ConstantResources;
-    output.RenderResources = [](dispatch_runtime_t& _rt, vktk::Swapchain const& _swapchain)
-    {
-        _rt.graph.DepthFirstTraversal(
-            [&]
-            (uint32_t, dstk::Registry::Node node) {
-                dispatch_runtime_t* runtime =
-                    _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
-                if (runtime && runtime->RenderResources)
-                    runtime->RenderResources(*runtime, _swapchain);
-            });
-
-        DensePixelCyclingPipelinePayload& payload = *(DensePixelCyclingPipelinePayload*)_rt.payload;
-
-        _rt.Context().ClearFramebufferRuntime();
-        _rt.Context().GenerateFramebufferRuntime(&_swapchain.format);
-
-        {
-            _rt.vulkan->DestroyTexture(payload.primary_pass_color);
-            payload.primary_pass_color = _rt.vulkan->CreateTexture(
-                _swapchain.size.width, _swapchain.size.height, 1,
-                VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
-                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
-                | VK_IMAGE_USAGE_TRANSFER_SRC_BIT
-                | VK_IMAGE_USAGE_SAMPLED_BIT
-            );
-
-            _rt.vulkan->DestroyTexture(payload.primary_pass_depth);
-            payload.primary_pass_depth = _rt.vulkan->CreateTexture(
-                _swapchain.size.width, _swapchain.size.height, 1,
-                VK_IMAGE_TYPE_2D, VK_FORMAT_D32_SFLOAT,
-                VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
-            );
-        }
-
-        numtk::vec2u size = { _swapchain.size.width, _swapchain.size.height };
-        _rt.Context().BindAttachments(
-            _rt.graph["FramebufferDispatch"], size,
-            { payload.primary_pass_color.view, payload.primary_pass_depth.view }
-        );
-
-        _rt.Context().BindSwapchain(_rt.graph["FramebufferResolve"], _swapchain);
-
-        VkDescriptorImageInfo image_info{};
-        image_info.sampler = payload.base.nearest_sampler;
-        image_info.imageView = payload.primary_pass_color.view;
-        image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        VkWriteDescriptorSet desc_write = _rt.Context().BindShaderResource(
-            _rt.graph["FramebufferResolve"]["ResolvePass"],
-            vkrg::layout::BindingPoint{
-                .type = vkrg::layout::BindingType_Shader,
-                .shader = { 0, 0 }
-            },
-            0,
-            vkrg::bind::ShaderResources{
-                .images = { image_info }
-            });
-
-        vkUpdateDescriptorSets(_rt.vulkan->device, 1, &desc_write, 0u, nullptr);
-
-        numtk::vec2i screen_size{ (int32_t)_swapchain.size.width, (int32_t)_swapchain.size.height };
-        numtk::vec2i* push_constants =
-            (numtk::vec2i*)_rt.Context().BindPushConstants(
-                _rt.graph["FramebufferResolve"]["ResolvePass"],
-                {
-                    .type = vkrg::layout::BindingType_PushConstantRange,
-                    .push_constant_range = 0
-                }, 0);
-        *push_constants = screen_size;
-
-        {
-            vktk::CommandBuffer layout_commands =
-                _rt.vulkan->CreateCommandBuffer(_rt.vulkan->present_queue);
-            layout_commands.Begin();
-
-            layout_commands.ImageTransitions(
-                VK_PIPELINE_STAGE_NONE,
-                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                {
-                    {
-                        payload.primary_pass_color.image,
-                        VK_ACCESS_NONE, VK_ACCESS_NONE,
-                        VK_IMAGE_LAYOUT_UNDEFINED,
-                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                        VK_IMAGE_ASPECT_COLOR_BIT
-                    },
-                    {
-                        payload.primary_pass_depth.image,
-                        VK_ACCESS_NONE, VK_ACCESS_NONE,
-                        VK_IMAGE_LAYOUT_UNDEFINED,
-                        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                        VK_IMAGE_ASPECT_DEPTH_BIT
-                    }
-                });
-
-            layout_commands.End();
-            layout_commands.Submit();
-        }
-    };
-
-    output.Update = [](dispatch_runtime_t& _rt)
-    {
-        _rt.graph.DepthFirstTraversal(
-            [&]
-            (uint32_t, dstk::Registry::Node node) {
-                dispatch_runtime_t* runtime =
-                    _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
-                if (runtime && runtime->Update)
-                    runtime->Update(*runtime);
-            });
-    };
-
-    output.Dispatch = _state->forward_runtime.Dispatch;
-
-    output.PostSubmit = [](dispatch_runtime_t& _rt, VkFence _last_submit)
-    {
-        _rt.graph.DepthFirstTraversal(
-            [&]
-            (uint32_t, dstk::Registry::Node node) {
-                dispatch_runtime_t* runtime =
-                    _rt.registry->ComponentLookup<dispatch_runtime_t>(node);
-                if (runtime && runtime->PostSubmit)
-                    runtime->PostSubmit(*runtime, _last_submit);
-            });
-    };
-
     return output;
 }
 
