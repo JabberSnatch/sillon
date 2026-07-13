@@ -753,21 +753,11 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
 
     package.stack_depth = depth*2;
     package.display_depth = package.stack_depth;
-    //package.area_scale = 1.f / (float)(1u << ((log_node_size * depth) - log_area_size));
     package.area_scale = numtk::vec3f::Constant(1.f) / numtk::vec3f{
         (float)(1u << ((log_node_size * depth) - log_area_size.x)),
         (float)(1u << ((log_node_size * depth) - log_area_size.y)),
         (float)(1u << ((log_node_size * depth) - log_area_size.z))
     };
-
-#if 0
-    package.stack_depth = 0;
-    for (uint32_t region_size = package.area_size*4;
-         region_size > 1;
-         region_size /= package.node_size*4)
-        package.stack_depth += 2;
-    package.display_depth = package.stack_depth;
-#endif
 
     uint32_t kScaleRatio = area_size / node_size;
     uint32_t kLogScale = (uint32_t)std::popcount((node_size*4) - 1u);
@@ -790,27 +780,29 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
             src = &lods[src_index-1];
         VOXEL_FIELD_TYPE& dst = lods.back();
 
-        for (uint32_t dstz = 0; dstz < dst.Size().z; ++dstz)
+        numtk::vec3i dst_extent = dst.bounds.extent();
+        for (int32_t dstz = 0; dstz < dst_extent.z; ++dstz)
         {
-            for (uint32_t dsty = 0; dsty < dst.Size().y; ++dsty)
+            for (int32_t dsty = 0; dsty < dst_extent.y; ++dsty)
             {
-                for (uint32_t dstx = 0; dstx < dst.Size().x; ++dstx)
+                for (int32_t dstx = 0; dstx < dst_extent.x; ++dstx)
                 {
-                    numtk::vec3u dstbase{ dstx, dsty, dstz };
+                    numtk::vec3i dstbase =
+                        dst.bounds.min + numtk::vec3i{ dstx, dsty, dstz };
 
                     bool bit = []
                         (uint32_t node_size,
                          VOXEL_FIELD_TYPE const& src,
-                         numtk::vec3u const& dstbase) {
-                        for (uint32_t srcz = 0; srcz < node_size; ++srcz)
+                         numtk::vec3i const& dstbase) {
+                        for (int32_t srcz = 0; srcz < node_size; ++srcz)
                         {
-                            for (uint32_t srcy = 0; srcy < node_size; ++srcy)
+                            for (int32_t srcy = 0; srcy < node_size; ++srcy)
                             {
-                                for (uint32_t srcx = 0; srcx < node_size; ++srcx)
+                                for (int32_t srcx = 0; srcx < node_size; ++srcx)
                                 {
-                                    numtk::vec3u srcbase = dstbase*node_size*4
-                                        + numtk::vec3u{ srcx, srcy, srcz }*4;
-                                    uint64_t srcbits = src.GetEnclosingKernel(srcbase);
+                                    numtk::vec3i srcbase = dstbase*(int32_t)node_size*4
+                                        + numtk::vec3i{ srcx, srcy, srcz }*4;
+                                    uint64_t srcbits = src.TestKernel(srcbase);
                                     if (srcbits != 0)
                                         return true;
                                 }
@@ -819,7 +811,7 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                         return false;
                     }(node_size, *src, dstbase);
 
-                    dst.Set(dstbase, bit);
+                    ((voxtk::VoxelField&)dst).Set(dstbase, bit);
                 }
             }
         }
@@ -847,13 +839,14 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
     {
         uint32_t lod_index = lod_count-1 - level_index;
         VOXEL_FIELD_TYPE const& lod = lods[lod_count-1 - level_index];
-        numtk::vec3u nextlod_size = numtk::max(lod.Size() / (node_size * 4),
+        numtk::vec3u lod_size = lod.bounds.extent().cast<uint32_t>();
+        numtk::vec3u nextlod_size = numtk::max(lod_size / (node_size * 4),
                                                numtk::vec3u::Constant(1));
         numtk::vec3u nextlod_chunkcount = numtk::max(nextlod_size / 4,
                                                     numtk::vec3u::Constant(1));
         numtk::vec3u nextlod_chunksize = (level_index == 0)
             ? numtk::vec3u{ 4, 4, 4 }
-            : numtk::min(lods[lod_count-level_index].Size(),
+            : numtk::min(lods[lod_count-level_index].bounds.extent().cast<uint32_t>(),
                          numtk::vec3u{ 4, 4, 4 });
 
         uint32_t nextlod_count = 1u << shift_depth;
@@ -874,9 +867,9 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
             numtk::vec3u const lod_base = nextlod_base * node_size*4;
 
             numtk::vec3u const valid_range{
-                std::min(node_size, std::max((lod.Size().x-lod_base.x)/4u, 1u)),
-                std::min(node_size, std::max((lod.Size().y-lod_base.y)/4u, 1u)),
-                std::min(node_size, std::max((lod.Size().z-lod_base.z)/4u, 1u))
+                std::min(node_size, std::max((lod_size.x-lod_base.x)/4u, 1u)),
+                std::min(node_size, std::max((lod_size.y-lod_base.y)/4u, 1u)),
+                std::min(node_size, std::max((lod_size.z-lod_base.z)/4u, 1u))
             };
 
             package.masks.push_back(
