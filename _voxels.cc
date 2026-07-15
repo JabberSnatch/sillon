@@ -23,6 +23,7 @@
 #include <unordered_map>
 
 //#define SYNC_LOAD
+#define VOXEL_NODE_SIZE 16u
 
 namespace {
 
@@ -69,8 +70,6 @@ struct FlightCamera
 
 struct VoxelRegionPackage
 {
-    uint32_t area_size;
-    uint32_t node_size;
     numtk::vec3f area_scale;
     int32_t stack_depth;
     int32_t display_depth;
@@ -81,9 +80,7 @@ struct VoxelRegionPackage
 };
 
 VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
-                                     voxtk::VoxelField const& region,
-                                     uint32_t area_size,
-                                     uint32_t node_size);
+                                     voxtk::VoxelField const& region);
 
 struct dispatch_runtime_t
 {
@@ -115,8 +112,6 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt, VoxelRegionPackage cons
 struct VoxelRegionFuture
 {
     voxtk::VoxelField region;
-    uint32_t area_size = 0u;
-    uint32_t node_size = 0u;
 };
 
 struct voxel_state_t
@@ -440,9 +435,7 @@ voxtk::VoxelField DeserialiseRegion(std::string const& file_path)
 }
 
 VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
-                                     voxtk::VoxelField const& region,
-                                     uint32_t area_size,
-                                     uint32_t node_size)
+                                     voxtk::VoxelField const& region)
 {
     systk::Timer scope_time{ "UploadVoxelRegion",
         [](std::string const& tag, float time) {
@@ -450,22 +443,20 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
         }
     };
 
-    node_size = 16u;
-    numtk::vec3u _area_size = region.bounds.extent().cast<uint32_t>();
+    constexpr uint32_t node_size = VOXEL_NODE_SIZE;
+    numtk::vec3u area_size = region.bounds.extent().cast<uint32_t>();
 
     VoxelRegionPackage package = {};
-    package.area_size = area_size;
-    package.node_size = node_size;
 
-    uint32_t log_node_size = (uint32_t)numtk::BitTrailingZeroCount(package.node_size*4);
+    uint32_t log_node_size = (uint32_t)numtk::BitTrailingZeroCount(VOXEL_NODE_SIZE*4);
     numtk::vec3u log_area_size{
-        (uint32_t)(64 - numtk::BitLeadingZeroCount(_area_size.x - 1)),
-        (uint32_t)(64 - numtk::BitLeadingZeroCount(_area_size.y - 1)),
-        (uint32_t)(64 - numtk::BitLeadingZeroCount(_area_size.z - 1))
+        (uint32_t)(64 - numtk::BitLeadingZeroCount(area_size.x - 1)),
+        (uint32_t)(64 - numtk::BitLeadingZeroCount(area_size.y - 1)),
+        (uint32_t)(64 - numtk::BitLeadingZeroCount(area_size.z - 1))
     };
     uint32_t max_log_area_size = std::max(log_area_size.x,
                                           std::max(log_area_size.y, log_area_size.z));
-    area_size = (std::max(_area_size.x, std::max(_area_size.y, _area_size.z)) + 3) / 4;
+    uint32_t max_area_size = (std::max(area_size.x, std::max(area_size.y, area_size.z)) + 3) / 4;
 
     uint32_t depth = (uint32_t)((max_log_area_size + (log_node_size-1)) / log_node_size);
 
@@ -477,7 +468,9 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
         (float)(1u << ((log_node_size * depth) - log_area_size.z))
     };
 
-    uint32_t kScaleRatio = area_size / node_size;
+    assert(package.stack_depth < 5);
+
+    uint32_t kScaleRatio = max_area_size / node_size;
     uint32_t kLogScale = (uint32_t)std::popcount((node_size*4) - 1u);
     uint32_t kNodeMortonMask = (node_size - 1u);
     uint32_t kNodeMortonShift = (uint32_t)std::popcount(kNodeMortonMask);
@@ -890,8 +883,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         []() -> VoxelRegionFuture {
             VoxelRegionFuture output = {};
             output.region = DeserialiseRegion("../r.-1.6.mca");
-            output.area_size = 128u;
-            output.node_size = 16u;
             return std::move(output);
         }
     );
@@ -903,9 +894,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         []() -> VoxelRegionFuture {
             VoxelRegionFuture output = {};
 
-            output.area_size = 1024u;
-            output.node_size = 32u;
-
             {
                 systk::Timer scope_time{ "COPC import",
                     [](std::string const& tag, float time) {
@@ -915,8 +903,9 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
                 output.region =
                     voxtk::importer::ImportCOPC(
-                        "../LHD_FXX_0697_6520_PTS_C_LAMB93_IGN69.copc.laz",
-                        output.area_size * 4);
+                        "../LHD_FXX_0697_6520_PTS_LAMB93_IGN69.copc.laz",
+                        //"../LHD_FXX_0697_6520_PTS_C_LAMB93_IGN69.copc.laz",
+                        4096);
             }
 
             return std::move(output);
@@ -929,16 +918,14 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     {
         VoxelRegionFuture voxel_region = _state->region_future.get();
         _state->region_package = UploadVoxelRegion(_vulkan,
-                                                   voxel_region.region,
-                                                   voxel_region.area_size,
-                                                   voxel_region.node_size);
+                                                   voxel_region.region);
     }
 #endif
 
 
 #if 0
     _state->initial_region = _state->voxel_region;
-    _state->region_package = UploadVoxelRegion(_vulkan, _state->voxel_region, area_size, node_size);
+    _state->region_package = UploadVoxelRegion(_vulkan, _state->voxel_region);
 #endif
 
 #if 0
@@ -1089,9 +1076,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
 #if 1
         _state->voxel_region = _state->initial_region.Shift(_state->stencil_location);
-        _state->region_package = UploadVoxelRegion(_vulkan, _state->voxel_region,
-                                                   _state->region_package.area_size,
-                                                   _state->region_package.node_size);
+        _state->region_package = UploadVoxelRegion(_vulkan, _state->voxel_region);
 
         SparseRegionUpdateBindings(_state->sparse_runtime);
 #else
@@ -1117,7 +1102,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
             uint32_t area_size = 4u;
             uint32_t node_size = 4u;
-            _state->region_package = UploadVoxelRegion(_vulkan, _state->voxel_region, area_size, node_size);
+            _state->region_package = UploadVoxelRegion(_vulkan, _state->voxel_region);
 
             SparseRegionUpdateBindings(_state->sparse_runtime);
         }
@@ -3244,9 +3229,7 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
         {
             VoxelRegionFuture voxel_region = _rt.state->region_future.get();
             _rt.state->region_package = UploadVoxelRegion(_rt.vulkan,
-                                                          voxel_region.region,
-                                                          voxel_region.area_size,
-                                                          voxel_region.node_size);
+                                                          voxel_region.region);
             SparseRegionUpdateBindings(_rt, _rt.state->region_package);
         }
 #endif
@@ -3326,7 +3309,7 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
                 }, 0);
         push_constants->light_dir = sun_dir;
         push_constants->display_mode = _rt.state->enable_indirect_light ? 1.f : 0.f;
-        push_constants->node_size = (float)_rt.state->region_package.node_size;
+        push_constants->node_size = (float)VOXEL_NODE_SIZE;
         push_constants->region_scale = _rt.state->region_package.area_scale;
         push_constants->stack_depth = std::max(_rt.state->region_package.display_depth-1, 0);
         push_constants->sample_offset = _rt.state->progressive_frame_index;
