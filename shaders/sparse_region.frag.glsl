@@ -374,13 +374,13 @@ void main()
     uint pixelCount = uint(screen_size.x) * uint(screen_size.y);
 
     vec3 dir =
-        inverse(mat3(view_model)) *
-        inverse(mat3(projection))
-        * vec3(uv * 2.0 - vec2(1.0), 1.0);
-    dir = normalize(dir);
+        (inverse(mat3(view_model)) *
+         inverse(mat3(projection))
+         * vec3(uv * 2.0 - vec2(1.0), 1.0));
+    dir = normalize(dir) * normalize(box_scale);
 
     vec3 step_sign = sign(-dir);
-    vec3 max_t = abs(((step_sign * 0.5 + vec3(0.5)) - (step_sign * local_coords)) / dir);
+    vec3 max_t = abs(((step_sign * 0.5 + vec3(0.5)) * box_scale - (step_sign * local_coords)) / dir);
 
     float entry_depth = distance(local_camera, local_coords);
     float region_begin = min(max_t.x, min(max_t.y, max_t.z));
@@ -400,7 +400,7 @@ void main()
         vec3 sign_bit = -sign(dir);
         vec3 d = (0.5 * box_scale * winding * sign_bit - alt_org) / dir;
 
-#define TEST(U, VW) (d.U > 0.0) && all(lessThan(abs(alt_org.VW + dir.VW * d.U), vec2(0.5 * box_scale)))
+#define TEST(U, VW) (d.U > 0.0) && all(lessThan(abs(alt_org.VW + dir.VW * d.U), vec2(0.5 * box_scale.VW)))
 
         bvec3 test = bvec3(TEST(x, yz), TEST(y, zx), TEST(z, xy));
         sign_bit = test.x
