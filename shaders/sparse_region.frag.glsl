@@ -382,18 +382,9 @@ void main()
     vec3 step_sign = sign(-dir);
     vec3 max_t = abs(((step_sign * 0.5 + vec3(0.5)) * box_scale - (step_sign * local_coords)) / dir);
 
-    float entry_depth = distance(local_camera, local_coords);
-    float region_begin = min(max_t.x, min(max_t.y, max_t.z));
-
     vec3 root_org = local_camera;
     if (root_org != clamp(root_org, vec3(0.0), vec3(1.0) * box_scale))
     {
-#if 0
-        root_org = local_coords
-            - dir * 0.00001
-            - (dir * min(entry_depth, region_begin));
-#endif
-
         vec3 alt_org = root_org - vec3(0.5) * box_scale;
         vec3 abs_org = abs(alt_org) * (2.0 / box_scale);
         float winding = max(abs_org.x, max(abs_org.y, abs_org.z)) < 1.0 ? -1.0 : 1.0;
@@ -414,7 +405,8 @@ void main()
         root_org = local_camera + dir * distance;
     }
 
-    entry_depth = max(entry_depth - region_begin, 0.0);
+    float entry_depth = distance(local_camera, root_org);
+    float region_begin = min(max_t.x, min(max_t.y, max_t.z));
 
     vec3 base_color = vec3(0.0);
     vec3 org = root_org;
