@@ -71,6 +71,7 @@ struct FlightCamera
 struct VoxelRegionPackage
 {
     numtk::vec3f area_scale;
+    numtk::vec3f area_size;
     int32_t stack_depth;
     int32_t display_depth;
     uint32_t leaves_begin;
@@ -467,6 +468,7 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
         (float)(1u << ((log_node_size * depth) - log_area_size.y)),
         (float)(1u << ((log_node_size * depth) - log_area_size.z))
     };
+    package.area_size = (numtk::vec3u::Constant(1) << log_area_size).cast<float>();
 
     assert(package.stack_depth < 5);
 
@@ -3252,13 +3254,27 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
             matrix->view = _rt.state->camera.Matrix();
             matrix->projection =
                 numtk::mat4f::Perspective_VulkanNDC(1.0f, 1000000.f, 90.f*numtk::kDegrees, how);
+
+#if 0
             matrix->view_model =
                 matrix->view
                 * numtk::mat4f{
-                256.f, 0.f, 0.f, 0.f,
+                512.f, 0.f, 0.f, 0.f,
                 0.f, 256.f, 0.f, 0.f,
-                0.f, 0.f, 256.f, 0.f,
+                0.f, 0.f, 1024.f, 0.f,
                 0.f, 0.f, 0.f, 1.f };
+#else
+            //numtk::vec3f model_scale = numtk::vec3f::Constant(1.f) / _rt.state->region_package.area_scale;
+            numtk::vec3f model_scale = _rt.state->region_package.area_size;
+            matrix->view_model =
+                matrix->view
+                * numtk::mat4f{
+                model_scale.x, 0.f, 0.f, 0.f,
+                0.f, model_scale.y, 0.f, 0.f,
+                0.f, 0.f, model_scale.z, 0.f,
+                0.f, 0.f, 0.f, 1.f };
+#endif
+
             matrix->screen_offset = numtk::vec2f{ 0.f, 0.f };
             matrix->screen_size = swapchain_size.cast<int32_t>();
 
