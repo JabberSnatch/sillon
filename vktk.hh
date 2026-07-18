@@ -298,6 +298,11 @@ struct ImageSyncTriplet {
     VkImageLayout layout;
 };
 
+struct DeferredStagingUpload {
+    Buffer staging;
+    std::function<void(vktk::CommandBuffer&)> copy_command;
+};
+
 struct Context
 {
     Context(uint64_t _hinstance, uint64_t _hwindow);
@@ -445,7 +450,14 @@ struct Context
                           ImageSyncTriplet const& _sync,
                           std::function<void(void*)> const& _upload_callback);
 
+    Texture CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
+                          VkImageType _type, VkFormat _format, VkImageUsageFlags _usage,
+                          ImageSyncTriplet const& _sync,
+                          DeferredStagingUpload& _upload);
+
     void DestroyTexture(Texture const& _texture);
+
+    void CommitStaging(DeferredStagingUpload& _upload);
 
     VkImageView CreateImageView(Texture const& _texture) const;
 

@@ -1849,51 +1849,45 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
                                ImageSyncTriplet const& _sync,
                                std::function<void(void*)> const& _upload_callback)
 {
+    DeferredStagingUpload upload = {};
+    Texture result = CreateTexture(_width, _height, _depth, _type, _format,
+                                   _usage | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                                   _sync, upload);
+
+    void* mapped_data = upload.staging.alloc.map;
+    _upload_callback(mapped_data);
+
+    CommitStaging(upload);
+
+    return result;
+}
+
+
+Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
+                               VkImageType _type, VkFormat _format, VkImageUsageFlags _usage,
+                               ImageSyncTriplet const& _sync,
+                               DeferredStagingUpload& _upload)
+{
     Texture result = CreateTexture(_width, _height, _depth, _type, _format,
                                    _usage | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
     uint64_t staging_size = _width * _height * _depth * VkFormatBytesPerUnit(_format);
-    Buffer staging = CreateBuffer(staging_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+    _upload.staging = CreateBuffer(staging_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
 
-    void* mapped_data = staging.alloc.map;
-    _upload_callback(mapped_data);
-
-    vktk::CommandBuffer command_buffer = CreateCommandBuffer(present_queue);
-    command_buffer.Begin();
-
-    VkImageMemoryBarrier image_memory_barrier{};
-    image_memory_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    image_memory_barrier.pNext = nullptr;
-    image_memory_barrier.srcAccessMask = VK_ACCESS_NONE;
-    image_memory_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    image_memory_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    image_memory_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    image_memory_barrier.srcQueueFamilyIndex = 0u;
-    image_memory_barrier.dstQueueFamilyIndex = 0u;
-    image_memory_barrier.image = result.image;
-    image_memory_barrier.subresourceRange = VkImageSubresourceRange{
+    VkImageMemoryBarrier src_memory_barrier{};
+    src_memory_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    src_memory_barrier.pNext = nullptr;
+    src_memory_barrier.srcAccessMask = VK_ACCESS_NONE;
+    src_memory_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    src_memory_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    src_memory_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    src_memory_barrier.srcQueueFamilyIndex = 0u;
+    src_memory_barrier.dstQueueFamilyIndex = 0u;
+    src_memory_barrier.image = result.image;
+    src_memory_barrier.subresourceRange = VkImageSubresourceRange{
         VK_IMAGE_ASPECT_COLOR_BIT,
         0u, 1u, 0u, 1u
     };
-
-    VkBufferMemoryBarrier buffer_memory_barrier{};
-    buffer_memory_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    buffer_memory_barrier.pNext = nullptr;
-    buffer_memory_barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
-    buffer_memory_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    buffer_memory_barrier.srcQueueFamilyIndex = 0u;
-    buffer_memory_barrier.dstQueueFamilyIndex = 0u;
-    buffer_memory_barrier.buffer = staging.buffer;
-    buffer_memory_barrier.offset = 0u;
-    buffer_memory_barrier.size = staging_size;
-
-    vkCmdPipelineBarrier(command_buffer,
-                         VK_PIPELINE_STAGE_HOST_BIT,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         0u,
-                         0u, nullptr,
-                         1u, &buffer_memory_barrier,
-                         1u, &image_memory_barrier);
 
     VkBufferImageCopy copy_region{};
     copy_region.bufferOffset = 0u;
@@ -1906,25 +1900,79 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
     copy_region.imageOffset = VkOffset3D{ 0u, 0u, 0u };
     copy_region.imageExtent = VkExtent3D{ _width, _height, _depth };
 
-    vkCmdCopyBufferToImage(command_buffer,
-                           staging.buffer,
-                           result.image,
-                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                           1,
-                           &copy_region);
+    VkImageMemoryBarrier dst_memory_barrier = src_memory_barrier;
+    dst_memory_barrier.oldLayout = dst_memory_barrier.newLayout;
+    dst_memory_barrier.newLayout = _sync.layout;
+    dst_memory_barrier.srcAccessMask = dst_memory_barrier.dstAccessMask;
+    dst_memory_barrier.dstAccessMask = _sync.access;
 
-    image_memory_barrier.oldLayout = image_memory_barrier.newLayout;
-    image_memory_barrier.newLayout = _sync.layout;
-    image_memory_barrier.srcAccessMask = image_memory_barrier.dstAccessMask;
-    image_memory_barrier.dstAccessMask = _sync.access;
+    _upload.copy_command = [src_memory_barrier,
+                            copy_region,
+                            dst_memory_barrier,
+                            sync_stage = _sync.stage,
+                            buffer = _upload.staging,
+                            image = result.image]
+        (vktk::CommandBuffer& command_buffer) {
+
+        vkCmdPipelineBarrier(command_buffer,
+                             VK_PIPELINE_STAGE_HOST_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             0u,
+                             0u, nullptr,
+                             0u, nullptr,
+                             1u, &src_memory_barrier);
+
+        vkCmdCopyBufferToImage(command_buffer,
+                               buffer,
+                               image,
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                               1,
+                               &copy_region);
+
+        vkCmdPipelineBarrier(command_buffer,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             sync_stage,
+                             0u,
+                             0u, nullptr,
+                             0u, nullptr,
+                             1u, &dst_memory_barrier);
+    };
+
+    return result;
+}
+
+
+void Context::DestroyTexture(Texture const& _texture)
+{
+    vkDestroyImageView(device, _texture.view, nullptr);
+    vkDestroyImage(device, _texture.image, nullptr);
+}
+
+void Context::CommitStaging(DeferredStagingUpload& _upload)
+{
+    vktk::CommandBuffer command_buffer = CreateCommandBuffer(present_queue);
+    command_buffer.Begin();
+
+    VkBufferMemoryBarrier buffer_memory_barrier{};
+    buffer_memory_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    buffer_memory_barrier.pNext = nullptr;
+    buffer_memory_barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
+    buffer_memory_barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    buffer_memory_barrier.srcQueueFamilyIndex = 0u;
+    buffer_memory_barrier.dstQueueFamilyIndex = 0u;
+    buffer_memory_barrier.buffer = _upload.staging.buffer;
+    buffer_memory_barrier.offset = 0u;
+    buffer_memory_barrier.size = _upload.staging.alloc.size;
 
     vkCmdPipelineBarrier(command_buffer,
+                         VK_PIPELINE_STAGE_HOST_BIT,
                          VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         _sync.stage,
                          0u,
                          0u, nullptr,
-                         0u, nullptr,
-                         1u, &image_memory_barrier);
+                         1u, &buffer_memory_barrier,
+                         0u, nullptr);
+
+    _upload.copy_command(command_buffer);
 
     command_buffer.End();
 
@@ -1937,7 +1985,8 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
     std::cout << "[CreateTexture] scheduled staging buffer destruction "
               << std::hex << staging.buffer << std::dec << std::endl;
 #endif
-    ScheduleRoutine(staging_fence, [staging](Context& _context) {
+
+    ScheduleRoutine(staging_fence, [staging = _upload.staging](Context& _context) {
 #if 0
         std::cout << "[ScheduledRoutine] staging buffer destroyed "
                   << std::hex << staging.buffer << std::dec << std::endl;
@@ -1947,13 +1996,7 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
 
     ScheduleFenceDestroy(staging_fence);
 
-    return result;
-}
-
-void Context::DestroyTexture(Texture const& _texture)
-{
-    vkDestroyImageView(device, _texture.view, nullptr);
-    vkDestroyImage(device, _texture.image, nullptr);
+    _upload = DeferredStagingUpload{};
 }
 
 VkImageView Context::CreateImageView(Texture const& _texture) const
