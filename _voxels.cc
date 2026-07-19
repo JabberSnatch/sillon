@@ -83,6 +83,8 @@ struct VoxelRegionPackage
 VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                                      voxtk::VoxelField const& region);
 
+voxtk::VoxelField VoxelFieldDownsample(voxtk::VoxelField const& src, uint32_t size_factor);
+
 struct dispatch_runtime_t
 {
     vkrg::runtime::DispatchContext Context() {
@@ -444,48 +446,64 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
         }
     };
 
-    constexpr uint32_t node_size = VOXEL_NODE_SIZE;
+    constexpr uint32_t kNodeSize = VOXEL_NODE_SIZE;
+    constexpr uint32_t kKernelSize = voxtk::VoxelMask::kKernelSize;
+    constexpr uint32_t kLevelSize = kNodeSize*kKernelSize;
+
+    uint32_t kNodeMortonMask = (kNodeSize - 1u);
+    uint32_t kNodeMortonShift = (uint32_t)std::popcount(kNodeMortonMask);
+
+    constexpr uint32_t kKernelMortonMask = 0x3;
+    constexpr uint32_t kKernelMortonShift = 2;
+
+    uint32_t kLevelMortonShift = (kNodeMortonShift+kKernelMortonShift)*3;
+
+    uint32_t log_level_size = (uint32_t)numtk::BitTrailingZeroCount(kLevelSize);
+
     numtk::vec3u area_size = region.bounds.extent().cast<uint32_t>();
-
-    VoxelRegionPackage package = {};
-
-    uint32_t log_node_size = (uint32_t)numtk::BitTrailingZeroCount(VOXEL_NODE_SIZE*4);
     numtk::vec3u log_area_size{
         (uint32_t)(64 - numtk::BitLeadingZeroCount(area_size.x - 1)),
         (uint32_t)(64 - numtk::BitLeadingZeroCount(area_size.y - 1)),
         (uint32_t)(64 - numtk::BitLeadingZeroCount(area_size.z - 1))
     };
+
     uint32_t max_log_area_size = std::max(log_area_size.x,
                                           std::max(log_area_size.y, log_area_size.z));
-    uint32_t max_area_size = (std::max(area_size.x, std::max(area_size.y, area_size.z)) + 3) / 4;
+    uint32_t max_area_size = (std::max(area_size.x, std::max(area_size.y, area_size.z))
+                              + (kKernelSize-1)) / kKernelSize;
 
-    uint32_t depth = (uint32_t)((max_log_area_size + (log_node_size-1)) / log_node_size);
+    uint32_t depth = (uint32_t)((max_log_area_size + (log_level_size-1)) / log_level_size);
+    assert(depth < 3);
 
+    uint32_t kScaleRatio = max_area_size / kNodeSize;
+    uint32_t kLogScale = (uint32_t)std::popcount((kNodeSize*4) - 1u);
+
+    VoxelRegionPackage package = {};
     package.stack_depth = depth*2;
     package.display_depth = package.stack_depth;
     package.area_scale = numtk::vec3f::Constant(1.f) / numtk::vec3f{
-        (float)(1u << ((log_node_size * depth) - log_area_size.x)),
-        (float)(1u << ((log_node_size * depth) - log_area_size.y)),
-        (float)(1u << ((log_node_size * depth) - log_area_size.z))
+        (float)(1u << ((log_level_size * depth) - log_area_size.x)),
+        (float)(1u << ((log_level_size * depth) - log_area_size.y)),
+        (float)(1u << ((log_level_size * depth) - log_area_size.z))
     };
     package.area_size = (numtk::vec3u::Constant(1) << log_area_size).cast<float>();
 
-    assert(package.stack_depth < 5);
-
-    uint32_t kScaleRatio = max_area_size / node_size;
-    uint32_t kLogScale = (uint32_t)std::popcount((node_size*4) - 1u);
-    uint32_t kNodeMortonMask = (node_size - 1u);
-    uint32_t kNodeMortonShift = (uint32_t)std::popcount(kNodeMortonMask);
-    uint32_t kChunkMortonMask = 0x3;
-    uint32_t kChunkMortonShift = 2;
-    uint32_t kLevelMortonShift = (kNodeMortonShift+kChunkMortonShift)*3;
-
     std::vector<voxtk::VoxelField> lods = {};
+
+#if 1
+    voxtk::VoxelField const* src = &region;
+    for (uint32_t lod_index = 0; lod_index < depth; ++lod_index)
+    {
+        lods.push_back(VoxelFieldDownsample(*src, kNodeSize));
+        src = &lods[lod_index];
+    }
+
+#else
 
     voxtk::VoxelField const* src = &region;
     for (uint32_t lod_size = kScaleRatio, src_index = 0u;
          lod_size > 1;
-         (lod_size /= node_size*4, ++src_index))
+         (lod_size /= kLevelSize, ++src_index))
     {
         lods.push_back(voxtk::VoxelField{});
 
@@ -505,16 +523,16 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                         dst_min + numtk::vec3i{ dstx, dsty, dstz };
 
                     bool bit = []
-                        (uint32_t node_size,
+                        (uint32_t kNodeSize,
                          voxtk::VoxelField const& src,
                          numtk::vec3i const& dstbase) {
-                        for (int32_t srcz = 0; srcz < node_size; ++srcz)
+                        for (int32_t srcz = 0; srcz < kNodeSize; ++srcz)
                         {
-                            for (int32_t srcy = 0; srcy < node_size; ++srcy)
+                            for (int32_t srcy = 0; srcy < kNodeSize; ++srcy)
                             {
-                                for (int32_t srcx = 0; srcx < node_size; ++srcx)
+                                for (int32_t srcx = 0; srcx < kNodeSize; ++srcx)
                                 {
-                                    numtk::vec3i srcbase = dstbase*(int32_t)node_size*4
+                                    numtk::vec3i srcbase = dstbase*(int32_t)kNodeSize*4
                                         + numtk::vec3i{ srcx, srcy, srcz }*4;
                                     uint64_t srcbits = src.TestKernel(srcbase);
                                     if (srcbits != 0)
@@ -523,7 +541,7 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                             }
                         }
                         return false;
-                    }(node_size, *src, dstbase);
+                    }(kNodeSize, *src, dstbase);
 
                     ((voxtk::VoxelField&)dst).Set(dstbase, bit);
                 }
@@ -533,6 +551,7 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
 
     lods.push_back(voxtk::VoxelField{});
     lods.back().Set({ 0, 0, 0 }, true);
+#endif
 
     uint32_t current_offset = 1u;
     uint32_t group_size = 1u;
@@ -540,25 +559,25 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
     uint32_t morton_mask = kNodeMortonMask;
 
     uint32_t node_mask = 0;
-    uint32_t chunk_mask = 0;
+    uint32_t kernel_mask = 0;
     uint32_t shift_depth = 0;
 
     uint32_t lod_count = lods.size()-1;
     for (uint32_t level_index = 0u; level_index < lod_count;
          ++level_index
-             , morton_mask = (morton_mask << kNodeMortonShift*3) | kNodeMortonMask
-             , node_mask = (kNodeMortonMask << (3*kChunkMortonShift)) | (node_mask << kLevelMortonShift)
-             , chunk_mask = kChunkMortonMask | (chunk_mask << kLevelMortonShift)
-             , shift_depth += kLevelMortonShift)
+         , morton_mask = (morton_mask << kNodeMortonShift*3) | kNodeMortonMask
+         , node_mask = (kNodeMortonMask << (3*kKernelMortonShift)) | (node_mask << kLevelMortonShift)
+         , kernel_mask = kKernelMortonMask | (kernel_mask << kLevelMortonShift)
+         , shift_depth += kLevelMortonShift)
     {
         uint32_t lod_index = lod_count-1 - level_index;
         voxtk::VoxelField const& lod = lods[lod_count-1 - level_index];
         numtk::vec3u lod_size = lod.bounds.extent().cast<uint32_t>();
-        numtk::vec3u nextlod_size = numtk::max(lod_size / (node_size * 4),
+        numtk::vec3u nextlod_size = numtk::max(lod_size / (kNodeSize * 4),
                                                numtk::vec3u::Constant(1));
-        numtk::vec3u nextlod_chunkcount = numtk::max(nextlod_size / 4,
+        numtk::vec3u nextlod_kernelcount = numtk::max(nextlod_size / 4,
                                                     numtk::vec3u::Constant(1));
-        numtk::vec3u nextlod_chunksize = (level_index == 0)
+        numtk::vec3u nextlod_kernelsize = (level_index == 0)
             ? numtk::vec3u{ 4, 4, 4 }
             : numtk::min(lods[lod_count-level_index].bounds.extent().cast<uint32_t>(),
                          numtk::vec3u{ 4, 4, 4 });
@@ -570,29 +589,29 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
             std::vector<uint32_t> level_offsets{};
 
             numtk::vec3u const nextlod_base{
-                numtk::BitExtract(index, node_mask | chunk_mask),
-                numtk::BitExtract(index, (node_mask << kNodeMortonShift) | (chunk_mask << kChunkMortonShift)),
-                numtk::BitExtract(index, (node_mask << (2*kNodeMortonShift)) | (chunk_mask << (2*kChunkMortonShift)))
+                numtk::BitExtract(index, node_mask | kernel_mask),
+                numtk::BitExtract(index, (node_mask << kNodeMortonShift) | (kernel_mask << kKernelMortonShift)),
+                numtk::BitExtract(index, (node_mask << (2*kNodeMortonShift)) | (kernel_mask << (2*kKernelMortonShift)))
             };
 
             if (level_index != 0u
                 && !lods[lod_count - level_index].Test(nextlod_base.cast<int32_t>()))
                 continue;
 
-            numtk::vec3u const lod_base = nextlod_base * node_size*4;
+            numtk::vec3u const lod_base = nextlod_base * kNodeSize*4;
 
             numtk::vec3u const valid_range{
-                std::min(node_size, std::max((lod_size.x-lod_base.x)/4u, 1u)),
-                std::min(node_size, std::max((lod_size.y-lod_base.y)/4u, 1u)),
-                std::min(node_size, std::max((lod_size.z-lod_base.z)/4u, 1u))
+                std::min(kNodeSize, std::max((lod_size.x-lod_base.x)/4u, 1u)),
+                std::min(kNodeSize, std::max((lod_size.y-lod_base.y)/4u, 1u)),
+                std::min(kNodeSize, std::max((lod_size.z-lod_base.z)/4u, 1u))
             };
 
             package.masks.push_back(
                 vulkan->CreateTexture(
-                    node_size, node_size, node_size,
+                    kNodeSize, kNodeSize, kNodeSize,
                     VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
                     VK_IMAGE_USAGE_SAMPLED_BIT,
-                    [&lod, &lod_base, &level_offsets, &valid_range, &current_offset, lod_index, node_size](void* mapped_data) {
+                    [&lod, &lod_base, &level_offsets, &valid_range, &current_offset, lod_index, kNodeSize](void* mapped_data) {
                         uint64_t* output = (uint64_t*)mapped_data;
 
                         for (uint32_t zindex = 0; zindex < valid_range.z; ++zindex)
@@ -608,51 +627,51 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                                     } + lod_base).cast<int32_t>();
 
                                     uint64_t bits = lod.TestKernel(base);
-                                    output[xindex + yindex*node_size + zindex*node_size*node_size] = bits;
+                                    output[xindex + yindex*kNodeSize + zindex*kNodeSize*kNodeSize] = bits;
 
                                     level_offsets.push_back(current_offset);
                                     current_offset += std::popcount(bits);
                                 }
 
-                                if (valid_range.x != node_size)
+                                if (valid_range.x != kNodeSize)
                                 {
                                     level_offsets.resize(level_offsets.size()
-                                                         + (node_size-valid_range.x),
+                                                         + (kNodeSize-valid_range.x),
                                                          level_offsets.back());
 
                                     std::memset(output +
                                                 valid_range.x +
-                                                yindex*node_size +
-                                                zindex*node_size*node_size,
+                                                yindex*kNodeSize +
+                                                zindex*kNodeSize*kNodeSize,
                                                 0,
-                                                sizeof(uint64_t) * (node_size-valid_range.x));
+                                                sizeof(uint64_t) * (kNodeSize-valid_range.x));
                                 }
                             }
 
-                            if (valid_range.y != node_size)
+                            if (valid_range.y != kNodeSize)
                             {
                                 level_offsets.resize(level_offsets.size()
-                                                     + (node_size-valid_range.y)*node_size,
+                                                     + (kNodeSize-valid_range.y)*kNodeSize,
                                                      level_offsets.back());
 
                                 std::memset(output +
-                                            valid_range.y*node_size +
-                                            zindex*node_size*node_size,
+                                            valid_range.y*kNodeSize +
+                                            zindex*kNodeSize*kNodeSize,
                                             0,
-                                            sizeof(uint64_t) * (node_size-valid_range.y)*node_size);
+                                            sizeof(uint64_t) * (kNodeSize-valid_range.y)*kNodeSize);
                             }
                         }
 
-                        if (valid_range.z != node_size)
+                        if (valid_range.z != kNodeSize)
                         {
                             level_offsets.resize(level_offsets.size()
-                                                 + (node_size-valid_range.z)*node_size*node_size,
+                                                 + (kNodeSize-valid_range.z)*kNodeSize*kNodeSize,
                                                  level_offsets.back());
 
                             std::memset(output +
-                                        valid_range.z*node_size*node_size,
+                                        valid_range.z*kNodeSize*kNodeSize,
                                         0,
-                                        sizeof(uint64_t) * (node_size-valid_range.z)*node_size*node_size);
+                                        sizeof(uint64_t) * (kNodeSize-valid_range.z)*kNodeSize*kNodeSize);
                         }
                     }
                 )
@@ -660,12 +679,12 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
 
             package.offsets.push_back(
                 vulkan->CreateTexture(
-                    node_size, node_size, node_size,
+                    kNodeSize, kNodeSize, kNodeSize,
                     VK_IMAGE_TYPE_3D, VK_FORMAT_R32_UINT,
                     VK_IMAGE_USAGE_SAMPLED_BIT,
-                    [&level_offsets, &valid_range, node_size](void* mapped_data) {
+                    [&level_offsets, &valid_range, kNodeSize](void* mapped_data) {
                         uint32_t* output = (uint32_t*)mapped_data;
-                        std::memcpy(output, level_offsets.data(), node_size*node_size*node_size*sizeof(uint32_t));
+                        std::memcpy(output, level_offsets.data(), kNodeSize*kNodeSize*kNodeSize*sizeof(uint32_t));
                     }
                 )
             );
@@ -682,21 +701,21 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
     for (uint32_t index = 0u; index < level1_count; ++index)
     {
         numtk::vec3u const lod1_base{
-            numtk::BitExtract(index, node_mask | chunk_mask),
-            numtk::BitExtract(index, (node_mask << kNodeMortonShift) | (chunk_mask << kChunkMortonShift)),
-            numtk::BitExtract(index, (node_mask << (2*kNodeMortonShift)) | (chunk_mask << (2*kChunkMortonShift)))
+            numtk::BitExtract(index, node_mask | kernel_mask),
+            numtk::BitExtract(index, (node_mask << kNodeMortonShift) | (kernel_mask << kKernelMortonShift)),
+            numtk::BitExtract(index, (node_mask << (2*kNodeMortonShift)) | (kernel_mask << (2*kKernelMortonShift)))
         };
 
         if (!lods[0].Test(lod1_base.cast<int32_t>()))
             continue;
 
-        numtk::vec3u const lod0_base = lod1_base * node_size*4u;
+        numtk::vec3u const lod0_base = lod1_base * kNodeSize*4u;
 
         std::vector<vktk::ImageTransition> pre_transitions = {};
         std::vector<vktk::ImageTransition> post_transitions = {};
 
         vktk::Texture mask = vulkan->CreateTexture(
-            node_size, node_size, node_size,
+            kNodeSize, kNodeSize, kNodeSize,
             VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
             VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
         package.masks.push_back(mask);
@@ -719,7 +738,7 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
         if (region.HasLayer(0))
         {
             payload = vulkan->CreateTexture(
-                node_size * 4u, node_size * 4u, node_size * 4u,
+                kNodeSize * 4u, kNodeSize * 4u, kNodeSize * 4u,
                 VK_IMAGE_TYPE_3D, VK_FORMAT_R8G8B8A8_UNORM,
                 VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
             package.payloads.push_back(payload);
@@ -746,14 +765,14 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
         upload_commands.UpdateTexture(
             mask,
             VkOffset3D{ 0, 0, 0 },
-            VkExtent3D{ node_size, node_size, node_size },
-            [&region, &lod0_base, node_size](void* mapped_data) {
+            VkExtent3D{ kNodeSize, kNodeSize, kNodeSize },
+            [&region, &lod0_base, kNodeSize](void* mapped_data) {
                 uint64_t* output = (uint64_t*)mapped_data;
-                for (uint32_t zindex = 0; zindex < node_size; ++zindex)
+                for (uint32_t zindex = 0; zindex < kNodeSize; ++zindex)
                 {
-                    for (uint32_t yindex = 0; yindex < node_size; ++yindex)
+                    for (uint32_t yindex = 0; yindex < kNodeSize; ++yindex)
                     {
-                        for (uint32_t xindex = 0; xindex < node_size; ++xindex)
+                        for (uint32_t xindex = 0; xindex < kNodeSize; ++xindex)
                         {
                             numtk::vec3 base = numtk::vec3u{
                                 xindex * 4,
@@ -762,7 +781,7 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                             } + lod0_base;
 
                             uint64_t bits = region.TestKernel(base.cast<int32_t>());
-                            output[xindex + yindex*node_size + zindex*node_size*node_size] = bits;
+                            output[xindex + yindex*kNodeSize + zindex*kNodeSize*kNodeSize] = bits;
                         }
                     }
                 }
@@ -773,9 +792,9 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
             upload_commands.UpdateTexture(
                 payload,
                 VkOffset3D{ 0, 0, 0 },
-                VkExtent3D{ node_size * 4, node_size * 4, node_size * 4 },
-                [&region, &lod0_base, node_size](void* mapped_data) {
-                    uint32_t extent = node_size * 4;
+                VkExtent3D{ kNodeSize * 4, kNodeSize * 4, kNodeSize * 4 },
+                [&region, &lod0_base, kNodeSize](void* mapped_data) {
+                    uint32_t extent = kNodeSize * 4;
                     numtk::vec4<uint8_t>* output = (numtk::vec4<uint8_t>*)mapped_data;
                     for (uint32_t zindex = 0; zindex < extent; ++zindex)
                     {
@@ -811,6 +830,56 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
     upload_commands.Submit();
 
     return package;
+}
+
+voxtk::VoxelField VoxelFieldDownsample(voxtk::VoxelField const& source, uint32_t size_factor)
+{
+    voxtk::VoxelField target{};
+    uint32_t downsample_size = size_factor * voxtk::VoxelMask::kKernelSize;
+    numtk::bounds3i range = voxtk::VoxelField::Node::AlignedBounds(source.bounds, 0);
+    range.min = range.min / downsample_size;
+    range.max = range.max / downsample_size;
+
+    static const auto ComputeBitPredicate = [](voxtk::VoxelField const& source,
+                                               uint32_t size_factor,
+                                               numtk::vec3i const& base) {
+
+        for (int32_t srcz = 0; srcz < size_factor; ++srcz)
+        {
+            for (int32_t srcy = 0; srcy < size_factor; ++srcy)
+            {
+                for (int32_t srcx = 0; srcx < size_factor; ++srcx)
+                {
+                    numtk::vec3i kernel_base = base +
+                        numtk::vec3i{ srcx, srcy, srcz } * voxtk::VoxelMask::kKernelSize;
+
+                    uint64_t source_bits = source.TestKernel(kernel_base);
+                    if (source_bits != 0)
+                        return true;
+                }
+            }
+        }
+
+        return false;
+    };
+
+    for (int32_t tgtz = range.min.z; tgtz < range.max.z; ++tgtz)
+    {
+        for (int32_t tgty = range.min.y; tgty < range.max.y; ++tgty)
+        {
+            for (int32_t tgtx = range.min.x; tgtx < range.max.x; ++tgtx)
+            {
+                numtk::vec3i target_base{ tgtx, tgty, tgtz };
+                numtk::vec3i source_base = target_base * downsample_size;
+
+                bool bit = ComputeBitPredicate(source, size_factor, source_base);
+
+                target.Set(target_base, bit);
+            }
+        }
+    }
+
+    return target;
 }
 
 void ConstantResources(void* _pstate, vktk::Context* _vulkan)
