@@ -83,7 +83,12 @@ struct VoxelRegionPackage
 VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                                      voxtk::VoxelField const& region);
 
-voxtk::VoxelField VoxelFieldDownsample(voxtk::VoxelField const& src, uint32_t size_factor);
+voxtk::VoxelField VoxelFieldDownsample(voxtk::VoxelField const& source, uint32_t size_factor);
+void VoxelFieldOffsets(voxtk::VoxelField const& source,
+                       voxtk::VoxelField const& target,
+                       uint32_t size_factor,
+                       std::vector<uint64_t*> const& masks,
+                       std::vector<uint32_t*> const& offsets);
 
 struct dispatch_runtime_t
 {
@@ -449,6 +454,7 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
     constexpr uint32_t kNodeSize = VOXEL_NODE_SIZE;
     constexpr uint32_t kKernelSize = voxtk::VoxelMask::kKernelSize;
     constexpr uint32_t kLevelSize = kNodeSize*kKernelSize;
+    constexpr uint32_t kNodeVolume = kNodeSize*kNodeSize*kNodeSize;
 
     uint32_t kNodeMortonMask = (kNodeSize - 1u);
     uint32_t kNodeMortonShift = (uint32_t)std::popcount(kNodeMortonMask);
@@ -473,7 +479,7 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                               + (kKernelSize-1)) / kKernelSize;
 
     uint32_t depth = (uint32_t)((max_log_area_size + (log_level_size-1)) / log_level_size);
-    assert(depth < 3);
+    assert(depth < 4);
 
     uint32_t kScaleRatio = max_area_size / kNodeSize;
     uint32_t kLogScale = (uint32_t)std::popcount((kNodeSize*4) - 1u);
@@ -552,6 +558,30 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
     lods.push_back(voxtk::VoxelField{});
     lods.back().Set({ 0, 0, 0 }, true);
 #endif
+
+#if 1
+    assert((uint32_t)lods.size() == depth);
+    for (uint32_t index = 1u; index < depth; ++index)
+    {
+        uint32_t lod_index = (depth-1) - index;
+        voxtk::VoxelField const& source = lods[lod_index];
+        voxtk::VoxelField const& target = lods[lod_index+1];
+
+        uint64_t target_count = target.Popcount();
+        std::vector<uint32_t*> offsets = {};
+        std::vector<uint64_t*> masks = {};
+        offsets.resize(target_count);
+        masks.resize(target_count);
+
+        std::vector<uint32_t> storage = {};
+        storage.resize(target_count * kNodeVolume);
+        for (uint64_t point_index = 0ull; point_index < target_count; ++point_index)
+            offsets[point_index] = &storage[point_index * kNodeVolume];
+
+        VoxelFieldOffsets(source, target, kNodeSize, masks, offsets);
+    }
+
+#else
 
     uint32_t current_offset = 1u;
     uint32_t group_size = 1u;
@@ -829,6 +859,8 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
     upload_commands.End();
     upload_commands.Submit();
 
+#endif
+
     return package;
 }
 
@@ -836,9 +868,16 @@ voxtk::VoxelField VoxelFieldDownsample(voxtk::VoxelField const& source, uint32_t
 {
     voxtk::VoxelField target{};
     uint32_t downsample_size = size_factor * voxtk::VoxelMask::kKernelSize;
-    numtk::bounds3i range = voxtk::VoxelField::Node::AlignedBounds(source.bounds, 0);
-    range.min = range.min / downsample_size;
-    range.max = range.max / downsample_size;
+
+    numtk::bounds3i range = [&](){
+        numtk::bounds3i range = voxtk::VoxelField::Node::AlignedBounds(source.bounds, 0);
+        numtk::vec3i down_min = range.min / downsample_size;
+        numtk::vec3i down_max = range.max / downsample_size;
+        return numtk::bounds3i::MinExtent(
+            down_min,
+            numtk::max(down_max - down_min, numtk::vec3i::Constant(1))
+        );
+    }();
 
     static const auto ComputeBitPredicate = [](voxtk::VoxelField const& source,
                                                uint32_t size_factor,
@@ -880,6 +919,71 @@ voxtk::VoxelField VoxelFieldDownsample(voxtk::VoxelField const& source, uint32_t
     }
 
     return target;
+}
+
+void VoxelFieldOffsets(voxtk::VoxelField const& source,
+                       voxtk::VoxelField const& target,
+                       uint32_t size_factor,
+                       std::vector<uint64_t*> const& masks,
+                       std::vector<uint32_t*> const& offsets)
+{
+    assert(masks.size() == offsets.size());
+
+    uint32_t downsample_size = size_factor * voxtk::VoxelMask::kKernelSize;
+    numtk::bounds3i range = voxtk::VoxelField::Node::AlignedBounds(target.bounds, 0);
+
+    static const auto VoxelCount = [](voxtk::VoxelField const& source,
+                                      uint32_t size_factor,
+                                      numtk::vec3i const& base,
+                                      uint32_t base_offset,
+                                      uint32_t* offsets) {
+        uint32_t count = 0;
+
+        for (int32_t srcz = 0; srcz < size_factor; ++srcz)
+        {
+            for (int32_t srcy = 0; srcy < size_factor; ++srcy)
+            {
+                for (int32_t srcx = 0; srcx < size_factor; ++srcx)
+                {
+                    numtk::vec3i kernel_base = base +
+                        numtk::vec3i{ srcx, srcy, srcz } * voxtk::VoxelMask::kKernelSize;
+                    uint32_t point_index = srcx + srcy*size_factor + srcz*size_factor*size_factor;
+
+                    uint64_t bits = source.TestKernel(kernel_base);
+                    offsets[point_index] = count + base_offset;
+                    count += std::popcount(bits);
+                }
+            }
+        }
+
+        return count;
+    };
+
+    assert(target.Popcount() == offsets.size());
+    uint32_t buffer_index = 0u;
+    uint32_t current_offset = 0u;
+    for (int32_t tgtz = range.min.z; tgtz < range.max.z; ++tgtz)
+    {
+        for (int32_t tgty = range.min.y; tgty < range.max.y; ++tgty)
+        {
+            for (int32_t tgtx = range.min.x; tgtx < range.max.x; ++tgtx)
+            {
+                numtk::vec3i target_base{ tgtx, tgty, tgtz };
+
+                if (!target.Test(target_base))
+                    continue;
+
+                numtk::vec3i source_base = target_base * downsample_size;
+                current_offset += VoxelCount(source,
+                                             size_factor,
+                                             source_base,
+                                             current_offset,
+                                             offsets[buffer_index]);
+
+                ++buffer_index;
+            }
+        }
+    }
 }
 
 void ConstantResources(void* _pstate, vktk::Context* _vulkan)
