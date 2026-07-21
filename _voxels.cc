@@ -604,6 +604,7 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
 #else
 
     uint32_t current_offset = 1u;
+    uint32_t _current_offset = 1u;
     uint32_t group_size = 1u;
 
     uint32_t node_mask = 0;
@@ -645,10 +646,10 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
         for (uint64_t point_index = 0ull; point_index < target_count; ++point_index)
             offsets[point_index] = &offset_storage[point_index * kNodeVolume];
 
-        current_offset += VoxelFieldOffsets(source,
+        _current_offset += VoxelFieldOffsets(source,
                                             target,
                                             kNodeSize,
-                                            current_offset,
+                                            _current_offset,
                                             level_index,
                                             masks,
                                             offsets);
@@ -927,8 +928,10 @@ voxtk::VoxelField VoxelFieldDownsample(voxtk::VoxelField const& source, uint32_t
 
     numtk::bounds3i range = [&](){
         numtk::bounds3i range = voxtk::VoxelField::Node::AlignedBounds(source.bounds, 0);
-        numtk::vec3i down_min = range.min / downsample_size;
-        numtk::vec3i down_max = range.max / downsample_size;
+        numtk::vec3i down_min = (range.min + numtk::vec3i::Constant(downsample_size-1))
+            / downsample_size;
+        numtk::vec3i down_max = (range.max + numtk::vec3i::Constant(downsample_size-1))
+            / downsample_size;
         return numtk::bounds3i::MinExtent(
             down_min,
             numtk::max(down_max - down_min, numtk::vec3i::Constant(1))
