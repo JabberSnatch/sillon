@@ -23,7 +23,7 @@
 #include <unordered_map>
 
 //#define SYNC_LOAD
-#define VOXEL_NODE_SIZE 16u
+#define VOXEL_NODE_SIZE 4u
 
 namespace {
 
@@ -440,11 +440,17 @@ voxtk::VoxelField DeserialiseRegion(std::string const& file_path)
 
 #endif
 
-#if 0
     voxtk::VoxelField copy{};
     copy.DeclareLayer(0, numtk::vec3<uint8_t>{ 0, 0, 0 });
     copy.SetField({ 0, 0, 0 }, output);
-    output.SetField({ 512, 0, 0 }, output);
+    output.SetField({ 512, 0, 0 }, copy);
+    output.SetField({ 0, 0, 512 }, copy);
+    output.SetField({ 512, 0, 512 }, copy);
+
+    output.SetField({ 512, 512, 0 }, copy);
+    output.SetField({ 0, 512, 512 }, copy);
+    output.SetField({ 512, 512, 512 }, copy);
+#if 0
     for (int32_t index = 1; index < 16; ++index)
     {
         output.SetField({ 512 * (index%4), 0, 512 * (index/4) }, copy);
@@ -604,6 +610,7 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
 #else
 
     uint32_t current_offset = 1u;
+    uint32_t _current_offset = 1u;
     uint32_t group_size = 1u;
 
     uint32_t node_mask = 0;
@@ -631,7 +638,7 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
 
         uint32_t nextlod_count = 1u << shift_depth;
 
-#if 1
+#if 0
         uint32_t voxel_index = 0u;
         voxtk::VoxelField const& source = lod;
         voxtk::VoxelField const& target = lods[lod_count - level_index];
@@ -645,10 +652,10 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
         for (uint64_t point_index = 0ull; point_index < target_count; ++point_index)
             offsets[point_index] = &offset_storage[point_index * kNodeVolume];
 
-        current_offset += VoxelFieldOffsets(source,
+        _current_offset += VoxelFieldOffsets(source,
                                             target,
                                             kNodeSize,
-                                            current_offset,
+                                            _current_offset,
                                             level_index,
                                             masks,
                                             offsets);
@@ -707,6 +714,7 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                                 {
                                     level_offsets.resize(level_offsets.size()
                                                          + (kNodeSize-valid_range.x),
+                                                         //level_offsets.back());
                                                          current_offset);
 
                                     std::memset(output +
@@ -722,6 +730,7 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                             {
                                 level_offsets.resize(level_offsets.size()
                                                      + (kNodeSize-valid_range.y)*kNodeSize,
+                                                     //level_offsets.back());
                                                      current_offset);
 
                                 std::memset(output +
@@ -736,6 +745,7 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                         {
                             level_offsets.resize(level_offsets.size()
                                                  + (kNodeSize-valid_range.z)*kNodeSize*kNodeSize,
+                                                 //level_offsets.back());
                                                  current_offset);
 
                             std::memset(output +
@@ -747,7 +757,7 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                 )
             );
 
-#if 0
+#if 1
             package.offsets.push_back(
                 vulkan->CreateTexture(
                     kNodeSize, kNodeSize, kNodeSize,
@@ -1024,7 +1034,7 @@ uint32_t VoxelFieldOffsets(voxtk::VoxelField const& source,
             numtk::vec3u indexing_base{
                 numtk::BitExtract(point_index, indexing_masks.x),
                 numtk::BitExtract(point_index, indexing_masks.y),
-                numtk::BitExtract(point_index, indexing_masks.z)
+                numtk::BitExtract(point_index, indexing_masks.z),
             };
 
             numtk::vec3i kernel_base = base +
@@ -1044,15 +1054,44 @@ uint32_t VoxelFieldOffsets(voxtk::VoxelField const& source,
     uint32_t buffer_index = 0u;
     uint32_t current_offset = 0u;
 
+#if 1
+    uint32_t size_mask = (size_factor - 1u);
+    uint32_t size_shift = (uint32_t)std::popcount(size_mask);
+
+    uint32_t kernel_mask = voxtk::VoxelMask::kKernelSize - 1;
+    uint32_t kernel_shift = (uint32_t)std::popcount(kernel_mask);
+
+    uint32_t level_shift = (size_shift + kernel_shift) * 3u;
+
+    uint32_t size_aggregate = 0u;
+    uint32_t kernel_aggregate = 0u;
+    for (uint32_t index = 0u; index < lod_index; ++index)
+    {
+        size_aggregate = (size_aggregate << level_shift) |
+            (size_mask << (3 * kernel_shift));
+        kernel_aggregate = (kernel_aggregate << level_shift) |
+            (kernel_mask);
+    }
+
+    numtk::vec3u indexing_masks{
+        size_aggregate | kernel_aggregate,
+        (size_aggregate << size_shift) | (kernel_aggregate << kernel_shift),
+        (size_aggregate << (size_shift * 2)) | (kernel_aggregate << (kernel_shift * 2))
+    };
+
+#else
+
     uint32_t log_size = (uint32_t)numtk::BitTrailingZeroCount(size_factor);
     numtk::vec3u indexing_masks{
         (1u << (lod_index*log_size)) - 1u,
         ((1u << (lod_index*log_size)) - 1u) << (lod_index*log_size),
         ((1u << (lod_index*log_size)) - 1u) << (lod_index*log_size*2)
     };
+#endif
 
     uint32_t volume = lod_index == 0 ? 1 : size_factor*size_factor*size_factor;
 
+#if 0
     for (int32_t tgtz = range.min.z; tgtz < range.max.z; ++tgtz)
     {
         for (int32_t tgty = range.min.y; tgty < range.max.y; ++tgty)
@@ -1077,6 +1116,36 @@ uint32_t VoxelFieldOffsets(voxtk::VoxelField const& source,
             }
         }
     }
+
+#else
+
+    uint32_t target_volume = lod_index == 0 ? 1 : range.extent().x * range.extent().y * range.extent().z;
+    for (uint32_t point_index = 0u; point_index < target_volume; ++point_index)
+    {
+        numtk::vec3u indexing_base{
+            numtk::BitExtract(point_index, indexing_masks.x),
+            numtk::BitExtract(point_index, indexing_masks.y),
+            numtk::BitExtract(point_index, indexing_masks.z)
+        };
+
+        numtk::vec3i target_base = range.min + indexing_base.cast<int32_t>();
+
+        if (!target.Test(target_base))
+            continue;
+
+        numtk::vec3i source_base = target_base * downsample_size;
+        current_offset += VoxelCount(source,
+                                     size_factor,
+                                     volume,
+                                     source_base,
+                                     indexing_masks,
+                                     current_offset + base_offset,
+                                     offsets[buffer_index]);
+
+        ++buffer_index;
+    }
+
+#endif
 
     return current_offset;
 }
@@ -3498,9 +3567,20 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
                 == std::future_status::ready))
         {
             VoxelRegionFuture voxel_region = _rt.state->region_future.get();
+#if 1
             _rt.state->region_package = UploadVoxelRegion(_rt.vulkan,
                                                           voxel_region.region);
             SparseRegionUpdateBindings(_rt, _rt.state->region_package);
+#else
+            _rt.state->package_future = std::async(
+                std::launch::async,
+                []() -> VoxelRegionPackage {
+                    VoxelRegionPackage output = {};
+                    //output = UploadVoxelRegion(_rt.vulkan,
+                    return output;
+                }
+            );
+#endif
         }
 #endif
     };
