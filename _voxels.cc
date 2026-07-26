@@ -665,14 +665,31 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                                             offsets);
 #endif
 
+#if 1
+        numtk::vec3u indexing_masks{
+            node_mask | kernel_mask,
+            (node_mask << kNodeMortonShift) | (kernel_mask << kKernelMortonShift),
+            (node_mask << (kNodeMortonShift * 2)) | (kernel_mask << (kKernelMortonShift * 2))
+        };
+#else
+
+        uint32_t comp_shift = (uint32_t)numtk::BitTrailingZeroCount(kNodeSize) + 2;
+        uint32_t level_shift = comp_shift*3;
+        numtk::vec3u indexing_masks{
+            (1u << (level_index*comp_shift)) - 1u,
+            ((1u << (level_index*comp_shift)) - 1u) << (level_index*comp_shift),
+            ((1u << (level_index*comp_shift)) - 1u) << (level_index*comp_shift*2)
+        };
+#endif
+
         for (uint32_t index = 0u; index < nextlod_count; ++index)
         {
             std::vector<uint32_t> level_offsets{};
 
             numtk::vec3u const nextlod_base{
-                numtk::BitExtract(index, node_mask | kernel_mask),
-                numtk::BitExtract(index, (node_mask << kNodeMortonShift) | (kernel_mask << kKernelMortonShift)),
-                numtk::BitExtract(index, (node_mask << (2*kNodeMortonShift)) | (kernel_mask << (2*kKernelMortonShift)))
+                numtk::BitExtract(index, indexing_masks.x),
+                numtk::BitExtract(index, indexing_masks.y),
+                numtk::BitExtract(index, indexing_masks.z)
             };
 
             if (level_index != 0u
@@ -796,14 +813,31 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
     vktk::CommandBuffer upload_commands = vulkan->CreateCommandBuffer(vulkan->present_queue);
     upload_commands.Begin();
 
+#if 1
+    numtk::vec3u indexing_masks{
+        node_mask | kernel_mask,
+        (node_mask << kNodeMortonShift) | (kernel_mask << kKernelMortonShift),
+        (node_mask << (kNodeMortonShift * 2)) | (kernel_mask << (kKernelMortonShift * 2))
+    };
+#else
+
+    uint32_t comp_shift = (uint32_t)numtk::BitTrailingZeroCount(kNodeSize) + 2;
+    uint32_t level_shift = comp_shift*3;
+    numtk::vec3u indexing_masks{
+        (1u << (lod_count*comp_shift)) - 1u,
+        ((1u << (lod_count*comp_shift)) - 1u) << (lod_count*comp_shift),
+        ((1u << (lod_count*comp_shift)) - 1u) << (lod_count*comp_shift*2)
+    };
+#endif
+
     package.leaves_begin = package.masks.size();
     uint32_t level1_count = 1 << shift_depth;
     for (uint32_t index = 0u; index < level1_count; ++index)
     {
         numtk::vec3u const lod1_base{
-            numtk::BitExtract(index, node_mask | kernel_mask),
-            numtk::BitExtract(index, (node_mask << kNodeMortonShift) | (kernel_mask << kKernelMortonShift)),
-            numtk::BitExtract(index, (node_mask << (2*kNodeMortonShift)) | (kernel_mask << (2*kKernelMortonShift)))
+            numtk::BitExtract(index, indexing_masks.x),
+            numtk::BitExtract(index, indexing_masks.y),
+            numtk::BitExtract(index, indexing_masks.z)
         };
 
         if (!lods[0].Test(lod1_base.cast<int32_t>()))
@@ -1008,14 +1042,11 @@ uint32_t VoxelFieldOffsets(voxtk::VoxelField const& source,
 
     static const auto VoxelCount = [](voxtk::VoxelField const& source,
                                       uint32_t size_factor,
-                                      uint32_t volume,
                                       numtk::vec3i const& base,
-                                      numtk::vec3u const& indexing_masks,
                                       uint32_t base_offset,
                                       uint32_t* offsets) {
         uint32_t count = 0u;
 
-#if 1
         for (int32_t srcz = 0; srcz < size_factor; ++srcz)
         {
             for (int32_t srcy = 0; srcy < size_factor; ++srcy)
@@ -1032,26 +1063,6 @@ uint32_t VoxelFieldOffsets(voxtk::VoxelField const& source,
                 }
             }
         }
-#else
-
-        //uint32_t volume = size_factor*size_factor*size_factor;
-        for (uint32_t point_index = 0u; point_index < volume; ++point_index)
-        {
-            numtk::vec3u indexing_base{
-                numtk::BitExtract(point_index, indexing_masks.x),
-                numtk::BitExtract(point_index, indexing_masks.y),
-                numtk::BitExtract(point_index, indexing_masks.z),
-            };
-
-            numtk::vec3i kernel_base = base +
-                indexing_base.cast<int32_t>() * voxtk::VoxelMask::kKernelSize;
-
-            uint64_t bits = source.TestKernel(kernel_base);
-            offsets[point_index] = count + base_offset;
-            count += std::popcount(bits);
-        }
-
-#endif
 
         return count;
     };
@@ -1067,7 +1078,8 @@ uint32_t VoxelFieldOffsets(voxtk::VoxelField const& source,
     uint32_t kernel_mask = voxtk::VoxelMask::kKernelSize - 1;
     uint32_t kernel_shift = (uint32_t)std::popcount(kernel_mask);
 
-    uint32_t level_shift = (size_shift + kernel_shift) * 3u;
+    uint32_t comp_shift = size_shift + kernel_shift;
+    uint32_t level_shift = comp_shift * 3u;
 
     uint32_t size_aggregate = 0u;
     uint32_t kernel_aggregate = 0u;
@@ -1087,11 +1099,12 @@ uint32_t VoxelFieldOffsets(voxtk::VoxelField const& source,
 
 #else
 
-    uint32_t log_size = (uint32_t)numtk::BitTrailingZeroCount(size_factor);
+    uint32_t comp_shift = (uint32_t)numtk::BitTrailingZeroCount(size_factor) + 2;
+    uint32_t level_shift = comp_shift*3;
     numtk::vec3u indexing_masks{
-        (1u << (lod_index*log_size)) - 1u,
-        ((1u << (lod_index*log_size)) - 1u) << (lod_index*log_size),
-        ((1u << (lod_index*log_size)) - 1u) << (lod_index*log_size*2)
+        (1u << (lod_index*comp_shift)) - 1u,
+        ((1u << (lod_index*comp_shift)) - 1u) << (lod_index*comp_shift),
+        ((1u << (lod_index*comp_shift)) - 1u) << (lod_index*comp_shift*2)
     };
 #endif
 
@@ -1112,9 +1125,7 @@ uint32_t VoxelFieldOffsets(voxtk::VoxelField const& source,
                 numtk::vec3i source_base = target_base * downsample_size;
                 current_offset += VoxelCount(source,
                                              size_factor,
-                                             volume,
                                              source_base,
-                                             indexing_masks,
                                              current_offset + base_offset,
                                              offsets[buffer_index]);
 
@@ -1125,8 +1136,17 @@ uint32_t VoxelFieldOffsets(voxtk::VoxelField const& source,
 
 #else
 
+    numtk::vec3u range_extent = lod_index == 0
+        ? numtk::vec3u::Constant(1)
+        : range.extent().cast<uint32_t>();
+#if 1
     //uint32_t target_volume = lod_index == 0 ? 1 : range.extent().x * range.extent().y * range.extent().z
-    uint32_t target_volume = 1 << lod_index * level_shift;
+    uint32_t max_index =
+        numtk::BitDeposit(range_extent.x, indexing_masks.x)
+        | numtk::BitDeposit(range_extent.y, indexing_masks.y)
+        | numtk::BitDeposit(range_extent.z, indexing_masks.z);
+    uint32_t target_volume = max_index+1; //1 << (lod_index * level_shift);
+
     for (uint32_t point_index = 0u; point_index < target_volume; ++point_index)
     {
         numtk::vec3u indexing_base{
@@ -1134,6 +1154,109 @@ uint32_t VoxelFieldOffsets(voxtk::VoxelField const& source,
             numtk::BitExtract(point_index, indexing_masks.y),
             numtk::BitExtract(point_index, indexing_masks.z),
         };
+
+        if (indexing_base.x >= range_extent.x
+            || indexing_base.y >= range_extent.y
+            || indexing_base.z >= range_extent.z)
+        {
+            uint32_t bigmin = 0;
+
+            uint32_t zval = point_index;
+            uint32_t zmin = 0;
+            uint32_t zmax = max_index;
+
+            uint32_t pack_count = 6 * lod_index;
+
+            static auto const LoadZeros = [](uint32_t v, uint32_t count,
+                                             uint32_t mask, uint32_t stride) {
+                --count;
+                for (uint32_t index = 0; index < count; ++index)
+                    v &= ~(mask << (stride * index));
+                v |= (mask << (stride*count));
+                return v;
+            };
+
+            static auto const LoadOnes = [](uint32_t v, uint32_t count,
+                                            uint32_t mask, uint32_t stride) {
+                --count;
+                for (uint32_t index = 0; index < count; ++index)
+                    v |= (mask << (stride*(index)));
+                v &= ~(mask << (stride*count));
+                return v;
+            };
+
+            for (uint32_t index = 0; index < pack_count; ++index)
+            {
+                uint32_t pack_index = pack_count-1 - index;
+                uint32_t pack_mask = ((pack_index / 3) & 1) ? size_mask : kernel_mask;
+                uint32_t pack_shift = ((pack_index / 3) & 1) ? size_shift : kernel_shift;
+
+                uint32_t base_shift = level_shift * (pack_index/6);
+                uint32_t comp_shift = pack_shift * (pack_index%3);
+                if (pack_index % 6 > 3)
+                    comp_shift += kernel_shift*3;
+
+                uint32_t mask = pack_mask << (base_shift + comp_shift);
+
+                uint32_t val_bit = zval & mask;
+                uint32_t min_bit = zmin & mask;
+                uint32_t max_bit = zmax & mask;
+
+                uint32_t branch_index =
+                    (val_bit ? 1 : 0) +
+                    (min_bit ? 2 : 0) +
+                    (max_bit ? 4 : 0);
+
+                switch (branch_index)
+                {
+
+                case 0:
+                    break;
+
+                case 1: // val_bit
+                    index = pack_count;
+                    break;
+
+                case 2: // min_bit
+                    assert(false);
+                    break;
+
+                case 3: // val_bit && min_bit
+                    assert(false);
+                    break;
+
+                case 4: // max_bit
+                    bigmin = LoadZeros(zmin, ((pack_index+5)/6),
+                                       pack_mask << comp_shift, level_shift);
+                    zmax = LoadOnes(zmax, ((pack_index+5)/6),
+                                    pack_mask << comp_shift, level_shift);
+                    break;
+
+                case 5: // val_bit && max_bit
+                    zmin = LoadZeros(zmin, ((pack_index+5)/6),
+                                     pack_mask << comp_shift, level_shift);
+                    break;
+
+                case 6: // min_bit && max_bit
+                    bigmin = zmin;
+                    index = pack_count;
+                    break;
+
+                case 7: // val_bit && min_bit && max_bit
+                    break;
+
+                default: break;
+                }
+            }
+
+            numtk::vec3u test_point{
+                numtk::BitExtract(bigmin, indexing_masks.x),
+                numtk::BitExtract(bigmin, indexing_masks.y),
+                numtk::BitExtract(bigmin, indexing_masks.z)
+            };
+
+            bigmin = bigmin;
+        }
 
         numtk::vec3i target_base = range.min + indexing_base.cast<int32_t>();
 
@@ -1143,14 +1266,55 @@ uint32_t VoxelFieldOffsets(voxtk::VoxelField const& source,
         numtk::vec3i source_base = target_base * downsample_size;
         current_offset += VoxelCount(source,
                                      size_factor,
-                                     volume,
                                      source_base,
-                                     indexing_masks,
                                      current_offset + base_offset,
                                      offsets[buffer_index]);
 
         ++buffer_index;
     }
+#else
+
+    numtk::vec3u deindexing_masks{
+        (1u << (lod_index*comp_shift)) - 1u,
+        ((1u << (lod_index*comp_shift)) - 1u) << (lod_index*comp_shift),
+        ((1u << (lod_index*comp_shift)) - 1u) << (lod_index*comp_shift*2)
+    };
+
+    for (uint32_t tgtz = 0u; tgtz < range_extent.z; ++tgtz)
+    {
+        for (uint32_t tgty = 0u; tgty < range_extent.y; ++tgty)
+        {
+            for (uint32_t tgtx = 0u; tgtx < range_extent.x; ++tgtx)
+            {
+                uint32_t point_index =
+                    numtk::BitDeposit(tgtx, deindexing_masks.x)
+                    | numtk::BitDeposit(tgty, deindexing_masks.y)
+                    | numtk::BitDeposit(tgtz, deindexing_masks.z);
+
+                numtk::vec3u index_base{
+                    numtk::BitExtract(point_index, indexing_masks.x),
+                    numtk::BitExtract(point_index, indexing_masks.y),
+                    numtk::BitExtract(point_index, indexing_masks.z)
+                };
+
+                numtk::vec3i target_base = range.min + index_base.cast<int32_t>();
+
+                if (!target.Test(target_base))
+                    continue;
+
+                numtk::vec3i source_base = target_base * downsample_size;
+                current_offset += VoxelCount(source,
+                                             size_factor,
+                                             source_base,
+                                             current_offset + base_offset,
+                                             offsets[buffer_index]);
+
+                ++buffer_index;
+            }
+        }
+    }
+
+#endif
 
 #endif
 
