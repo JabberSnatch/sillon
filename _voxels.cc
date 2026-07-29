@@ -1129,25 +1129,23 @@ uint32_t VoxelFieldRenderLayout(voxtk::VoxelField const& source,
 
             uint32_t zval = point_index;
             uint32_t zmin = 0;
-            uint32_t zmax = max_index+1;
+            uint32_t zmax = max_index;
 
             uint32_t pack_count = 6 * lod_index;
 
-            static auto const LoadZeros = [](uint32_t v, uint32_t count,
+            static auto const LoadZeros = [](uint32_t v, uint32_t max_index,
                                              uint32_t mask, uint32_t stride) {
-                --count;
-                for (uint32_t index = 0; index < count; ++index)
+                for (uint32_t index = 0; index < max_index; ++index)
                     v &= ~(mask << (stride * index));
-                v |= (mask << (stride*count));
+                v |= (mask << (stride*max_index));
                 return v;
             };
 
-            static auto const LoadOnes = [](uint32_t v, uint32_t count,
+            static auto const LoadOnes = [](uint32_t v, uint32_t max_index,
                                             uint32_t mask, uint32_t stride) {
-                --count;
-                for (uint32_t index = 0; index < count; ++index)
-                    v |= (mask << (stride*(index)));
-                v &= ~(mask << (stride*count));
+                for (uint32_t index = 0; index < max_index; ++index)
+                    v |= (mask << (stride * index));
+                v &= ~(mask << (stride*max_index));
                 return v;
             };
 
@@ -1159,7 +1157,7 @@ uint32_t VoxelFieldRenderLayout(voxtk::VoxelField const& source,
 
                 uint32_t base_shift = level_shift * (pack_index/6);
                 uint32_t comp_shift = pack_shift * (pack_index%3);
-                if (pack_index % 6 > 3)
+                if (pack_index % 6 >= 3)
                     comp_shift += kernel_shift*3;
 
                 uint32_t mask = pack_mask << (base_shift + comp_shift);
@@ -1170,8 +1168,8 @@ uint32_t VoxelFieldRenderLayout(voxtk::VoxelField const& source,
 
                 uint32_t branch_index =
                     (val_bit ? 1 : 0) +
-                    (min_bit ? 2 : 0) +
-                    (max_bit ? 4 : 0);
+                    (min_bit && (val_bit >= min_bit) ? 2 : 0) +
+                    (max_bit && (val_bit <= max_bit) ? 4 : 0);
 
                 switch (branch_index)
                 {
@@ -1192,14 +1190,14 @@ uint32_t VoxelFieldRenderLayout(voxtk::VoxelField const& source,
                     break;
 
                 case 4: // max_bit
-                    bigmin = LoadZeros(zmin, ((pack_index+5)/6),
+                    bigmin = LoadZeros(zmin, (pack_index/6),
                                        pack_mask << comp_shift, level_shift);
-                    zmax = LoadOnes(zmax, ((pack_index+5)/6),
+                    zmax = LoadOnes(zmax, (pack_index/6),
                                     pack_mask << comp_shift, level_shift);
                     break;
 
                 case 5: // val_bit && max_bit
-                    zmin = LoadZeros(zmin, ((pack_index+5)/6),
+                    zmin = LoadZeros(zmin, (pack_index/6),
                                      pack_mask << comp_shift, level_shift);
                     break;
 
