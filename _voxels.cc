@@ -469,12 +469,26 @@ voxtk::VoxelField DeserialiseRegion(std::string const& file_path)
 
 #endif
 
+#if 0
     voxtk::VoxelField copy{};
     copy.DeclareLayer(0, numtk::vec3<uint8_t>{ 0, 0, 0 });
     copy.SetField({ 0, 0, 0 }, output);
     output.SetField({ 704, 0, 0 }, copy);
     output.SetField({ 0, 1000, 0 }, copy);
+    output.SetField({ 704, 1000, 0 }, copy);
+
     output.SetField({ 0, 0, 1496 }, copy);
+    output.SetField({ 704, 0, 1496 }, copy);
+    output.SetField({ 0, 1000, 1496 }, copy);
+    output.SetField({ 704, 1000, 1496 }, copy);
+#endif
+
+#if 0
+    output.SetField({ 0, 0, 704 }, copy);
+    output.SetField({ 704, 0, 704 }, copy);
+    output.SetField({ 0, 1000, 704 }, copy);
+    output.SetField({ 704, 1000, 704 }, copy);
+#endif
 
     //output.SetField({ 4096, 0, 4096 }, copy);
 
@@ -506,16 +520,6 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
     constexpr uint32_t kChunkSize = VOXEL_CHUNK_SIZE;
     constexpr uint32_t kKernelSize = voxtk::VoxelMask::kKernelSize;
     constexpr uint32_t kLevelSize = kChunkSize*kKernelSize;
-    constexpr uint32_t kChunkVolume = kChunkSize*kChunkSize*kChunkSize;
-
-    uint32_t kChunkMortonMask = (kChunkSize - 1u);
-    uint32_t kChunkMortonShift = (uint32_t)std::popcount(kChunkMortonMask);
-
-    constexpr uint32_t kKernelMortonMask = 0x3;
-    constexpr uint32_t kKernelMortonShift = 2;
-
-    uint32_t kLevelMortonShift = (kChunkMortonShift+kKernelMortonShift)*3;
-
     uint32_t log_level_size = (uint32_t)numtk::BitTrailingZeroCount(kLevelSize);
 
     numtk::vec3u area_size = region.bounds.extent().cast<uint32_t>();
@@ -525,16 +529,17 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
         (uint32_t)(64 - numtk::BitLeadingZeroCount(area_size.z - 1))
     };
 
-    uint32_t max_log_area_size = std::max(log_area_size.x,
-                                          std::max(log_area_size.y, log_area_size.z));
-    uint32_t max_area_size = (std::max(area_size.x, std::max(area_size.y, area_size.z))
-                              + (kKernelSize-1)) / kKernelSize;
+    uint32_t depth = [&](){
+        uint32_t max_log_area_size = std::max(log_area_size.x,
+                                              std::max(log_area_size.y, log_area_size.z));
+        uint32_t max_area_size = (std::max(area_size.x, std::max(area_size.y, area_size.z))
+                                  + (kKernelSize-1)) / kKernelSize;
 
-    uint32_t depth = (uint32_t)((max_log_area_size + (log_level_size-1)) / log_level_size);
-    assert(depth < 4);
+        uint32_t depth = (uint32_t)((max_log_area_size + (log_level_size-1)) / log_level_size);
+        assert(depth < 4);
 
-    uint32_t kScaleRatio = max_area_size / kChunkSize;
-    uint32_t kLogScale = (uint32_t)std::popcount((kChunkSize*4) - 1u);
+        return depth;
+    }();
 
     VoxelFieldRenderParams render_params = VoxelFieldSetupRender(kChunkSize);
 
@@ -557,7 +562,6 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
         src = &lods[lod_index];
     }
 
-#if 1
     uint32_t current_offset = 1u;
     assert((uint32_t)lods.size() == depth);
     for (uint32_t index = 1u; index < depth; ++index)
@@ -745,352 +749,6 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
         }
     }
 
-#else
-
-    uint32_t current_offset = 1u;
-    uint32_t _current_offset = 1u;
-    uint32_t group_size = 1u;
-
-    uint32_t chunk_mask = 0;
-    uint32_t kernel_mask = 0;
-    uint32_t shift_depth = 0;
-
-    uint32_t lod_count = lods.size()-1;
-    for (uint32_t level_index = 0u; level_index < lod_count;
-         ++level_index
-         , chunk_mask = (kChunkMortonMask << (3*kKernelMortonShift)) | (chunk_mask << kLevelMortonShift)
-         , kernel_mask = kKernelMortonMask | (kernel_mask << kLevelMortonShift)
-         , shift_depth += kLevelMortonShift)
-    {
-        uint32_t lod_index = lod_count-1 - level_index;
-        voxtk::VoxelField const& lod = lods[lod_count-1 - level_index];
-        numtk::vec3u lod_size = lod.bounds.extent().cast<uint32_t>();
-        numtk::vec3u nextlod_size = numtk::max(lod_size / (kChunkSize * 4),
-                                               numtk::vec3u::Constant(1));
-        numtk::vec3u nextlod_kernelcount = numtk::max(nextlod_size / 4,
-                                                    numtk::vec3u::Constant(1));
-        numtk::vec3u nextlod_kernelsize = (level_index == 0)
-            ? numtk::vec3u{ 4, 4, 4 }
-            : numtk::min(lods[lod_count-level_index].bounds.extent().cast<uint32_t>(),
-                         numtk::vec3u{ 4, 4, 4 });
-
-        uint32_t nextlod_count = 1u << shift_depth;
-
-#if 0
-        uint32_t voxel_index = 0u;
-        voxtk::VoxelField const& source = lod;
-        voxtk::VoxelField const& target = lods[lod_count - level_index];
-        uint64_t target_count = target.Popcount();
-        std::vector<uint32_t> offset_storage = {};
-        offset_storage.resize(target_count * kChunkVolume);
-        std::vector<uint64_t> masks_storage = {};
-        masks_storage.resize(target_count * kChunkVolume);
-        std::vector<uint32_t*> offsets = {};
-        std::vector<uint64_t*> masks = {};
-        offsets.resize(target_count);
-        masks.resize(target_count);
-        for (uint64_t point_index = 0ull; point_index < target_count; ++point_index)
-        {
-            offsets[point_index] = &offset_storage[point_index * kChunkVolume];
-            masks[point_index] = &masks_storage[point_index * kChunkVolume];
-        }
-
-        _current_offset += VoxelFieldRenderLayout(source,
-                                                  target,
-                                                  kChunkSize,
-                                                  _current_offset,
-                                                  level_index,
-                                                  masks,
-                                                  offsets);
-#endif
-
-        numtk::vec3u indexing_masks{
-            chunk_mask | kernel_mask,
-            (chunk_mask << kChunkMortonShift) | (kernel_mask << kKernelMortonShift),
-            (chunk_mask << (kChunkMortonShift * 2)) | (kernel_mask << (kKernelMortonShift * 2))
-        };
-
-        for (uint32_t index = 0u; index < nextlod_count; ++index)
-        {
-            std::vector<uint32_t> level_offsets{};
-
-            numtk::vec3u const nextlod_base{
-                numtk::BitExtract(index, indexing_masks.x),
-                numtk::BitExtract(index, indexing_masks.y),
-                numtk::BitExtract(index, indexing_masks.z)
-            };
-
-            if (level_index != 0u
-                && !lods[lod_count - level_index].Test(nextlod_base.cast<int32_t>()))
-                continue;
-
-            numtk::vec3u const lod_base = nextlod_base * kChunkSize*4;
-
-            numtk::vec3u const valid_range{
-                std::min(kChunkSize, std::max((lod_size.x-lod_base.x)/4u, 1u)),
-                std::min(kChunkSize, std::max((lod_size.y-lod_base.y)/4u, 1u)),
-                std::min(kChunkSize, std::max((lod_size.z-lod_base.z)/4u, 1u))
-            };
-
-#if 0
-            package.masks.push_back(
-                vulkan->CreateTexture(
-                    kChunkSize, kChunkSize, kChunkSize,
-                    VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
-                    VK_IMAGE_USAGE_SAMPLED_BIT,
-                    [&lod, &lod_base, &level_offsets, &valid_range, &current_offset, lod_index, kChunkSize](void* mapped_data) {
-                        uint64_t* output = (uint64_t*)mapped_data;
-
-                        for (uint32_t zindex = 0; zindex < valid_range.z; ++zindex)
-                        {
-                            for (uint32_t yindex = 0; yindex < valid_range.y; ++yindex)
-                            {
-                                for (uint32_t xindex = 0; xindex < valid_range.x; ++xindex)
-                                {
-                                    numtk::vec3i base = (numtk::vec3u{
-                                        xindex * 4,
-                                        yindex * 4,
-                                        zindex * 4
-                                    } + lod_base).cast<int32_t>();
-
-                                    uint64_t bits = lod.TestKernel(base);
-                                    output[xindex + yindex*kChunkSize + zindex*kChunkSize*kChunkSize] = bits;
-
-                                    level_offsets.push_back(current_offset);
-                                    current_offset += std::popcount(bits);
-                                }
-
-                                if (valid_range.x != kChunkSize)
-                                {
-                                    level_offsets.resize(level_offsets.size()
-                                                         + (kChunkSize-valid_range.x),
-                                                         current_offset);
-
-                                    std::memset(output +
-                                                valid_range.x +
-                                                yindex*kChunkSize +
-                                                zindex*kChunkSize*kChunkSize,
-                                                0,
-                                                sizeof(uint64_t) * (kChunkSize-valid_range.x));
-                                }
-                            }
-
-                            if (valid_range.y != kChunkSize)
-                            {
-                                level_offsets.resize(level_offsets.size()
-                                                     + (kChunkSize-valid_range.y)*kChunkSize,
-                                                     current_offset);
-
-                                std::memset(output +
-                                            valid_range.y*kChunkSize +
-                                            zindex*kChunkSize*kChunkSize,
-                                            0,
-                                            sizeof(uint64_t) * (kChunkSize-valid_range.y)*kChunkSize);
-                            }
-                        }
-
-                        if (valid_range.z != kChunkSize)
-                        {
-                            level_offsets.resize(level_offsets.size()
-                                                 + (kChunkSize-valid_range.z)*kChunkSize*kChunkSize,
-                                                 current_offset);
-
-                            std::memset(output +
-                                        valid_range.z*kChunkSize*kChunkSize,
-                                        0,
-                                        sizeof(uint64_t) * (kChunkSize-valid_range.z)*kChunkSize*kChunkSize);
-                        }
-                    }
-                )
-            );
-
-            assert(0 == std::memcmp(level_offsets.data(), offsets[voxel_index],
-                                    kChunkVolume*sizeof(uint32_t)));
-
-            package.offsets.push_back(
-                vulkan->CreateTexture(
-                    kChunkSize, kChunkSize, kChunkSize,
-                    VK_IMAGE_TYPE_3D, VK_FORMAT_R32_UINT,
-                    VK_IMAGE_USAGE_SAMPLED_BIT,
-                    [&level_offsets, &valid_range, kChunkSize](void* mapped_data) {
-                        uint32_t* output = (uint32_t*)mapped_data;
-                        std::memcpy(output, level_offsets.data(), kChunkSize*kChunkSize*kChunkSize*sizeof(uint32_t));
-                    }
-                )
-            );
-
-#else
-            package.masks.push_back(
-                vulkan->CreateTexture(
-                    kChunkSize, kChunkSize, kChunkSize,
-                    VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
-                    VK_IMAGE_USAGE_SAMPLED_BIT,
-                    [data = masks[voxel_index], kChunkSize](void* mapped_data){
-                        std::memcpy(mapped_data,
-                                    data,
-                                    kChunkSize*kChunkSize*kChunkSize*sizeof(uint64_t));
-                    }
-                )
-            );
-
-            package.offsets.push_back(
-                vulkan->CreateTexture(
-                    kChunkSize, kChunkSize, kChunkSize,
-                    VK_IMAGE_TYPE_3D, VK_FORMAT_R32_UINT,
-                    VK_IMAGE_USAGE_SAMPLED_BIT,
-                    [data = offsets[voxel_index], kChunkSize](void* mapped_data) {
-                        std::memcpy(mapped_data,
-                                    data,
-                                    kChunkSize*kChunkSize*kChunkSize*sizeof(uint32_t));
-                    }
-                )
-            );
-
-            ++voxel_index;
-#endif
-        }
-    }
-
-#endif
-
-#if 0
-    uint32_t max_fence_count = 0u;
-
-    vktk::CommandBuffer upload_commands = vulkan->CreateCommandBuffer(vulkan->present_queue);
-    upload_commands.Begin();
-
-    uint32_t shift_depth = render_params.LevelShift() * (depth-1);
-
-    package.leaves_begin = package.masks.size();
-    uint32_t level1_count = 1 << shift_depth;
-    for (uint32_t index = 0u; index < level1_count; ++index)
-    {
-        numtk::vec3u const lod1_base = render_params.IndexPoint(index);
-
-        if (!lods[0].Test(lod1_base.cast<int32_t>()))
-            continue;
-
-        numtk::vec3u const lod0_base = lod1_base * render_params.NodeSize();
-
-        std::vector<vktk::ImageTransition> pre_transitions = {};
-        std::vector<vktk::ImageTransition> post_transitions = {};
-
-        vktk::Texture mask = vulkan->CreateTexture(
-            kChunkSize, kChunkSize, kChunkSize,
-            VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
-            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
-        package.masks.push_back(mask);
-
-        pre_transitions.push_back(vktk::ImageTransition{
-            mask.image,
-            VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT,
-            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            VK_IMAGE_ASPECT_COLOR_BIT,
-        });
-
-        post_transitions.push_back(vktk::ImageTransition{
-            mask.image,
-            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            VK_IMAGE_ASPECT_COLOR_BIT,
-        });
-
-        vktk::Texture payload = {};
-        if (region.HasLayer(0))
-        {
-            payload = vulkan->CreateTexture(
-                render_params.NodeSize(), render_params.NodeSize(), render_params.NodeSize(),
-                VK_IMAGE_TYPE_3D, VK_FORMAT_R8G8B8A8_UNORM,
-                VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
-            package.payloads.push_back(payload);
-
-            pre_transitions.push_back(vktk::ImageTransition{
-                payload.image,
-                VK_ACCESS_NONE, VK_ACCESS_TRANSFER_WRITE_BIT,
-                VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                VK_IMAGE_ASPECT_COLOR_BIT
-            });
-
-            post_transitions.push_back(vktk::ImageTransition{
-                payload.image,
-                VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                VK_IMAGE_ASPECT_COLOR_BIT
-            });
-        }
-
-        upload_commands.ImageTransitions(VK_PIPELINE_STAGE_HOST_BIT,
-                                         VK_PIPELINE_STAGE_TRANSFER_BIT,
-                                         pre_transitions);
-
-        upload_commands.UpdateTexture(
-            mask,
-            VkOffset3D{ 0, 0, 0 },
-            VkExtent3D{ kChunkSize, kChunkSize, kChunkSize },
-            [&region, &lod0_base, kChunkSize](void* mapped_data) {
-                uint64_t* output = (uint64_t*)mapped_data;
-                for (uint32_t zindex = 0; zindex < kChunkSize; ++zindex)
-                {
-                    for (uint32_t yindex = 0; yindex < kChunkSize; ++yindex)
-                    {
-                        for (uint32_t xindex = 0; xindex < kChunkSize; ++xindex)
-                        {
-                            numtk::vec3 base = numtk::vec3u{
-                                xindex * 4,
-                                yindex * 4,
-                                zindex * 4
-                            } + lod0_base;
-
-                            uint64_t bits = region.TestKernel(base.cast<int32_t>());
-                            output[xindex + yindex*kChunkSize + zindex*kChunkSize*kChunkSize] = bits;
-                        }
-                    }
-                }
-            }
-        );
-
-        if (payload.image != VK_NULL_HANDLE)
-            upload_commands.UpdateTexture(
-                payload,
-                VkOffset3D{ 0, 0, 0 },
-                VkExtent3D{ kChunkSize * 4, kChunkSize * 4, kChunkSize * 4 },
-                [&region, &lod0_base, kChunkSize](void* mapped_data) {
-                    uint32_t extent = kChunkSize * 4;
-                    numtk::vec4<uint8_t>* output = (numtk::vec4<uint8_t>*)mapped_data;
-                    for (uint32_t zindex = 0; zindex < extent; ++zindex)
-                    {
-                        for (uint32_t yindex = 0; yindex < extent; ++yindex)
-                        {
-                            for (uint32_t xindex = 0; xindex < extent; ++xindex)
-                            {
-                                numtk::vec3<uint8_t> const& data =
-                                    region.LoadData<numtk::vec3<uint8_t>>(
-                                        (lod0_base + numtk::vec3u{ xindex, yindex, zindex })
-                                        .cast<int32_t>(),
-                                        0);
-
-                                output[xindex
-                                       + yindex*extent
-                                       + zindex*extent*extent] = numtk::vec4<uint8_t>{
-                                    data.x, data.y, data.z, 0
-                                };
-                            }
-                        }
-                    }
-                }
-            );
-
-        upload_commands.ImageTransitions(VK_PIPELINE_STAGE_TRANSFER_BIT,
-                                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                                         post_transitions);
-
-        max_fence_count = std::max(max_fence_count, vulkan->fence_count);
-    }
-
-    upload_commands.End();
-    upload_commands.Submit();
-#endif
-
     return package;
 }
 
@@ -1186,19 +844,12 @@ voxtk::VoxelField VoxelFieldDownsample(voxtk::VoxelField const& source, uint32_t
 
 uint32_t VoxelFieldRenderLayout(voxtk::VoxelField const& source,
                                 voxtk::VoxelField const& target,
-                                //uint32_t size_factor,
                                 VoxelFieldRenderParams const& render_params,
                                 uint32_t base_offset,
                                 uint32_t lod_index,
                                 std::vector<uint64_t*> const& masks,
                                 std::vector<uint32_t*> const& offsets)
 {
-    systk::Timer scope_time{ "VoxelFieldRenderLayout",
-        [](std::string const& tag, float time) {
-            std::cout << "[" << tag << "] " << time << " s" << std::endl;
-        }
-    };
-
     assert(masks.size() == offsets.size());
 
     uint32_t downsample_size = render_params.NodeSize();
