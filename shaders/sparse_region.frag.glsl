@@ -86,6 +86,7 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
     bool hit = false;
     vec3 output_value = vec3(0.0);
     float t = 0.0;
+    uint depth_bypass = stack_depth;
 
     int depth = 0;
     DDAContext ctx = InitDDAContext(org, dir, node_size);
@@ -166,6 +167,18 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
                     hit = true;
                     if (depth < stack_depth)
                     {
+                        uint base_offset = texture(offsets[nonuniformEXT(current_tex)],
+                                                   ctx_cache[depth-1].voxel_coords).x;
+
+                        if (base_offset == 0xffffffff)
+                        {
+                            output_value = HitNormalDDAContext(ctx);
+                            payload = vec3(1.0);
+                            depth_bypass = depth;
+                            depth = stack_depth+1;
+                            break;
+                        }
+
                         ctx_cache[depth] = SaveDDAContext(ctx);
                         org_cache[depth] = org;
                         tex_index[depth] = current_tex;
@@ -174,9 +187,7 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
                         if (side_index == 1)
                             offset += bitCount(data[depth-1][0]);
 
-                        current_tex = offset +
-                            texture(offsets[nonuniformEXT(current_tex)],
-                                    ctx_cache[depth-1].voxel_coords).x;
+                        current_tex = offset + base_offset;
 
                         org = RecursionPointDDAContext(ctx, org, dir, CHUNK_SIZE);
                         ctx = InitDDAContext(org, dir, node_size);
@@ -213,7 +224,7 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
             else if (depth > stack_depth)
             {
                 float level_size = 1.0;
-                for (uint index = 0; index < stack_depth; index++)
+                for (uint index = 0; index < min(depth_bypass, stack_depth); index++)
                 {
                     float voxel_count = ((index & 1) != 0 ? CHUNK_SIZE : node_size);
                     t += DDAContextSaveT(ctx_cache[index], dir, voxel_count) * level_size;
