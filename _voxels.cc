@@ -80,20 +80,6 @@ struct VoxelRegionPackage
     std::vector<vktk::Texture> payloads{};
 };
 
-struct VoxelRegionUpload
-{
-    //std::vector<voxtk::VoxelField> lods{};
-    std::vector<vktk::DeferredStagingUpload> masks{};
-    std::vector<vktk::DeferredStagingUpload> offsets{};
-    std::vector<vktk::DeferredStagingUpload> payloads{};
-};
-
-VoxelRegionUpload PrepareRegionUpload(vktk::Context* vulkan,
-                                      voxtk::VoxelField const& region);
-
-VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
-                                     voxtk::VoxelField const& region);
-
 struct VoxelFieldRenderParams
 {
     uint32_t chunk_size;
@@ -120,6 +106,28 @@ struct VoxelFieldRenderParams
         };
     }
 };
+
+struct VoxelRegionLevel
+{
+    std::vector<vktk::DeferredStagingUpload> masks{};
+    std::vector<vktk::DeferredStagingUpload> offsets{};
+    std::vector<vktk::DeferredStagingUpload> payloads{};
+};
+
+struct VoxelRegionUpload
+{
+    voxtk::VoxelField const* base = nullptr;
+    std::vector<voxtk::VoxelField> lods{};
+    std::vector<VoxelRegionLevel> levels{};
+    VoxelFieldRenderParams render_params{};
+    VoxelRegionPackage package{};
+};
+
+std::future<VoxelRegionUpload> PrepareRegionUpload(vktk::Context* vulkan,
+                                                   voxtk::VoxelField const& region);
+
+VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
+                                     voxtk::VoxelField const& region);
 
 VoxelFieldRenderParams VoxelFieldSetupRender(uint32_t chunk_size);
 
@@ -201,10 +209,11 @@ struct voxel_state_t
 
     numtk::vec3i stencil_location{ 0, 0, 0 };
     voxtk::VoxelField initial_region;
-    voxtk::VoxelField voxel_region{};
+    mutable voxtk::VoxelField voxel_region{};
 
     mutable VoxelRegionPackage region_package;
     mutable std::future<VoxelRegionFuture> region_future = {};
+    mutable std::future<VoxelRegionUpload> region_upload = {};
 };
 
 struct MatrixBlock
@@ -507,6 +516,276 @@ voxtk::VoxelField DeserialiseRegion(std::string const& file_path)
 #endif
     return output;
 }
+
+std::future<VoxelRegionUpload> PrepareRegionUpload(vktk::Context* vulkan,
+                                                   voxtk::VoxelField const& region)
+{
+    systk::Timer scope_time{ "PrepareRegionUpload",
+        [](std::string const& tag, float time) {
+            std::cout << "[" << tag << "] " << time << " s" << std::endl;
+        }
+    };
+
+    constexpr uint32_t kChunkSize = VOXEL_CHUNK_SIZE;
+    constexpr uint32_t kKernelSize = voxtk::VoxelMask::kKernelSize;
+    constexpr uint32_t kLevelSize = kChunkSize*kKernelSize;
+
+    uint32_t log_level_size = (uint32_t)numtk::BitTrailingZeroCount(kLevelSize);
+    numtk::vec3u area_size = region.bounds.extent().cast<uint32_t>();
+    numtk::vec3u log_area_size{
+        (uint32_t)(64 - numtk::BitLeadingZeroCount(area_size.x - 1)),
+        (uint32_t)(64 - numtk::BitLeadingZeroCount(area_size.y - 1)),
+        (uint32_t)(64 - numtk::BitLeadingZeroCount(area_size.z - 1))
+    };
+
+    uint32_t depth = [&](){
+        uint32_t max_log_area_size = std::max(log_area_size.x,
+                                              std::max(log_area_size.y, log_area_size.z));
+        uint32_t max_area_size = (std::max(area_size.x, std::max(area_size.y, area_size.z))
+                                  + (kKernelSize-1)) / kKernelSize;
+
+        uint32_t depth = (uint32_t)((max_log_area_size + (log_level_size-1)) / log_level_size);
+        assert(depth < 4);
+
+        return depth;
+    }();
+
+    VoxelRegionUpload upload = {};
+    upload.base = &region;
+    upload.levels.resize(depth+1);
+    upload.render_params = VoxelFieldSetupRender(kChunkSize);
+
+    VoxelRegionPackage& package = upload.package;
+    package.stack_depth = depth*2;
+    package.display_depth = package.stack_depth;
+    package.area_scale = numtk::vec3f::Constant(1.f) / numtk::vec3f{
+        (float)(1u << ((log_level_size * depth) - log_area_size.x)),
+        (float)(1u << ((log_level_size * depth) - log_area_size.y)),
+        (float)(1u << ((log_level_size * depth) - log_area_size.z))
+    };
+    package.area_size = (numtk::vec3u::Constant(1) << log_area_size).cast<float>();
+
+    voxtk::VoxelField const* src = &region;
+    for (uint32_t lod_index = 0; lod_index < depth; ++lod_index)
+    {
+        upload.lods.push_back(VoxelFieldDownsample(*src, kChunkSize));
+        src = &upload.lods[lod_index];
+    }
+
+    for (uint32_t index = 1u; index < depth; ++index)
+    {
+        uint32_t lod_index = (depth-1) - index;
+        VoxelRegionLevel& level = upload.levels[lod_index+1];
+        voxtk::VoxelField const& source = upload.lods[lod_index];
+        voxtk::VoxelField const& target = upload.lods[lod_index+1];
+        uint64_t target_count = target.Popcount();
+
+        level.masks.resize(target_count);
+        level.offsets.resize(target_count);
+
+        for (uint64_t point_index = 0ull; point_index < target_count; ++point_index)
+        {
+            package.masks.push_back(vulkan->CreateTexture(
+                                        kChunkSize, kChunkSize, kChunkSize,
+                                        VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
+                                        VK_IMAGE_USAGE_SAMPLED_BIT,
+                                        vktk::ImageSyncTriplet{
+                                            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                            VK_ACCESS_SHADER_READ_BIT,
+                                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                        },
+                                        level.masks[point_index]
+                                    ));
+
+            package.offsets.push_back(vulkan->CreateTexture(
+                                          kChunkSize, kChunkSize, kChunkSize,
+                                          VK_IMAGE_TYPE_3D, VK_FORMAT_R32_UINT,
+                                          VK_IMAGE_USAGE_SAMPLED_BIT,
+                                          vktk::ImageSyncTriplet{
+                                            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                            VK_ACCESS_SHADER_READ_BIT,
+                                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                          },
+                                          level.offsets[point_index]
+                                      ));
+        }
+    }
+
+    {
+        package.leaves_begin = package.masks.size();
+
+        uint64_t level1_popcount = upload.lods[0].Popcount();
+        VoxelRegionLevel& level = upload.levels[0];
+
+        level.masks.resize(level1_popcount);
+        if (region.HasLayer(0))
+            level.payloads.resize(level1_popcount);
+
+        for (uint64_t point_index = 0; point_index < level1_popcount; ++point_index)
+        {
+            package.masks.push_back(vulkan->CreateTexture(
+                                        kChunkSize, kChunkSize, kChunkSize,
+                                        VK_IMAGE_TYPE_3D, VK_FORMAT_R32G32_UINT,
+                                        VK_IMAGE_USAGE_SAMPLED_BIT,
+                                        vktk::ImageSyncTriplet{
+                                            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                            VK_ACCESS_SHADER_READ_BIT,
+                                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                        },
+                                        level.masks[point_index]
+                                    ));
+
+            if (region.HasLayer(0))
+            {
+                package.payloads.push_back(
+                    vulkan->CreateTexture(
+                        upload.render_params.NodeSize(),
+                        upload.render_params.NodeSize(),
+                        upload.render_params.NodeSize(),
+                        VK_IMAGE_TYPE_3D, VK_FORMAT_R8G8B8A8_UNORM,
+                        VK_IMAGE_USAGE_SAMPLED_BIT,
+                        vktk::ImageSyncTriplet{
+                            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                            VK_ACCESS_SHADER_READ_BIT,
+                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                        },
+                        level.payloads[point_index]));
+            }
+        }
+    }
+
+    return std::async(
+        std::launch::async,
+        [](VoxelRegionUpload args) -> VoxelRegionUpload {
+
+            systk::Timer scope_time{ "RegionCopy",
+                [](std::string const& tag, float time) {
+                    std::cout << "[" << tag << "] " << time << " s" << std::endl;
+                }
+            };
+
+            uint32_t depth = (uint32_t)args.lods.size();
+            uint32_t current_offset = 1u;
+
+            for (uint32_t index = 1u; index < depth; ++index)
+            {
+                uint32_t lod_index = (depth-1) - index;
+                voxtk::VoxelField const& source = args.lods[lod_index];
+                voxtk::VoxelField const& target = args.lods[lod_index+1];
+
+                uint64_t target_count = target.Popcount();
+                std::vector<uint32_t*> offsets = {};
+                std::vector<uint64_t*> masks = {};
+                offsets.resize(target_count);
+                masks.resize(target_count);
+
+                for (uint64_t point_index = 0ull; point_index < target_count; ++point_index)
+                {
+                    masks[point_index] =
+                        (uint64_t*)args.levels[lod_index+1].masks[point_index].staging.alloc.map;
+                    offsets[point_index] =
+                        (uint32_t*)args.levels[lod_index+1].offsets[point_index].staging.alloc.map;
+                }
+
+                current_offset += VoxelFieldRenderLayout(source,
+                                                         target,
+                                                         args.render_params,
+                                                         current_offset,
+                                                         index,
+                                                         masks,
+                                                         offsets);
+            }
+
+            {
+                uint32_t shift_depth = args.render_params.LevelShift() * (depth-1);
+                uint32_t level1_count = 1 << shift_depth;
+                uint64_t level1_popcount = args.lods[0].Popcount();
+
+                std::vector<uint64_t*> masks = {};
+                std::vector<numtk::vec4<uint8_t>*> payloads = {};
+
+                masks.resize(level1_popcount);
+                if (!args.levels[0].payloads.empty())
+                    payloads.resize(level1_popcount);
+
+                for (uint64_t point_index = 0; point_index < level1_popcount; ++point_index)
+                {
+                    masks[point_index] =
+                        (uint64_t*)args.levels[0].masks[point_index].staging.alloc.map;
+                    payloads[point_index] =
+                        (numtk::vec4<uint8_t>*)args.levels[0].masks[point_index].staging.alloc.map;
+                }
+
+                voxtk::VoxelField const& region = *args.base;
+                uint32_t node_size = args.render_params.NodeSize();
+                uint64_t buffer_index = 0ull;
+                for (uint32_t point_index = 0u; point_index < level1_count; ++point_index)
+                {
+                    numtk::vec3u const lod1_base = args.render_params.IndexPoint(point_index);
+                    if (!args.lods[0].Test(lod1_base.cast<int32_t>()))
+                        continue;
+
+                    numtk::vec3u const lod0_base = lod1_base * node_size;
+
+                    uint64_t* mask = masks[buffer_index];
+                    numtk::vec4<uint8_t>* payload = !payloads.empty()
+                        ? payloads[buffer_index]
+                        : nullptr;
+
+                    for (uint32_t srcz = 0; srcz < kChunkSize; ++srcz)
+                    {
+                        for (uint32_t srcy = 0; srcy < kChunkSize; ++srcy)
+                        {
+                            for (uint32_t srcx = 0; srcx < kChunkSize; ++srcx)
+                            {
+                                numtk::vec3 kernel_base = numtk::vec3u{
+                                    srcx, srcy, srcz
+                                } * numtk::vec3u::Constant(voxtk::VoxelMask::kKernelSize)
+                                      + lod0_base;
+
+                                uint64_t bits = region.TestKernel(kernel_base.cast<int32_t>());
+                                mask[srcx + srcy*kChunkSize + srcz*kChunkSize*kChunkSize] = bits;
+
+                                if (payload)
+                                {
+                                    for (uint32_t bit_index = 0;
+                                         bit_index < voxtk::VoxelMask::kKernelVolume;
+                                         ++bit_index)
+                                    {
+                                        numtk::vec3u voxel_base = kernel_base
+                                            + args.render_params.IndexPoint(bit_index);
+                                        numtk::vec3u texture_base = voxel_base - lod0_base;
+
+                                        uint32_t payload_index =
+                                            texture_base.x
+                                            + texture_base.y*node_size
+                                            + texture_base.z*node_size*node_size;
+
+                                        numtk::vec3<uint8_t> const& data =
+                                            region.LoadData<numtk::vec3<uint8_t>>(
+                                                voxel_base.cast<int32_t>(),
+                                                0);
+
+                                        payload[payload_index] = numtk::vec4<uint8_t>{
+                                            data.x, data.y, data.z, 0
+                                        };
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    ++buffer_index;
+                }
+            }
+
+            return std::move(args);
+        },
+        std::move(upload)
+    );
+}
+
+
 
 VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                                      voxtk::VoxelField const& region)
@@ -876,6 +1155,7 @@ uint32_t VoxelFieldRenderLayout(voxtk::VoxelField const& source,
                     uint64_t bits = source.TestKernel(kernel_base);
                     masks[point_index] = bits;
                     offsets[point_index] = count + base_offset;
+                    //offsets[point_index] = 0xffffffffu;
                     count += std::popcount(bits);
                 }
             }
@@ -3461,10 +3741,41 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
                 == std::future_status::ready))
         {
             VoxelRegionFuture voxel_region = _rt.state->region_future.get();
+#if 1
+            _rt.state->voxel_region = std::move(voxel_region.region);
+            _rt.state->region_upload = PrepareRegionUpload(_rt.vulkan,
+                                                           _rt.state->voxel_region);
+
+#else
+
             _rt.state->region_package = UploadVoxelRegion(_rt.vulkan,
                                                           voxel_region.region);
             SparseRegionUpdateBindings(_rt, _rt.state->region_package);
+#endif
         }
+
+#if 1
+        if (_rt.state->region_upload.valid()
+            && (_rt.state->region_upload.wait_for(std::chrono::seconds(0))
+                == std::future_status::ready))
+        {
+            VoxelRegionUpload region_upload = _rt.state->region_upload.get();
+
+            for (auto level : region_upload.levels)
+            {
+                for (vktk::DeferredStagingUpload& upload : level.masks)
+                    _rt.vulkan->CommitStaging(upload);
+                for (vktk::DeferredStagingUpload& upload : level.offsets)
+                    _rt.vulkan->CommitStaging(upload);
+                for (vktk::DeferredStagingUpload& upload : level.payloads)
+                    _rt.vulkan->CommitStaging(upload);
+            }
+
+            _rt.state->region_package = std::move(region_upload.package);
+            SparseRegionUpdateBindings(_rt, _rt.state->region_package);
+        }
+#endif
+
 #endif
     };
 
