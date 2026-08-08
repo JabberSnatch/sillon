@@ -713,7 +713,7 @@ std::future<VoxelRegionUpload> PrepareRegionUpload(vktk::Context* vulkan,
                     masks[point_index] =
                         (uint64_t*)args.levels[0].masks[point_index].staging.alloc.map;
                     payloads[point_index] =
-                        (numtk::vec4<uint8_t>*)args.levels[0].masks[point_index].staging.alloc.map;
+                        (numtk::vec4<uint8_t>*)args.levels[0].payloads[point_index].staging.alloc.map;
                 }
 
                 voxtk::VoxelField const& region = *args.base;
@@ -1662,6 +1662,7 @@ void Draw(void* _pstate,
 #endif
 
     _vulkan->ScheduleFenceDestroy(_state->last_submit);
+    _state->last_submit = VK_NULL_HANDLE;
 
 #if 0
     std::cout << "[VoxelsDraw] submitted on fence "
