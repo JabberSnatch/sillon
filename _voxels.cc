@@ -712,8 +712,9 @@ std::future<VoxelRegionUpload> PrepareRegionUpload(vktk::Context* vulkan,
                 {
                     masks[point_index] =
                         (uint64_t*)args.levels[0].masks[point_index].staging.alloc.map;
-                    payloads[point_index] =
-                        (numtk::vec4<uint8_t>*)args.levels[0].payloads[point_index].staging.alloc.map;
+                    if (!payloads.empty())
+                        payloads[point_index] =
+                            (numtk::vec4<uint8_t>*)args.levels[0].payloads[point_index].staging.alloc.map;
                 }
 
                 voxtk::VoxelField const& region = *args.base;
