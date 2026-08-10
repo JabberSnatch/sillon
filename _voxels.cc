@@ -1978,6 +1978,8 @@ vkrg::layout::DispatchStage SparseRegionDispatchStageInfo()
         {
             { VK_SHADER_STAGE_ALL, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
               0, 1 },
+            { VK_SHADER_STAGE_ALL, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+              0, 1 },
         }
     });
 
@@ -2600,6 +2602,7 @@ struct SparsePipelinePayload
     VkSampler nearest_sampler;
     vktk::Buffer matrix_buffer;
     vktk::Buffer staging_buffer;
+    vktk::Buffer residency_buffer;
 };
 
 dispatch_runtime_t SparseRenderingPipeline(
@@ -2809,6 +2812,24 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt, VoxelRegionPackage cons
             0,
             vkrg::bind::ShaderResources{
                 .buffers = { matrix_buffer_info }
+            })
+    );
+
+    VkDescriptorBufferInfo residency_buffer_info = {};
+    residency_buffer_info.buffer = payload.residency_buffer;
+    residency_buffer_info.offset = 0;
+    residency_buffer_info.range = (_region_package.offsets.size() + 31) / 32;
+
+    desc_writes.push_back(
+        _rt.Context().BindShaderResource(
+            sparse_region_node,
+            vkrg::layout::BindingPoint{
+                .type = vkrg::layout::BindingType_Shader,
+                .shader = { 0, 1 }
+            },
+            0,
+            vkrg::bind::ShaderResources{
+                .buffers = { residency_buffer_info }
             })
     );
 
@@ -3689,6 +3710,10 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
             sizeof(MatrixBlock),
             VK_BUFFER_USAGE_TRANSFER_DST_BIT
             | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+
+        payload.residency_buffer = _rt.vulkan->CreateBuffer(
+            sizeof(uint32_t) * 1024,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 
         MatrixBlock* matrix = (MatrixBlock*)payload.staging_buffer.alloc.map;
         matrix->projection = numtk::mat4f::Constant(0.f);

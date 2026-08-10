@@ -17,6 +17,10 @@ layout(std140, set = 0, binding = 0) uniform MatrixBlock {
     ivec2 screen_size;
 };
 
+layout(std140, set = 0, binding = 1) buffer ResidencyBlock {
+    uint residency_mask[];
+};
+
 layout(push_constant, std430) uniform PushConstants {
     vec3 light_dir;
 
@@ -188,6 +192,15 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
                             offset += bitCount(data[depth-1][0]);
 
                         current_tex = offset + base_offset;
+
+                        if (0 == ((residency_mask[current_tex / 32] >> (current_tex & 0x1fu)) & 1u))
+                        {
+                            output_value = HitNormalDDAContext(ctx);
+                            payload = vec3(1.0);
+                            depth_bypass = depth;
+                            depth = stack_depth+1;
+                            break;
+                        }
 
                         org = RecursionPointDDAContext(ctx, org, dir, CHUNK_SIZE);
                         ctx = InitDDAContext(org, dir, node_size);
