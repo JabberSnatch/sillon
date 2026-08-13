@@ -109,9 +109,9 @@ struct VoxelFieldRenderParams
 
 struct VoxelRegionLevel
 {
-    std::vector<vktk::DeferredStagingUpload> masks{};
-    std::vector<vktk::DeferredStagingUpload> offsets{};
-    std::vector<vktk::DeferredStagingUpload> payloads{};
+    std::vector<vktk::DeferredUpload> masks{};
+    std::vector<vktk::DeferredUpload> offsets{};
+    std::vector<vktk::DeferredUpload> payloads{};
 };
 
 struct VoxelRegionUpload
@@ -842,6 +842,8 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
         src = &lods[lod_index];
     }
 
+    std::vector<vktk::DeferredUpload> pending_uploads = {};
+
     uint32_t current_offset = 1u;
     assert((uint32_t)lods.size() == depth);
     for (uint32_t index = 1u; index < depth; ++index)
@@ -856,8 +858,8 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
         offsets.resize(target_count);
         masks.resize(target_count);
 
-        std::vector<vktk::DeferredStagingUpload> masks_uploads = {};
-        std::vector<vktk::DeferredStagingUpload> offsets_uploads = {};
+        std::vector<vktk::DeferredUpload> masks_uploads = {};
+        std::vector<vktk::DeferredUpload> offsets_uploads = {};
         masks_uploads.resize(target_count);
         offsets_uploads.resize(target_count);
 
@@ -915,8 +917,8 @@ VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
         uint64_t level1_popcount = lods[0].Popcount();
         std::vector<uint64_t*> masks = {};
         std::vector<numtk::vec4<uint8_t>*> payloads = {};
-        std::vector<vktk::DeferredStagingUpload> masks_uploads = {};
-        std::vector<vktk::DeferredStagingUpload> payloads_uploads = {};
+        std::vector<vktk::DeferredUpload> masks_uploads = {};
+        std::vector<vktk::DeferredUpload> payloads_uploads = {};
 
         masks.resize(level1_popcount);
         masks_uploads.resize(level1_popcount);
@@ -3790,11 +3792,11 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
 
             for (auto level : region_upload.levels)
             {
-                for (vktk::DeferredStagingUpload& upload : level.masks)
+                for (vktk::DeferredUpload& upload : level.masks)
                     _rt.vulkan->CommitStaging(upload);
-                for (vktk::DeferredStagingUpload& upload : level.offsets)
+                for (vktk::DeferredUpload& upload : level.offsets)
                     _rt.vulkan->CommitStaging(upload);
-                for (vktk::DeferredStagingUpload& upload : level.payloads)
+                for (vktk::DeferredUpload& upload : level.payloads)
                     _rt.vulkan->CommitStaging(upload);
             }
 

@@ -1849,7 +1849,7 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
                                ImageSyncTriplet const& _sync,
                                std::function<void(void*)> const& _upload_callback)
 {
-    DeferredStagingUpload upload = {};
+    DeferredUpload upload = {};
     Texture result = CreateTexture(_width, _height, _depth, _type, _format,
                                    _usage | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                                    _sync, upload);
@@ -1866,7 +1866,7 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
 Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _depth,
                                VkImageType _type, VkFormat _format, VkImageUsageFlags _usage,
                                ImageSyncTriplet const& _sync,
-                               DeferredStagingUpload& _upload)
+                               DeferredUpload& _upload)
 {
     Texture result = CreateTexture(_width, _height, _depth, _type, _format,
                                    _usage | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
@@ -1948,7 +1948,7 @@ void Context::DestroyTexture(Texture const& _texture)
     vkDestroyImage(device, _texture.image, nullptr);
 }
 
-void Context::CommitStaging(DeferredStagingUpload& _upload)
+void Context::CommitStaging(DeferredUpload& _upload)
 {
     vktk::CommandBuffer command_buffer = CreateCommandBuffer(present_queue);
     command_buffer.Begin();
@@ -1996,7 +1996,7 @@ void Context::CommitStaging(DeferredStagingUpload& _upload)
 
     ScheduleFenceDestroy(staging_fence);
 
-    _upload = DeferredStagingUpload{};
+    _upload = DeferredUpload{};
 }
 
 VkImageView Context::CreateImageView(Texture const& _texture) const
