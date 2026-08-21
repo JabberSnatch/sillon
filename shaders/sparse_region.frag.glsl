@@ -17,7 +17,7 @@ layout(std140, set = 0, binding = 0) uniform MatrixBlock {
     ivec2 screen_size;
 };
 
-layout(std140, set = 0, binding = 1) buffer ResidencyBlock {
+layout(std430, set = 0, binding = 1) buffer ResidencyBlock {
     uint residency_mask[];
 };
 
@@ -193,7 +193,7 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
 
                         current_tex = offset + base_offset;
 
-                        if (0 == ((residency_mask[current_tex / 32] >> (current_tex & 0x1fu)) & 1u))
+                        if (0 == ((residency_mask[current_tex >> 5] >> (current_tex & 0x1fu)) & 1u))
                         {
                             output_value = HitNormalDDAContext(ctx);
                             payload = vec3(1.0);

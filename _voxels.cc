@@ -2605,6 +2605,7 @@ struct SparsePipelinePayload
     vktk::Buffer matrix_buffer;
     vktk::Buffer staging_buffer;
     vktk::Buffer residency_buffer;
+    uint32_t residency_entry_count;
 };
 
 dispatch_runtime_t SparseRenderingPipeline(
@@ -2729,6 +2730,18 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt, VoxelRegionPackage cons
     SparsePipelinePayload& payload = *(SparsePipelinePayload*)_rt.payload;
 
     {
+        uint32_t residency_entry_count = ((_region_package.masks.size() + 31) / 32);
+        payload.residency_entry_count = residency_entry_count;
+        payload.residency_buffer = _rt.vulkan->CreateBuffer(
+            sizeof(uint32_t) * residency_entry_count,
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            [residency_entry_count](void* _ptr){
+                uint32_t* buffer = (uint32_t*)_ptr;
+                std::memset(buffer, 0xff, residency_entry_count * sizeof(uint32_t));
+            });
+    }
+
+    {
         vkrg::bind::PNextMap pNext_map = {};
 
         static uint32_t desc_counts[3] = { 0u, 0u, 0u };
@@ -2820,7 +2833,7 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt, VoxelRegionPackage cons
     VkDescriptorBufferInfo residency_buffer_info = {};
     residency_buffer_info.buffer = payload.residency_buffer;
     residency_buffer_info.offset = 0;
-    residency_buffer_info.range = (_region_package.offsets.size() + 31) / 32;
+    residency_buffer_info.range = payload.residency_entry_count * sizeof(uint32_t);
 
     desc_writes.push_back(
         _rt.Context().BindShaderResource(
@@ -3680,6 +3693,7 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
         vkDestroySampler(_rt.vulkan->device, payload.nearest_sampler, nullptr);
         _rt.vulkan->DestroyBuffer(payload.matrix_buffer);
         _rt.vulkan->DestroyBuffer(payload.staging_buffer);
+        _rt.vulkan->DestroyBuffer(payload.residency_buffer);
         delete &payload;
     };
 
@@ -3713,9 +3727,7 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
             VK_BUFFER_USAGE_TRANSFER_DST_BIT
             | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
 
-        payload.residency_buffer = _rt.vulkan->CreateBuffer(
-            sizeof(uint32_t) * 1024,
-            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        payload.residency_buffer = {};
 
         MatrixBlock* matrix = (MatrixBlock*)payload.staging_buffer.alloc.map;
         matrix->projection = numtk::mat4f::Constant(0.f);
