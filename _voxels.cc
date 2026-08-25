@@ -6,6 +6,7 @@
 
 #include <numtk.hh>
 #include <dstk.hh>
+#include <plltk.hh>
 
 #include "guitk.hh"
 #include "systk.hh"
@@ -75,9 +76,15 @@ struct VoxelRegionPackage
     int32_t stack_depth;
     int32_t display_depth;
     uint32_t leaves_begin;
+    uint32_t residency_entry_count;
     std::vector<vktk::Texture> masks{};
     std::vector<vktk::Texture> offsets{};
     std::vector<vktk::Texture> payloads{};
+
+    std::unique_ptr<plltk::Mutex> residency_mutex{ new plltk::Mutex{} };
+    vktk::Buffer residency_buffer;
+    vktk::Buffer residency_staging;
+    std::vector<uint32_t> residency_state;
 };
 
 struct VoxelFieldRenderParams
@@ -654,6 +661,24 @@ std::future<VoxelRegionUpload> PrepareRegionUpload(vktk::Context* vulkan,
         }
     }
 
+    package.residency_entry_count = ((package.masks.size() + 31) / 32);
+
+    package.residency_staging = vulkan->CreateBuffer(
+        sizeof(uint32_t) * package.residency_entry_count,
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+        | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    package.residency_buffer = vulkan->CreateBuffer(
+        sizeof(uint32_t) * package.residency_entry_count,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        [entry_count = package.residency_entry_count](void* _ptr){
+            uint32_t* buffer = (uint32_t*)_ptr;
+            std::memset(buffer, 0, entry_count * sizeof(uint32_t));
+        });
+
+    package.residency_state.resize(package.residency_entry_count);
+
     return std::async(
         std::launch::async,
         [](VoxelRegionUpload args) -> VoxelRegionUpload {
@@ -665,7 +690,8 @@ std::future<VoxelRegionUpload> PrepareRegionUpload(vktk::Context* vulkan,
             };
 
             uint32_t depth = (uint32_t)args.lods.size();
-            uint32_t current_offset = 1u;
+            uint32_t base_offset = 1u;
+            uint32_t current_offset = 0u;
 
             for (uint32_t index = 1u; index < depth; ++index)
             {
@@ -687,13 +713,21 @@ std::future<VoxelRegionUpload> PrepareRegionUpload(vktk::Context* vulkan,
                         (uint32_t*)args.levels[lod_index+1].offsets[point_index].staging.alloc.map;
                 }
 
-                current_offset += VoxelFieldRenderLayout(source,
-                                                         target,
-                                                         args.render_params,
-                                                         current_offset,
-                                                         index,
-                                                         masks,
-                                                         offsets);
+                uint32_t node_count = VoxelFieldRenderLayout(source,
+                                                      target,
+                                                      args.render_params,
+                                                      base_offset,
+                                                      index,
+                                                      masks,
+                                                      offsets);
+
+                {
+                    plltk::ScopeLock lock{ *args.package.residency_mutex };
+                    args.package.residency_state[current_offset/32] |= 1u << current_offset%32;
+                }
+
+                current_offset = base_offset;
+                base_offset += node_count;
             }
 
             {
@@ -776,7 +810,13 @@ std::future<VoxelRegionUpload> PrepareRegionUpload(vktk::Context* vulkan,
                         }
                     }
 
+                    {
+                        plltk::ScopeLock lock{ *args.package.residency_mutex };
+                        args.package.residency_state[current_offset/32] |= 1u << current_offset%32;
+                    }
+
                     ++buffer_index;
+                    ++current_offset;
                 }
             }
 
@@ -785,8 +825,6 @@ std::future<VoxelRegionUpload> PrepareRegionUpload(vktk::Context* vulkan,
         std::move(upload)
     );
 }
-
-
 
 VoxelRegionPackage UploadVoxelRegion(vktk::Context* vulkan,
                                      voxtk::VoxelField const& region)
@@ -2604,8 +2642,6 @@ struct SparsePipelinePayload
     VkSampler nearest_sampler;
     vktk::Buffer matrix_buffer;
     vktk::Buffer staging_buffer;
-    vktk::Buffer residency_buffer;
-    uint32_t residency_entry_count;
 };
 
 dispatch_runtime_t SparseRenderingPipeline(
@@ -2729,17 +2765,20 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt, VoxelRegionPackage cons
 {
     SparsePipelinePayload& payload = *(SparsePipelinePayload*)_rt.payload;
 
+#if 0
     {
-        uint32_t residency_entry_count = ((_region_package.masks.size() + 31) / 32);
-        payload.residency_entry_count = residency_entry_count;
+        //uint32_t residency_entry_count = ((_region_package.masks.size() + 31) / 32);
+        //payload.residency_entry_count = residency_entry_count;
         payload.residency_buffer = _rt.vulkan->CreateBuffer(
-            sizeof(uint32_t) * residency_entry_count,
+            sizeof(uint32_t) * _region_package.residency_entry_count,
             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-            [residency_entry_count](void* _ptr){
+            [entry_count = _region_package.residency_entry_count](void* _ptr){
                 uint32_t* buffer = (uint32_t*)_ptr;
-                std::memset(buffer, 0xff, residency_entry_count * sizeof(uint32_t));
+                //std::memset(buffer, 0xff, residency_entry_count * sizeof(uint32_t));
+                std::memset(buffer, 0, residency_entry_count * sizeof(uint32_t));
             });
     }
+#endif
 
     {
         vkrg::bind::PNextMap pNext_map = {};
@@ -2831,9 +2870,9 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt, VoxelRegionPackage cons
     );
 
     VkDescriptorBufferInfo residency_buffer_info = {};
-    residency_buffer_info.buffer = payload.residency_buffer;
+    residency_buffer_info.buffer = _region_package.residency_buffer;
     residency_buffer_info.offset = 0;
-    residency_buffer_info.range = payload.residency_entry_count * sizeof(uint32_t);
+    residency_buffer_info.range = _region_package.residency_entry_count * sizeof(uint32_t);
 
     desc_writes.push_back(
         _rt.Context().BindShaderResource(
@@ -3693,7 +3732,6 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
         vkDestroySampler(_rt.vulkan->device, payload.nearest_sampler, nullptr);
         _rt.vulkan->DestroyBuffer(payload.matrix_buffer);
         _rt.vulkan->DestroyBuffer(payload.staging_buffer);
-        _rt.vulkan->DestroyBuffer(payload.residency_buffer);
         delete &payload;
     };
 
@@ -3726,8 +3764,6 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
             sizeof(MatrixBlock),
             VK_BUFFER_USAGE_TRANSFER_DST_BIT
             | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
-
-        payload.residency_buffer = {};
 
         MatrixBlock* matrix = (MatrixBlock*)payload.staging_buffer.alloc.map;
         matrix->projection = numtk::mat4f::Constant(0.f);
@@ -3786,7 +3822,6 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
             _rt.state->voxel_region = std::move(voxel_region.region);
             _rt.state->region_upload = PrepareRegionUpload(_rt.vulkan,
                                                            _rt.state->voxel_region);
-
 #else
 
             _rt.state->region_package = UploadVoxelRegion(_rt.vulkan,
@@ -3814,6 +3849,54 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
 
             _rt.state->region_package = std::move(region_upload.package);
             SparseRegionUpdateBindings(_rt, _rt.state->region_package);
+
+            {
+                VoxelRegionPackage& package = _rt.state->region_package;
+
+                package.residency_mutex->Lock();
+
+                std::memcpy(package.residency_staging.alloc.map,
+                            package.residency_state.data(),
+                            sizeof(uint32_t) * package.residency_entry_count);
+
+                vktk::CommandBuffer command_buffer =
+                    _rt.vulkan->CreateCommandBuffer(_rt.vulkan->present_queue);
+                command_buffer.Begin();
+
+                command_buffer.BufferTransitions(
+                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    {
+                        { package.residency_buffer,
+                          VK_ACCESS_NONE,
+                          VK_ACCESS_TRANSFER_WRITE_BIT },
+                    });
+
+                command_buffer.BufferCopy(package.residency_buffer, 0, package.residency_staging, 0,
+                                          sizeof(uint32_t) * package.residency_entry_count);
+
+                command_buffer.BufferTransitions(
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                    {
+                        { package.residency_buffer,
+                          VK_ACCESS_TRANSFER_WRITE_BIT,
+                          VK_ACCESS_SHADER_READ_BIT }
+                    });
+
+                command_buffer.End();
+
+                VkFence sync_fence = VK_NULL_HANDLE;
+                vktk::CommandBuffer::SubmitInfo submit_info = {};
+                submit_info.signal_fence = &sync_fence;
+                command_buffer.Submit(submit_info);
+
+                _rt.vulkan->ScheduleRoutine(
+                    sync_fence,
+                    [&package](vktk::Context& _vulkan) {
+                        package.residency_mutex->Unlock();
+                    });
+            }
         }
 #endif
 
