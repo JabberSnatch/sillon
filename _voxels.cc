@@ -85,6 +85,7 @@ struct VoxelRegionPackage
     vktk::Buffer residency_buffer;
     vktk::Buffer residency_staging;
     std::vector<uint32_t> residency_state;
+    std::unique_ptr<std::vector<vktk::DeferredUpload*>> pending_uploads{ new std::vector<vktk::DeferredUpload*> };
 };
 
 struct VoxelFieldRenderParams
@@ -723,7 +724,15 @@ std::future<VoxelRegionUpload> PrepareRegionUpload(vktk::Context* vulkan,
 
                 {
                     plltk::ScopeLock lock{ *args.package.residency_mutex };
-                    args.package.residency_state[current_offset/32] |= 1u << current_offset%32;
+                    for (uint64_t point_index = 0ull; point_index < target_count; ++point_index)
+                    {
+                        uint32_t mask_index = current_offset + (uint32_t)point_index;
+                        args.package.residency_state[mask_index/32] |= 1u << mask_index%32;
+                        args.package.pending_uploads->push_back(
+                            &args.levels[lod_index+1].masks[point_index]);
+                        args.package.pending_uploads->push_back(
+                            &args.levels[lod_index+1].offsets[point_index]);
+                    }
                 }
 
                 current_offset = base_offset;
@@ -813,6 +822,11 @@ std::future<VoxelRegionUpload> PrepareRegionUpload(vktk::Context* vulkan,
                     {
                         plltk::ScopeLock lock{ *args.package.residency_mutex };
                         args.package.residency_state[current_offset/32] |= 1u << current_offset%32;
+                        args.package.pending_uploads->push_back(
+                            &args.levels[0].masks[buffer_index]);
+                        if (!payloads.empty())
+                            args.package.pending_uploads->push_back(
+                                &args.levels[0].payloads[buffer_index]);
                     }
 
                     ++buffer_index;
@@ -3837,15 +3851,9 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
         {
             VoxelRegionUpload region_upload = _rt.state->region_upload.get();
 
-            for (auto level : region_upload.levels)
-            {
-                for (vktk::DeferredUpload& upload : level.masks)
-                    _rt.vulkan->CommitStaging(upload);
-                for (vktk::DeferredUpload& upload : level.offsets)
-                    _rt.vulkan->CommitStaging(upload);
-                for (vktk::DeferredUpload& upload : level.payloads)
-                    _rt.vulkan->CommitStaging(upload);
-            }
+            for (auto upload : *region_upload.package.pending_uploads)
+                _rt.vulkan->CommitStaging(*upload);
+            region_upload.package.pending_uploads->clear();
 
             _rt.state->region_package = std::move(region_upload.package);
             SparseRegionUpdateBindings(_rt, _rt.state->region_package);
