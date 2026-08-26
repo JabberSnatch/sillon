@@ -967,7 +967,6 @@ uint32_t VoxelFieldRenderLayout(voxtk::VoxelField const& source,
                     uint64_t bits = source.TestKernel(kernel_base);
                     masks[point_index] = bits;
                     offsets[point_index] = count + base_offset;
-                    //offsets[point_index] = 0xffffffffu;
                     count += std::popcount(bits);
                 }
             }
@@ -1201,7 +1200,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->sparse_runtime = SparseRenderingPipeline(_state, _vulkan);
     _state->progressive_runtime = ProgressiveRenderingPipeline(_state, _vulkan);
 
-#if 0
+#if 1
 
     _state->region_future = std::async(
         std::launch::async,
@@ -2536,21 +2535,6 @@ void SparseRegionUpdateBindings(dispatch_runtime_t& _rt, VoxelRegionPackage cons
 {
     SparsePipelinePayload& payload = *(SparsePipelinePayload*)_rt.payload;
 
-#if 0
-    {
-        //uint32_t residency_entry_count = ((_region_package->masks.size() + 31) / 32);
-        //payload.residency_entry_count = residency_entry_count;
-        payload.residency_buffer = _rt.vulkan->CreateBuffer(
-            sizeof(uint32_t) * _region_package->residency_entry_count,
-            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-            [entry_count = _region_package.residency_entry_count](void* _ptr){
-                uint32_t* buffer = (uint32_t*)_ptr;
-                //std::memset(buffer, 0xff, residency_entry_count * sizeof(uint32_t));
-                std::memset(buffer, 0, residency_entry_count * sizeof(uint32_t));
-            });
-    }
-#endif
-
     {
         vkrg::bind::PNextMap pNext_map = {};
 
@@ -3602,71 +3586,13 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
 
             package.residency_mutex->Lock();
 
-            for (auto upload : *package.pending_uploads)
-                _rt.vulkan->CommitStaging(*upload);
-            package.pending_uploads->clear();
-
-            std::memcpy(package.residency_staging.alloc.map,
-                        package.residency_state.data(),
-                        sizeof(uint32_t) * package.residency_entry_count);
-
-            vktk::CommandBuffer command_buffer =
-                _rt.vulkan->CreateCommandBuffer(_rt.vulkan->present_queue);
-            command_buffer.Begin();
-
-            command_buffer.BufferTransitions(
-                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                VK_PIPELINE_STAGE_TRANSFER_BIT,
-                {
-                    { package.residency_buffer,
-                      VK_ACCESS_NONE,
-                      VK_ACCESS_TRANSFER_WRITE_BIT },
-                });
-
-            command_buffer.BufferCopy(package.residency_buffer, 0, package.residency_staging, 0,
-                                      sizeof(uint32_t) * package.residency_entry_count);
-
-            command_buffer.BufferTransitions(
-                VK_PIPELINE_STAGE_TRANSFER_BIT,
-                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                {
-                    { package.residency_buffer,
-                      VK_ACCESS_TRANSFER_WRITE_BIT,
-                      VK_ACCESS_SHADER_READ_BIT }
-                });
-
-            command_buffer.End();
-
-            VkFence sync_fence = VK_NULL_HANDLE;
-            vktk::CommandBuffer::SubmitInfo submit_info = {};
-            submit_info.signal_fence = &sync_fence;
-            command_buffer.Submit(submit_info);
-
-            _rt.vulkan->ScheduleRoutine(
-                sync_fence,
-                [&package](vktk::Context& _vulkan) {
-                    package.residency_mutex->Unlock();
-                });
-        }
-
-#if 0
-        if (_rt.state->region_upload.valid()
-            && (_rt.state->region_upload.wait_for(std::chrono::seconds(0))
-                == std::future_status::ready))
-        {
-            VoxelRegionUpload region_upload = _rt.state->region_upload.get();
-
-            for (auto upload : *region_upload.package.pending_uploads)
-                _rt.vulkan->CommitStaging(*upload);
-            region_upload.package.pending_uploads->clear();
-
-            _rt.state->region_package = std::move(region_upload.package);
-            SparseRegionUpdateBindings(_rt, _rt.state->region_package);
-
+            if (package.pending_uploads->empty())
+                package.residency_mutex->Unlock();
+            else
             {
-                VoxelRegionPackage& package = _rt.state->region_package;
-
-                package.residency_mutex->Lock();
+                for (auto upload : *package.pending_uploads)
+                    _rt.vulkan->CommitStaging(*upload);
+                package.pending_uploads->clear();
 
                 std::memcpy(package.residency_staging.alloc.map,
                             package.residency_state.data(),
@@ -3711,7 +3637,6 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
                     });
             }
         }
-#endif
 
 #endif
     };
