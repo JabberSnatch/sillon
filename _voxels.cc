@@ -393,24 +393,8 @@ void DecodeChunk(voxtk::VoxelField& region,
                         uint32_t y = (block_index / 256) % 16;
 
                         numtk::vec3i point = section_begin + numtk::vec3u{ x, y, z }.cast<int32_t>();
-#if 0
-                        if (palette_data[block_id] != "air"
-                            && palette_data[block_id] != "glow_lichen")
-                        {
-                            numtk::vec3<uint8_t> color = { 255, 255, 255 };
-                            if (block_color.count(palette_data[block_id]))
-                                color = block_color.at(palette_data[block_id]);
-                            region.StoreData(point, 0, color);
-                        }
-#endif
                         if (block_color.count(palette_data[block_id]))
                             region.StoreData(point, 0, block_color.at(palette_data[block_id]));
-#if 0
-                        else if (palette_data[block_id] != "air"
-                                 && palette_data[block_id] != "glow_lichen"
-                                 && palette_data[block_id] != "water")
-                            std::cout << palette_data[block_id]  << std::endl;
-#endif
 
                         data_offset += bit_count;
                         ++block_index;
@@ -1142,63 +1126,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     voxel_state_t* _state = (voxel_state_t*)_pstate;
     _state->gui_context = guitk::CreateContext();
 
-#if 0
-    {
-        numtk::vec3i offset_axis{ 1, 0, 1 };
-
-        voxtk::VoxelMask testmask0 = voxtk::VoxelMask::FillArea({ 0, 0, 0 }, { 4, 4, 4 });
-        testmask0 = testmask0.Shift(offset_axis * 1);
-
-        voxtk::VoxelMask testmask1 = voxtk::VoxelMask::FillArea({ 0, 0, 0 }, { 4, 4, 4 });
-        testmask1 = testmask1.Shift(offset_axis * 2);
-
-        voxtk::VoxelMask testmask2 = voxtk::VoxelMask::FillArea({ 0, 0, 0 }, { 4, 4, 4 });
-        testmask2 = testmask2.Shift(offset_axis * 3);
-
-        voxtk::VoxelMask testmask3 = voxtk::VoxelMask::FillArea({ 0, 0, 0 }, { 4, 4, 4 });
-        testmask3 = testmask3.Shift(offset_axis * 4);
-
-        voxtk::VoxelMask testmask4 = voxtk::VoxelMask::FillArea({ 0, 0, 0 }, { 4, 4, 4 });
-        testmask4 = testmask4.Shift(offset_axis * 5);
-
-        voxtk::VoxelMask testmask5 = voxtk::VoxelMask::FillArea({ 0, 0, 0 }, { 4, 4, 4 });
-        testmask5 = testmask5.Shift(offset_axis * 6);
-
-        voxtk::VoxelMask testmask6 = voxtk::VoxelMask::FillArea({ 0, 0, 0 }, { 4, 4, 4 });
-        testmask6 = testmask6.Shift(offset_axis * 7);
-
-        voxtk::VoxelMask testmask7 = voxtk::VoxelMask::FillArea({ 0, 0, 0 }, { 4, 4, 4 });
-        testmask7 = testmask7.Shift(offset_axis * 8);
-
-        int i = 0;
-    }
-#endif
-
-    uint32_t area_size = 0u;
-    uint32_t node_size = 0u;
-#if 0
-    {
-        voxtk::VoxelField src{ numtk::vec3u{ 16, 16, 16 } };
-        src.DeclareLayer(0, numtk::vec3<uint8_t>{ 255, 255, 255 });
-        for (uint32_t z = 0; z < 16; ++z)
-            for (uint32_t y = 0; y < 16; ++y)
-                for (uint32_t x = 0; x < 16; ++x)
-                    src.Set(numtk::vec3u{ x, y, z }, !!(((x&1) + (y&1) + (z&1)) & 1));
-
-        voxtk::VoxelField mask{ numtk::vec3u{ 2, 2, 2 } };
-        mask.Set(numtk::bounds3u{{ 0, 0, 0 }, { 2, 2, 2 }}, true);
-
-        voxtk::VoxelField src_shifted = src.Shift(numtk::vec3i{ 0, -7, 0 });
-        _state->voxel_region = src.BitwiseAnd(numtk::vec3i{ 0, 7, 0 }, mask);
-        //_state->voxel_region = src_shifted;
-        //_state->voxel_region = src;
-
-        area_size = 4u;
-        node_size = 4u;
-        int i = 0;
-    }
-#endif
-
     _state->sparse_runtime = SparseRenderingPipeline(_state, _vulkan);
     _state->progressive_runtime = ProgressiveRenderingPipeline(_state, _vulkan);
 
@@ -1246,12 +1173,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         _state->region_package = UploadVoxelRegion(_vulkan,
                                                    voxel_region.region);
     }
-#endif
-
-
-#if 0
-    _state->initial_region = _state->voxel_region;
-    _state->region_package = UploadVoxelRegion(_vulkan, _state->voxel_region);
 #endif
 
 #if 0
@@ -1315,27 +1236,8 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         if (guitk::Slider(_state->gui_context, &_state->sun_power, "Sun Power", 0.f, 1.f))
             reset_progressive_counter = true;
 
-#if 0
-        for (uint32_t i = 0; i < 4; ++i)
-        {
-            static bool storage[4];
-            guitk::Checkbox(_state->gui_context, &storage[i], std::string("checkbox") + std::to_string(i));
-        }
-#endif
         guitk::EndFrame(_state->gui_context);
 
-#if 0
-        static std::vector<guitk::Frame> frames(4);
-        for (uint32_t i = 0; i < 4; ++i)
-        {
-            guitk::BeginFrame(_state->gui_context, frames[i]);
-            guitk::Label(_state->gui_context, "the quick brown fox jumps over the lazy dog");
-            guitk::Label(_state->gui_context, "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG");
-            guitk::Label(_state->gui_context, "{} [] :; \\| \"' `~ =+ -_ <> ,. ?/");
-            guitk::Label(_state->gui_context, "12345 67890  !@#$% ^&*()");
-            guitk::EndFrame(_state->gui_context);
-        }
-#endif
         guitk::WidgetStates const* gui_record = guitk::EndRecord(_state->gui_context);
         _state->current_gui_record = gui_record;
 
@@ -1374,67 +1276,6 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         _state->region_package->display_depth = std::min(_state->region_package->display_depth+1, _state->region_package->stack_depth);
     if (_input->key_down['o'] && !_past_input->key_down['o'])
         _state->region_package->display_depth = std::max(_state->region_package->display_depth-1, 0);
-
-    numtk::vec3i stencil_delta{ 0, 0, 0 };
-    int32_t shift_factor = 1;
-    if (_input->mod_down & iotk::fKeyMod::kAlt)
-        shift_factor = 10;
-
-    if (_input->key_down['u'] && !_past_input->key_down['u'])
-        stencil_delta += numtk::vec3i{ 0, 1, 0 };
-    if (_input->key_down['j'] && !_past_input->key_down['j'])
-        stencil_delta += numtk::vec3i{ 0, -1, 0 };
-    if (_input->key_down['h'] && !_past_input->key_down['h'])
-        stencil_delta += numtk::vec3i{ -1, 0, 0 };
-    if (_input->key_down['k'] && !_past_input->key_down['k'])
-        stencil_delta += numtk::vec3i{ 1, 0, 0 };
-    if (_input->key_down['y'] && !_past_input->key_down['y'])
-        stencil_delta += numtk::vec3i{ 0, 0, -1 };
-    if (_input->key_down['i'] && !_past_input->key_down['i'])
-        stencil_delta += numtk::vec3i{ 0, 0, 1 };
-
-    stencil_delta *= shift_factor;
-
-#if 0
-    if (stencil_delta != numtk::vec3i::Constant(0))
-    {
-        _state->stencil_location += stencil_delta;
-
-#if 1
-        _state->voxel_region = _state->initial_region.Shift(_state->stencil_location);
-        _state->region_package = UploadVoxelRegion(_vulkan, _state->voxel_region);
-
-        SparseRegionUpdateBindings(_state->sparse_runtime);
-#else
-
-        _state->stencil_location = numtk::min(numtk::max(_state->stencil_location,
-                                                         numtk::vec3i::Constant(-16)),
-                                              numtk::vec3i::Constant(16));
-
-        {
-            voxtk::VoxelField src{ numtk::vec3u{ 16, 16, 16 } };
-            for (uint32_t z = 0; z < 16; ++z)
-                for (uint32_t y = 0; y < 16; ++y)
-                    for (uint32_t x = 0; x < 16; ++x)
-                        src.Set(numtk::vec3u{ x, y, z }, !!(((x&1) + (y&1) + (z&1)) & 1));
-
-            voxtk::VoxelField mask{ numtk::vec3u{ 3, 3, 3 } };
-            //mask.Set({ 0, 0, 0 }, { 3, 3, 3 }, uint8_t(0));
-            mask.Set(numtk::bounds3u{{ 0, 0, 0 }, { 3, 3, 3 }}, true);
-
-            //_state->voxel_region = src.BitwiseAnd(mask, _state->stencil_location);
-            _state->voxel_region = src.BitwiseAnd(_state->stencil_location.cast<int32_t>(), mask);
-            //_state->voxel_region = src.Shift(_state->stencil_location);
-
-            uint32_t area_size = 4u;
-            uint32_t node_size = 4u;
-            _state->region_package = UploadVoxelRegion(_vulkan, _state->voxel_region);
-
-            SparseRegionUpdateBindings(_state->sparse_runtime);
-        }
-#endif
-    }
-#endif
 
     if (!_state->current_gui_record->mouse_over)
         _state->camera.Update(_input, _past_input);
@@ -3661,16 +3502,6 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
             matrix->projection =
                 numtk::mat4f::Perspective_VulkanNDC(1.0f, 1000000.f, 90.f*numtk::kDegrees, how);
 
-#if 0
-            matrix->view_model =
-                matrix->view
-                * numtk::mat4f{
-                512.f, 0.f, 0.f, 0.f,
-                0.f, 256.f, 0.f, 0.f,
-                0.f, 0.f, 1024.f, 0.f,
-                0.f, 0.f, 0.f, 1.f };
-#else
-            //numtk::vec3f model_scale = numtk::vec3f::Constant(1.f) / _rt.state->region_package->area_scale;
             numtk::vec3f model_scale = _rt.state->region_package->area_size;
             matrix->view_model =
                 matrix->view
@@ -3679,7 +3510,6 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
                 0.f, model_scale.y, 0.f, 0.f,
                 0.f, 0.f, model_scale.z, 0.f,
                 0.f, 0.f, 0.f, 1.f };
-#endif
 
             matrix->screen_offset = numtk::vec2f{ 0.f, 0.f };
             matrix->screen_size = swapchain_size.cast<int32_t>();
