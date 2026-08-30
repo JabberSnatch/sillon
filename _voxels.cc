@@ -1,5 +1,7 @@
 #include "_voxels.hh"
 
+#include "_voxels/gui_runtime.hh"
+
 #define ZIPTK_IMPLEMENTATION
 #define MCTK_IMPLEMENTATION
 #include "mctk/mctk.hh"
@@ -2418,11 +2420,11 @@ dispatch_runtime_t SparseRenderingPipeline(
     voxel_state_t* _state, vktk::Context* _vulkan)
 {
     dispatch_runtime_t output = {};
-    output.graph = SparseRegionRenderSystem(_state->core_registry);
     output.vulkan = _vulkan;
     output.registry = &_state->core_registry;
     output.state = _state;
     output.payload = new SparsePipelinePayload{};
+    output.graph = SparseRegionRenderSystem(_state->core_registry);
 
     BindGUIRuntime(_state, _vulkan,
                    output.graph["FramebufferDispatch"]["GUISubpass"]);
