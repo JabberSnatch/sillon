@@ -1,5 +1,6 @@
 #include "_voxels.hh"
 
+#include "_voxels/voxel_field_runtime.hh"
 #include "_voxels/gui_runtime.hh"
 
 #define ZIPTK_IMPLEMENTATION
@@ -26,7 +27,7 @@
 #include <unordered_map>
 
 //#define SYNC_LOAD
-#define VOXEL_CHUNK_SIZE 16u
+//#define VOXEL_CHUNK_SIZE 16u
 
 namespace {
 

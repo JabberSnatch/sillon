@@ -17,7 +17,7 @@ struct dispatch_runtime_t
         };
     }
 
-    void Dispatch(dispatch_runtime_t& _rt, void* _args,
+    void Dispatch(dispatch_runtime_t& _rt, args_t _args,
                   vktk::CommandBuffer& _command_buffer)
     {
         _rt.UpdateBindings(_rt, _args);
