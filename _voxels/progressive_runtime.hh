@@ -10,8 +10,8 @@ namespace progressive_runtime
 
 struct Args
 {
-    gui_runtime::Args gui;
     voxel_field_runtime::Args voxel_field;
+    gui_runtime::Args gui;
 
     numtk::vec2u framebuffer_size;
     uint32_t swapchain_index;

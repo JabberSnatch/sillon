@@ -4,14 +4,59 @@
 
 #include <numtk.hh>
 #include <plltk.hh>
+#include <voxtk.hh>
 
 #include <memory>
+#include <future>
 #include <vector>
 
 #define VOXEL_CHUNK_SIZE 16u
 
 namespace voxel_field_runtime
 {
+
+struct RenderParams
+{
+    uint32_t chunk_size;
+    uint32_t chunk_mask;
+    uint32_t chunk_shift;
+    uint32_t kernel_mask;
+    uint32_t kernel_shift;
+    numtk::vec3u indexing_masks;
+
+    uint32_t NodeSize() const { return chunk_size * voxtk::VoxelMask::kKernelSize; }
+    uint32_t ComponentShift() const { return chunk_shift + kernel_shift; }
+    uint32_t LevelShift() const { return ComponentShift() * 3; }
+
+    uint32_t PointIndex(numtk::vec3u const& _point) const { return
+            numtk::BitDeposit(_point.x, indexing_masks.x)
+            | numtk::BitDeposit(_point.y, indexing_masks.y)
+            | numtk::BitDeposit(_point.z, indexing_masks.z);
+    }
+
+    numtk::vec3u IndexPoint(uint32_t _index) const { return {
+            numtk::BitExtract(_index, indexing_masks.x),
+            numtk::BitExtract(_index, indexing_masks.y),
+            numtk::BitExtract(_index, indexing_masks.z),
+        };
+    }
+};
+
+struct FieldLevel
+{
+    std::vector<vktk::DeferredUpload> masks{};
+    std::vector<vktk::DeferredUpload> offsets{};
+    std::vector<vktk::DeferredUpload> payloads{};
+};
+
+struct FieldUpload
+{
+    voxtk::VoxelField const* base = nullptr;
+    std::vector<voxtk::VoxelField> lods{};
+    std::vector<FieldLevel> levels{};
+    RenderParams render_params{};
+    struct FieldDescriptor* package;
+};
 
 struct FieldDescriptor
 {
@@ -24,6 +69,8 @@ struct FieldDescriptor
     std::vector<vktk::Texture> masks{};
     std::vector<vktk::Texture> offsets{};
     std::vector<vktk::Texture> payloads{};
+
+    std::future<FieldUpload> upload = {};
 
     std::unique_ptr<plltk::Mutex> residency_mutex{ new plltk::Mutex{} };
     vktk::Buffer residency_buffer;
@@ -234,9 +281,6 @@ void Impl::UpdateBindings(vkrg::runtime::DispatchContext _context,
     }
 
     {
-        float how = (float)_args.framebuffer_size.y()
-            / (float)_args.framebuffer_size.x();
-
         {
             MatrixBlock* matrix = (MatrixBlock*)staging_buffer.alloc.map;
             matrix->view = _args.view_matrix;

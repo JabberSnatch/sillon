@@ -1,11 +1,14 @@
+#define VOXTK_IMPLEMENTATION
+#define VOXTK_IMPORT_IMPLEMENTATION
+#define ZIPTK_IMPLEMENTATION
+#define MCTK_IMPLEMENTATION
+
 #include "_voxels.hh"
 
 #include "_voxels/progressive_runtime.hh"
 #include "_voxels/voxel_field_runtime.hh"
 #include "_voxels/gui_runtime.hh"
 
-#define ZIPTK_IMPLEMENTATION
-#define MCTK_IMPLEMENTATION
 #include "mctk/mctk.hh"
 
 #include <numtk.hh>
@@ -16,9 +19,7 @@
 #include "systk.hh"
 #include "vktk.hh"
 
-#define VOXTK_IMPLEMENTATION
 #include <voxtk.hh>
-#define VOXTK_IMPORT_IMPLEMENTATION
 #include "voxtk-importers/voxtk_import.hh"
 
 #include <bit>
@@ -137,15 +138,21 @@ struct VoxelRegionPackage
     std::unique_ptr<std::vector<vktk::DeferredUpload*>> pending_uploads{ new std::vector<vktk::DeferredUpload*> };
 };
 
+#if 0
 std::unique_ptr<VoxelRegionPackage> PrepareRegionUpload(vktk::Context* vulkan,
                                                         voxtk::VoxelField const& region);
+#else
+std::unique_ptr<voxel_field_runtime::FieldDescriptor>
+PrepareRegionUpload(vktk::Context* vulkan,
+                    voxtk::VoxelField const& region);
+#endif
 
-VoxelFieldRenderParams VoxelFieldSetupRender(uint32_t chunk_size);
+voxel_field_runtime::RenderParams VoxelFieldSetupRender(uint32_t chunk_size);
 
 voxtk::VoxelField VoxelFieldDownsample(voxtk::VoxelField const& source, uint32_t size_factor);
 uint32_t VoxelFieldRenderLayout(voxtk::VoxelField const& source,
                                 voxtk::VoxelField const& target,
-                                VoxelFieldRenderParams const& render_params,
+                                voxel_field_runtime::RenderParams const& render_params,
                                 uint32_t base_offset,
                                 uint32_t lod_index,
                                 std::vector<uint64_t*> const& masks,
@@ -207,7 +214,7 @@ struct voxel_state_t
     dstk::Registry core_registry;
     dispatch_runtime_t* current_runtime;
     dispatch_runtime_t sparse_runtime;
-    dispatch_runtime_t progressive_runtime;
+    ::dispatch_runtime_t progressive_runtime;
 
     VkFence last_submit;
 
@@ -224,6 +231,9 @@ struct voxel_state_t
 
     mutable std::unique_ptr<VoxelRegionPackage> region_package;
     mutable std::future<VoxelRegionFuture> region_future = {};
+
+    std::unique_ptr<voxtk::VoxelField> _voxel_region{ nullptr };
+    std::unique_ptr<voxel_field_runtime::FieldDescriptor> _region_package{ nullptr };
 };
 
 struct MatrixBlock
@@ -511,8 +521,14 @@ voxtk::VoxelField DeserialiseRegion(std::string const& file_path)
     return output;
 }
 
+#if 0
 std::unique_ptr<VoxelRegionPackage> PrepareRegionUpload(vktk::Context* vulkan,
-                                                        voxtk::VoxelField const& region)
+                                                        voxtk::VoxelField const& region);
+#else
+std::unique_ptr<voxel_field_runtime::FieldDescriptor>
+PrepareRegionUpload(vktk::Context* vulkan,
+                    voxtk::VoxelField const& region)
+#endif
 {
     systk::Timer scope_time{ "PrepareRegionUpload",
         [](std::string const& tag, float time) {
@@ -544,9 +560,9 @@ std::unique_ptr<VoxelRegionPackage> PrepareRegionUpload(vktk::Context* vulkan,
         return depth;
     }();
 
-    std::unique_ptr<VoxelRegionPackage> output{ new VoxelRegionPackage{} };
+    std::unique_ptr<voxel_field_runtime::FieldDescriptor> output{ new voxel_field_runtime::FieldDescriptor{} };
 
-    VoxelRegionPackage& package = *output;
+    voxel_field_runtime::FieldDescriptor& package = *output;
     package.stack_depth = depth*2;
     package.display_depth = package.stack_depth;
     package.area_scale = numtk::vec3f::Constant(1.f) / numtk::vec3f{
@@ -556,7 +572,7 @@ std::unique_ptr<VoxelRegionPackage> PrepareRegionUpload(vktk::Context* vulkan,
     };
     package.area_size = (numtk::vec3u::Constant(1) << log_area_size).cast<float>();
 
-    VoxelRegionUpload upload = {};
+    voxel_field_runtime::FieldUpload upload = {};
     upload.base = &region;
     upload.levels.resize(depth+1);
     upload.render_params = VoxelFieldSetupRender(kChunkSize);
@@ -572,7 +588,7 @@ std::unique_ptr<VoxelRegionPackage> PrepareRegionUpload(vktk::Context* vulkan,
     for (uint32_t index = 1u; index < depth; ++index)
     {
         uint32_t lod_index = (depth-1) - index;
-        VoxelRegionLevel& level = upload.levels[lod_index+1];
+        voxel_field_runtime::FieldLevel& level = upload.levels[lod_index+1];
         voxtk::VoxelField const& source = upload.lods[lod_index];
         voxtk::VoxelField const& target = upload.lods[lod_index+1];
         uint64_t target_count = target.Popcount();
@@ -612,7 +628,7 @@ std::unique_ptr<VoxelRegionPackage> PrepareRegionUpload(vktk::Context* vulkan,
         package.leaves_begin = package.masks.size();
 
         uint64_t level1_popcount = upload.lods[0].Popcount();
-        VoxelRegionLevel& level = upload.levels[0];
+        voxel_field_runtime::FieldLevel& level = upload.levels[0];
 
         level.masks.resize(level1_popcount);
         if (region.HasLayer(0))
@@ -671,7 +687,7 @@ std::unique_ptr<VoxelRegionPackage> PrepareRegionUpload(vktk::Context* vulkan,
 
     package.upload = std::async(
         std::launch::async,
-        [](VoxelRegionUpload args) -> VoxelRegionUpload {
+        [](voxel_field_runtime::FieldUpload args) -> voxel_field_runtime::FieldUpload {
 
             systk::Timer scope_time{ "RegionCopy",
                 [](std::string const& tag, float time) {
@@ -831,9 +847,9 @@ std::unique_ptr<VoxelRegionPackage> PrepareRegionUpload(vktk::Context* vulkan,
     return std::move(output);
 }
 
-VoxelFieldRenderParams VoxelFieldSetupRender(uint32_t chunk_size)
+voxel_field_runtime::RenderParams VoxelFieldSetupRender(uint32_t chunk_size)
 {
-    VoxelFieldRenderParams output = {};
+    voxel_field_runtime::RenderParams output = {};
     output.chunk_size = chunk_size;
     output.chunk_mask = output.chunk_size - 1u;
     output.chunk_shift = (uint32_t)std::popcount(output.chunk_mask);
@@ -923,7 +939,7 @@ voxtk::VoxelField VoxelFieldDownsample(voxtk::VoxelField const& source, uint32_t
 
 uint32_t VoxelFieldRenderLayout(voxtk::VoxelField const& source,
                                 voxtk::VoxelField const& target,
-                                VoxelFieldRenderParams const& render_params,
+                                voxel_field_runtime::RenderParams const& render_params,
                                 uint32_t base_offset,
                                 uint32_t lod_index,
                                 std::vector<uint64_t*> const& masks,
@@ -1129,7 +1145,8 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->gui_context = guitk::CreateContext();
 
     _state->sparse_runtime = SparseRenderingPipeline(_state, _vulkan);
-    _state->progressive_runtime = ProgressiveRenderingPipeline(_state, _vulkan);
+    //_state->progressive_runtime = ProgressiveRenderingPipeline(_state, _vulkan);
+    _state->progressive_runtime = progressive_runtime::Create(_vulkan, &_state->core_registry);
 
 #if 1
 
@@ -1180,7 +1197,8 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 #if 0
     _state->sparse_runtime.ConstantResources(_state->sparse_runtime);
 #endif
-    _state->progressive_runtime.ConstantResources(_state->progressive_runtime);
+    //_state->progressive_runtime.ConstantResources(_state->progressive_runtime);
+    _state->progressive_runtime.OnGlobalInit(_state->progressive_runtime);
 
     return;
 }
@@ -1194,7 +1212,8 @@ void RenderResources(void* _pstate,
 #if 0
     _state->sparse_runtime.RenderResources(_state->sparse_runtime, _swapchain);
 #endif
-    _state->progressive_runtime.RenderResources(_state->progressive_runtime, _swapchain);
+    //_state->progressive_runtime.RenderResources(_state->progressive_runtime, _swapchain);
+    _state->progressive_runtime.OnSwapchainInit(_state->progressive_runtime, _swapchain);
 }
 
 bool Update(void* _pstate, vktk::Context* _vulkan,
@@ -1246,7 +1265,7 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 #if 0
         _state->sparse_runtime.Update(_state->sparse_runtime);
 #endif
-        _state->progressive_runtime.Update(_state->progressive_runtime);
+        //_state->progressive_runtime.Update(_state->progressive_runtime);
     }
 
     _state->time += _input->time_delta;
@@ -1287,6 +1306,15 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         || reset_progressive_counter)
         _state->progressive_frame_index = 0;
 
+    if (_state->region_future.valid()
+        && (_state->region_future.wait_for(std::chrono::seconds(0))
+            == std::future_status::ready))
+    {
+        VoxelRegionFuture voxel_region = _state->region_future.get();
+        _state->_voxel_region.reset(new voxtk::VoxelField{ std::move(voxel_region.region) });
+        _state->_region_package = PrepareRegionUpload(_vulkan, *_state->_voxel_region);
+    }
+
     return true;
 }
 
@@ -1301,7 +1329,40 @@ void Draw(void* _pstate,
     command_buffer.Begin();
 
     //_state->sparse_runtime.Dispatch(_state->sparse_runtime, command_buffer, _swapchain);
-    _state->progressive_runtime.Dispatch(_state->progressive_runtime, command_buffer, _swapchain);
+    //_state->progressive_runtime.Dispatch(_state->progressive_runtime, command_buffer, _swapchain);
+
+    progressive_runtime::Args progressive_args = {};
+
+    float how = (float)_swapchain.size.height / (float)_swapchain.size.width;
+
+    progressive_args.voxel_field.field_descriptor = _state->_region_package.get();
+    progressive_args.voxel_field.framebuffer_size = numtk::vec2f{
+        (float)_swapchain.size.width,
+        (float)_swapchain.size.height };
+    progressive_args.voxel_field.view_matrix =
+        _state->camera.Matrix();
+    progressive_args.voxel_field.projection_matrix =
+        numtk::mat4f::Perspective_VulkanNDC(1.0f, 1000000.f, 90.f*numtk::kDegrees, how);
+    progressive_args.voxel_field.sample_offset = _state->progressive_frame_index;
+    progressive_args.voxel_field.sun_spherical = _state->sun_spherical;
+    progressive_args.voxel_field.enable_indirect_light = _state->enable_indirect_light;
+    progressive_args.voxel_field.sun_power = _state->sun_power;
+
+    progressive_args.gui.gui_record = _state->current_gui_record;
+    progressive_args.gui.framebuffer_size = numtk::vec2f{
+        (float)_swapchain.size.width,
+        (float)_swapchain.size.height };
+
+    progressive_args.framebuffer_size = numtk::vec2u{
+        _swapchain.size.width,
+        _swapchain.size.height };
+    progressive_args.swapchain_index = _swapchain.index;
+    progressive_args.swapchain_image = _swapchain.images[_swapchain.index];
+    progressive_args.progressive_frame_index = _state->progressive_frame_index;
+
+    _state->progressive_runtime.Dispatch(_state->progressive_runtime,
+                                         &progressive_args,
+                                         command_buffer);
 
     command_buffer.End();
 
@@ -3417,15 +3478,22 @@ void BindSparseRegionRuntime(voxel_state_t* _state, vktk::Context* _vulkan,
             && (_rt.state->region_future.wait_for(std::chrono::seconds(0))
                 == std::future_status::ready))
         {
+#if 0
             VoxelRegionFuture voxel_region = _rt.state->region_future.get();
             _rt.state->voxel_region = std::move(voxel_region.region);
             _rt.state->region_package = PrepareRegionUpload(_rt.vulkan,
                                                             _rt.state->voxel_region);
 
             SparseRegionUpdateBindings(_rt, *_rt.state->region_package);
+#endif
         }
 
-        if (_rt.state->region_package)
+        if (_rt.state->region_package
+#if 0
+            && (_rt.state->region_package->upload.wait_for(std::chrono::seconds(0))
+                == std::future_status::ready)
+#endif
+        )
         {
             VoxelRegionPackage& package = *_rt.state->region_package;
 
