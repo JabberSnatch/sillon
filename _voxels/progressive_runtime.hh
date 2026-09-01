@@ -20,7 +20,6 @@ struct Args
 };
 
 dispatch_runtime_t Create(vktk::Context* _vulkan, dstk::Registry* _registry);
-void Destroy(dispatch_runtime_t&);
 
 vkrg::layout::DispatchGraph RenderGraph(dstk::Registry& _registry);
 
@@ -35,6 +34,8 @@ struct Impl
     vktk::Texture primary_pass_depth;
     vktk::Texture accumulated_color;
     VkSampler nearest_sampler;
+
+    void Destroy(vkrg::runtime::DispatchContext _context);
 
     void OnModuleScopeOpen(vkrg::runtime::DispatchContext _context);
     void OnSwapchainScopeOpen(vkrg::runtime::DispatchContext _context,
@@ -68,6 +69,11 @@ dispatch_runtime_t Create(vktk::Context* _vulkan, dstk::Registry* _registry)
         runtime.registry->BindComponent(node, runtime);
     }
 
+    runtime.Destroy = [](dispatch_runtime_t& _rt){
+        ((Impl*)_rt.impl)->Destroy(_rt.Context());
+        delete (Impl*)_rt.impl;
+    };
+
     runtime.OnModuleScopeOpen = [](dispatch_runtime_t& _rt){
         ((Impl*)_rt.impl)->OnModuleScopeOpen(_rt.Context());
     };
@@ -87,9 +93,21 @@ dispatch_runtime_t Create(vktk::Context* _vulkan, dstk::Registry* _registry)
     return runtime;
 }
 
-void Destroy(dispatch_runtime_t& _rt)
+void Impl::Destroy(vkrg::runtime::DispatchContext _context)
 {
-    delete (Impl*)_rt.impl;
+    _context.vulkan.DestroyTexture(primary_pass_color);
+    _context.vulkan.DestroyTexture(primary_pass_depth);
+    _context.vulkan.DestroyTexture(accumulated_color);
+    vkDestroySampler(_context.vulkan.device, nearest_sampler, nullptr);
+
+    _context.graph.DepthFirstTraversal(
+        [&]
+        (uint32_t, dstk::Registry::Node node) {
+            dispatch_runtime_t* runtime =
+                _context.registry.ComponentLookup<dispatch_runtime_t>(node);
+            if (runtime && runtime->Destroy)
+                runtime->Destroy(*runtime);
+        });
 }
 
 void Impl::OnModuleScopeOpen(vkrg::runtime::DispatchContext _context)

@@ -1413,7 +1413,28 @@ void Shutdown(void* _pstate,
     for (uint32_t index = 0; index < _state->section_textures.size(); ++index)
         _vulkan->DestroyTexture(_state->section_textures[index]);
 
+    if (_state->_region_package)
+    {
+        voxel_field_runtime::FieldDescriptor& descriptor = *_state->_region_package;
+        descriptor.upload.wait();
+
+        for (auto upload : *descriptor.pending_uploads)
+            _vulkan->CommitStaging(*upload);
+        descriptor.pending_uploads->clear();
+
+        _vulkan->DestroyBuffer(descriptor.residency_buffer);
+        _vulkan->DestroyBuffer(descriptor.residency_staging);
+
+        for (vktk::Texture& texture : descriptor.masks)
+            _vulkan->DestroyTexture(texture);
+        for (vktk::Texture& texture : descriptor.offsets)
+            _vulkan->DestroyTexture(texture);
+        for (vktk::Texture& texture : descriptor.payloads)
+            _vulkan->DestroyTexture(texture);
+    }
+
     _state->sparse_runtime.DestroyPayload(_state->sparse_runtime);
+    _state->progressive_runtime.Destroy(_state->progressive_runtime);
 
     guitk::DeleteContext(_state->gui_context);
 }

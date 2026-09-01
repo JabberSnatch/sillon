@@ -14,7 +14,6 @@ struct Args
 };
 
 dispatch_runtime_t Create(vktk::Context* _vulkan, dstk::Registry* _registry);
-void Destroy(dispatch_runtime_t&);
 
 } // namespace gui_runtime
 
@@ -41,14 +40,56 @@ struct Impl
     vktk::Texture gui_symbols_texture;
     VkSampler nearest_sampler;
 
+    void Destroy(vkrg::runtime::DispatchContext _context);
+
     void OnModuleScopeOpen(vkrg::runtime::DispatchContext _context);
     void OnSwapchainScopeOpen(vkrg::runtime::DispatchContext _context,
                               vktk::Swapchain const& _swapchain);
+
     void UpdateBindings(vkrg::runtime::DispatchContext _context,
                         Args const& _args);
     void PostSubmit(vkrg::runtime::DispatchContext _context,
                     VkFence _fence);
 };
+
+dispatch_runtime_t Create(vktk::Context* _vulkan, dstk::Registry* _registry)
+{
+    dispatch_runtime_t runtime = {};
+    runtime.vulkan = _vulkan;
+    runtime.registry = _registry;
+    runtime.graph = RenderGraph(*_registry);
+    runtime.impl = new Impl{};
+
+    runtime.Destroy = [](dispatch_runtime_t& _rt){
+        ((Impl*)_rt.impl)->Destroy(_rt.Context());
+        delete (Impl*)_rt.impl;
+    };
+
+    runtime.OnModuleScopeOpen = [](dispatch_runtime_t& _rt){
+        ((Impl*)_rt.impl)->OnModuleScopeOpen(_rt.Context());
+    };
+
+    runtime.OnSwapchainScopeOpen = [](dispatch_runtime_t& _rt, vktk::Swapchain const& _swapchain){
+        ((Impl*)_rt.impl)->OnSwapchainScopeOpen(_rt.Context(), _swapchain);
+    };
+
+    runtime.UpdateBindings = [](dispatch_runtime_t& _rt, dispatch_runtime_t::args_t _args){
+        ((Impl*)_rt.impl)->UpdateBindings(_rt.Context(), *(Args const*)_args);
+    };
+
+    runtime.PostSubmit = [](dispatch_runtime_t& _rt, VkFence _fence){
+        ((Impl*)_rt.impl)->PostSubmit(_rt.Context(), _fence);
+    };
+
+    return runtime;
+}
+
+void Impl::Destroy(vkrg::runtime::DispatchContext _context)
+{
+    _context.vulkan.DestroyTexture(gui_font_texture);
+    _context.vulkan.DestroyTexture(gui_symbols_texture);
+    vkDestroySampler(_context.vulkan.device, nearest_sampler, nullptr);
+}
 
 void Impl::OnModuleScopeOpen(vkrg::runtime::DispatchContext _context)
 {
@@ -536,38 +577,6 @@ void Impl::PostSubmit(vkrg::runtime::DispatchContext _context,
             _vulkan.DestroyBuffer(glyph_indices);
             _vulkan.DestroyBuffer(glyph_vertices);
         });
-}
-
-dispatch_runtime_t Create(vktk::Context* _vulkan, dstk::Registry* _registry)
-{
-    dispatch_runtime_t runtime = {};
-    runtime.vulkan = _vulkan;
-    runtime.registry = _registry;
-    runtime.graph = RenderGraph(*_registry);
-    runtime.impl = new Impl{};
-
-    runtime.OnModuleScopeOpen = [](dispatch_runtime_t& _rt){
-        ((Impl*)_rt.impl)->OnModuleScopeOpen(_rt.Context());
-    };
-
-    runtime.OnSwapchainScopeOpen = [](dispatch_runtime_t& _rt, vktk::Swapchain const& _swapchain){
-        ((Impl*)_rt.impl)->OnSwapchainScopeOpen(_rt.Context(), _swapchain);
-    };
-
-    runtime.UpdateBindings = [](dispatch_runtime_t& _rt, dispatch_runtime_t::args_t _args){
-        ((Impl*)_rt.impl)->UpdateBindings(_rt.Context(), *(Args const*)_args);
-    };
-
-    runtime.PostSubmit = [](dispatch_runtime_t& _rt, VkFence _fence){
-        ((Impl*)_rt.impl)->PostSubmit(_rt.Context(), _fence);
-    };
-
-    return runtime;
-}
-
-void Destroy(dispatch_runtime_t& _rt)
-{
-    delete (Impl*)_rt.impl;
 }
 
 vkrg::layout::DispatchStage FramesDispatchStageInfo()
