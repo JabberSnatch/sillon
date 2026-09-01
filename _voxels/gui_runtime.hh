@@ -41,16 +41,16 @@ struct Impl
     vktk::Texture gui_symbols_texture;
     VkSampler nearest_sampler;
 
-    void OnGlobalInit(vkrg::runtime::DispatchContext _context);
-    void OnSwapchainInit(vkrg::runtime::DispatchContext _context,
-                         vktk::Swapchain const& _swapchain);
+    void OnModuleScopeOpen(vkrg::runtime::DispatchContext _context);
+    void OnSwapchainScopeOpen(vkrg::runtime::DispatchContext _context,
+                              vktk::Swapchain const& _swapchain);
     void UpdateBindings(vkrg::runtime::DispatchContext _context,
                         Args const& _args);
     void PostSubmit(vkrg::runtime::DispatchContext _context,
                     VkFence _fence);
 };
 
-void Impl::OnGlobalInit(vkrg::runtime::DispatchContext _context)
+void Impl::OnModuleScopeOpen(vkrg::runtime::DispatchContext _context)
 {
     VkSamplerCreateInfo sampler_create{};
     sampler_create.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -92,8 +92,8 @@ void Impl::OnGlobalInit(vkrg::runtime::DispatchContext _context)
     );
 }
 
-void Impl::OnSwapchainInit(vkrg::runtime::DispatchContext _context,
-                           vktk::Swapchain const& _swapchain)
+void Impl::OnSwapchainScopeOpen(vkrg::runtime::DispatchContext _context,
+                                vktk::Swapchain const& _swapchain)
 {}
 
 void Impl::UpdateBindings(vkrg::runtime::DispatchContext _context,
@@ -546,12 +546,12 @@ dispatch_runtime_t Create(vktk::Context* _vulkan, dstk::Registry* _registry)
     runtime.graph = RenderGraph(*_registry);
     runtime.impl = new Impl{};
 
-    runtime.OnGlobalInit = [](dispatch_runtime_t& _rt){
-        ((Impl*)_rt.impl)->OnGlobalInit(_rt.Context());
+    runtime.OnModuleScopeOpen = [](dispatch_runtime_t& _rt){
+        ((Impl*)_rt.impl)->OnModuleScopeOpen(_rt.Context());
     };
 
-    runtime.OnSwapchainInit = [](dispatch_runtime_t& _rt, vktk::Swapchain const& _swapchain){
-        ((Impl*)_rt.impl)->OnSwapchainInit(_rt.Context(), _swapchain);
+    runtime.OnSwapchainScopeOpen = [](dispatch_runtime_t& _rt, vktk::Swapchain const& _swapchain){
+        ((Impl*)_rt.impl)->OnSwapchainScopeOpen(_rt.Context(), _swapchain);
     };
 
     runtime.UpdateBindings = [](dispatch_runtime_t& _rt, dispatch_runtime_t::args_t _args){

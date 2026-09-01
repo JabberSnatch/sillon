@@ -36,9 +36,10 @@ struct Impl
     vktk::Texture accumulated_color;
     VkSampler nearest_sampler;
 
-    void OnGlobalInit(vkrg::runtime::DispatchContext _context);
-    void OnSwapchainInit(vkrg::runtime::DispatchContext _context,
-                         vktk::Swapchain const& _swapchain);
+    void OnModuleScopeOpen(vkrg::runtime::DispatchContext _context);
+    void OnSwapchainScopeOpen(vkrg::runtime::DispatchContext _context,
+                              vktk::Swapchain const& _swapchain);
+
     void UpdateBindings(vkrg::runtime::DispatchContext _context,
                         Args const& _args);
     void PostSubmit(vkrg::runtime::DispatchContext _context,
@@ -67,12 +68,12 @@ dispatch_runtime_t Create(vktk::Context* _vulkan, dstk::Registry* _registry)
         runtime.registry->BindComponent(node, runtime);
     }
 
-    runtime.OnGlobalInit = [](dispatch_runtime_t& _rt){
-        ((Impl*)_rt.impl)->OnGlobalInit(_rt.Context());
+    runtime.OnModuleScopeOpen = [](dispatch_runtime_t& _rt){
+        ((Impl*)_rt.impl)->OnModuleScopeOpen(_rt.Context());
     };
 
-    runtime.OnSwapchainInit = [](dispatch_runtime_t& _rt, vktk::Swapchain const& _swapchain){
-        ((Impl*)_rt.impl)->OnSwapchainInit(_rt.Context(), _swapchain);
+    runtime.OnSwapchainScopeOpen = [](dispatch_runtime_t& _rt, vktk::Swapchain const& _swapchain){
+        ((Impl*)_rt.impl)->OnSwapchainScopeOpen(_rt.Context(), _swapchain);
     };
 
     runtime.UpdateBindings = [](dispatch_runtime_t& _rt, dispatch_runtime_t::args_t _args){
@@ -91,7 +92,7 @@ void Destroy(dispatch_runtime_t& _rt)
     delete (Impl*)_rt.impl;
 }
 
-void Impl::OnGlobalInit(vkrg::runtime::DispatchContext _context)
+void Impl::OnModuleScopeOpen(vkrg::runtime::DispatchContext _context)
 {
     _context.GenerateStaticRuntime();
     _context.ResetDynamicRuntime();
@@ -116,12 +117,12 @@ void Impl::OnGlobalInit(vkrg::runtime::DispatchContext _context)
         (uint32_t, dstk::Registry::Node node) {
             dispatch_runtime_t* runtime =
                 _context.registry.ComponentLookup<dispatch_runtime_t>(node);
-            if (runtime && runtime->OnGlobalInit)
-                runtime->OnGlobalInit(*runtime);
+            if (runtime && runtime->OnModuleScopeOpen)
+                runtime->OnModuleScopeOpen(*runtime);
         });
 }
 
-void Impl::OnSwapchainInit(vkrg::runtime::DispatchContext _context,
+void Impl::OnSwapchainScopeOpen(vkrg::runtime::DispatchContext _context,
                            vktk::Swapchain const& _swapchain)
 {
     _context.ClearFramebufferRuntime();
@@ -221,8 +222,8 @@ void Impl::OnSwapchainInit(vkrg::runtime::DispatchContext _context,
         (uint32_t, dstk::Registry::Node node) {
             dispatch_runtime_t* runtime =
                 _context.registry.ComponentLookup<dispatch_runtime_t>(node);
-            if (runtime && runtime->OnSwapchainInit)
-                runtime->OnSwapchainInit(*runtime, _swapchain);
+            if (runtime && runtime->OnSwapchainScopeOpen)
+                runtime->OnSwapchainScopeOpen(*runtime, _swapchain);
         });
 }
 

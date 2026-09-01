@@ -29,8 +29,13 @@ struct dispatch_runtime_t
     dstk::Registry* registry;
     impl_t impl;
 
-    void (*OnGlobalInit)(dispatch_runtime_t&);
-    void (*OnSwapchainInit)(dispatch_runtime_t&, vktk::Swapchain const&);
+    void (*Destroy)(dispatch_runtime_t&);
+
+    void (*OnModuleScopeOpen)(dispatch_runtime_t&);
+    void (*OnModuleScopeClose)(dispatch_runtime_t&);
+
+    void (*OnSwapchainScopeOpen)(dispatch_runtime_t&, vktk::Swapchain const&);
+    void (*OnSwapchainScopeClose)(dispatch_runtime_t&);
 
     void (*UpdateBindings)(dispatch_runtime_t&, args_t);
     void (*PostSubmit)(dispatch_runtime_t&, VkFence);

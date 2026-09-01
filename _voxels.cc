@@ -1198,7 +1198,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->sparse_runtime.ConstantResources(_state->sparse_runtime);
 #endif
     //_state->progressive_runtime.ConstantResources(_state->progressive_runtime);
-    _state->progressive_runtime.OnGlobalInit(_state->progressive_runtime);
+    _state->progressive_runtime.OnModuleScopeOpen(_state->progressive_runtime);
 
     return;
 }
@@ -1213,7 +1213,7 @@ void RenderResources(void* _pstate,
     _state->sparse_runtime.RenderResources(_state->sparse_runtime, _swapchain);
 #endif
     //_state->progressive_runtime.RenderResources(_state->progressive_runtime, _swapchain);
-    _state->progressive_runtime.OnSwapchainInit(_state->progressive_runtime, _swapchain);
+    _state->progressive_runtime.OnSwapchainScopeOpen(_state->progressive_runtime, _swapchain);
 }
 
 bool Update(void* _pstate, vktk::Context* _vulkan,
