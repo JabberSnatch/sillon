@@ -5,6 +5,7 @@
 
 #include "_voxels.hh"
 
+#include "_voxels/atmosphere_runtime.hh"
 #include "_voxels/progressive_runtime.hh"
 #include "_voxels/voxel_field_runtime.hh"
 #include "_voxels/gui_runtime.hh"

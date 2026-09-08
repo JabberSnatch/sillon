@@ -1,4 +1,11 @@
-#versione 450
+#version 450
+
+layout(location = 0) in vec3 iFS_csPosition;
+layout(location = 0) out vec4 oFS_color;
+
+layout(push_constant, std430) uniform PushConstants {
+    ivec2 render_size;
+};
 
 const float base_radius = 6.360;
 const float outer_radius = 6.460;
@@ -19,7 +26,7 @@ float OuterCircleIntersection(float polar_radius, float outer_radius, float cos_
     return -b + sqrt(det);
 }
 
-vec2 ZenithAltitudeMap(float altitude, float cos_zenith)
+vec2 AltitudeZenithMap(float altitude, float cos_zenith)
 {
     float polar_radius = altitude + base_radius;
     float horizon_depth = sqrt(polar_radius*polar_radius - base_radius*base_radius);
@@ -33,7 +40,7 @@ vec2 ZenithAltitudeMap(float altitude, float cos_zenith)
     );
 }
 
-vec2 ZenithAltitudeInverseMap(vec2 uv)
+vec2 AltitudeZenithInverseMap(vec2 uv)
 {
     float polar_radius = sqrt(uv.y*uv.y*tangent_depth*tangent_depth + base_radius*base_radius);
     float horizon_depth = sqrt(polar_radius*polar_radius - base_radius*base_radius);
@@ -54,5 +61,10 @@ void Transmittance(float org_height, float cos_theta)
 
 void main()
 {
-    vec2 uv = vec2(gl_FragCoord.xy) / vec2(render_size.xy);
+    vec2 uv = (vec2(gl_FragCoord.xy) + vec2(0.5)) / vec2(render_size.xy);
+    vec2 alt_zen = AltitudeZenithInverseMap(uv);
+    float altitude = alt_zen.x;
+    float cos_zenith = alt_zen.y;
+
+    oFS_color = vec4(altitude, cos_zenith, 0.0, 1.0);
 }

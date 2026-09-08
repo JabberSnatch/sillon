@@ -16,7 +16,8 @@ set_property(TARGET vktk PROPERTY CXX_STANDARD 20)
 add_library(sillon MODULE engine.cc _glyphs.cc _icosphere.cc _voxels.cc _editor.cc)
 
 set(SHADER_SOURCES
-  shaders/sparse_region.frag.glsl)
+  shaders/sparse_region.frag.glsl
+  shaders/atmosphere_transmittance.frag.glsl)
 
 
 # === SHADER BUILD SETUP ===
