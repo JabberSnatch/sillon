@@ -77,6 +77,10 @@ void Impl::Destroy(vkrg::runtime::DispatchContext _context)
 
 void Impl::OnModuleScopeOpen(vkrg::runtime::DispatchContext _context)
 {
+    _context.GenerateStaticRuntime();
+    _context.ResetDynamicRuntime();
+    _context.ClearFramebufferRuntime();
+    _context.GenerateFramebufferRuntime(nullptr);
 }
 
 void Impl::OnSwapchainScopeOpen(vkrg::runtime::DispatchContext _context,
@@ -88,13 +92,22 @@ void Impl::UpdateBindings(vkrg::runtime::DispatchContext _context,
                           Args const& _args)
 {
     {
-        dstk::Registry::Node main_stage_node = _context.graph["Transmittance"];
-
         _context.BindAttachments(
-            main_stage_node, _args.render_size.cast<uint32_t>(),
+            _context.graph["FramebufferDispatch"], _args.render_size.cast<uint32_t>(),
             { _args.output_texture.view }
         );
 
+        numtk::bounds2u scissor{ { 0, 0 },
+            _args.render_size.cast<uint32_t>() };
+        numtk::bounds2f viewport{ { 0.f, 0.f },
+            _args.render_size.cast<float>() };
+        _context.BindFramebufferArea(
+            _context.graph["FramebufferDispatch"],
+            { 0, scissor, viewport }
+        );
+
+        dstk::Registry::Node main_stage_node =
+            _context.graph["FramebufferDispatch"]["Transmittance"];
         vkrg::bind::GraphicsCommand command = {};
         command.command = vkrg::bind::DispatchCommand_Draw;
         command.vertex_count = 3;
@@ -120,14 +133,31 @@ void Impl::PostSubmit(vkrg::runtime::DispatchContext _context,
 vkrg::layout::DispatchGraph RenderGraph(dstk::Registry& _registry)
 {
     vkrg::layout::DispatchGraph output{ &_registry };
-    vkrg::layout::DispatchStage main_stage{};
+    _registry.BindComponent(output["FramebufferDispatch"], vkrg::layout::DispatchPass{
+        .mode = vkrg::layout::DispatchMode_Graphics,
+        .graphics = {
+            .attachments = {
+                {
+                    VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
+                    numtk::vec4f::Constant(0.f)
+                }
+            }
+        }
+    });
+
+    vkrg::layout::DispatchGraph& subpasses = output.MakeSubgraph("FramebufferDispatch");
+
+    vkrg::layout::DispatchStage main_stage = {};
     main_stage.name = "transmittance";
 
     main_stage.shaders = std::vector<vkrg::layout::ShaderStage>{
         { VK_SHADER_STAGE_VERTEX_BIT,
-          { "#version 450",
-            #include "../shaders/full_screen.vert.h"
-          }
+          vktk::Context::CompileShader_GLSLtoSPIRV(
+              VK_SHADER_STAGE_VERTEX_BIT, "full_screen_draw",
+              { "#version 450",
+                #include "../shaders/full_screen.vert.h"
+              }
+          )
         },
         { VK_SHADER_STAGE_FRAGMENT_BIT, {
             #include "shaders/atmosphere_transmittance.frag.glsl.spv"
@@ -142,7 +172,7 @@ vkrg::layout::DispatchGraph RenderGraph(dstk::Registry& _registry)
         { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(AtmospherePrecomputePushConstants) }
     };
 
-    _registry.BindComponent(output["Transmittance"], main_stage);
+    _registry.BindComponent(subpasses["Transmittance"], main_stage);
     return output;
 }
 
