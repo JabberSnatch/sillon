@@ -50,7 +50,7 @@ vec2 AltitudeZenithInverseMap(vec2 uv)
 
     return vec2(
         polar_radius - base_radius,
-        (-exit_depth + polar_radius*polar_radius - outer_radius*outer_radius)
+        -(exit_depth + polar_radius*polar_radius - outer_radius*outer_radius)
         / (2.0 * exit_depth * polar_radius)
     );
 }

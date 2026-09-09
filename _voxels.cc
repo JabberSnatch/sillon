@@ -981,14 +981,15 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
     _state->transmittance_runtime = atmosphere_runtime::Create(_vulkan, &_state->core_registry);
     _state->transmittance_runtime.OnModuleScopeOpen(_state->transmittance_runtime);
-    vktk::Texture transmittance_texture =
-        _vulkan->CreateTexture(128, 64, 0,
-                               VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
-                               VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
     {
         atmosphere_runtime::Args args = {};
-        args.render_size = numtk::vec2i{ 128, 64 };
-        args.output_texture = transmittance_texture;
+        args.render_size = numtk::vec2i{ 128, 128 };
+
+        args.output_texture = _vulkan->CreateTexture(
+            args.render_size.x(), args.render_size.y(), 1,
+            VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+            | VK_IMAGE_USAGE_SAMPLED_BIT);
 
         vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
         command_buffer.Begin();
