@@ -19,9 +19,35 @@ const vec3 ozone_absorption = vec3(0.65e-6, 1.881e-6, 0.085e-6) * scale_factor;
 
 const float tangent_depth = sqrt(outer_radius*outer_radius - base_radius*base_radius);
 
-float OuterCircleIntersection(float polar_radius, float outer_radius, float cos_theta)
+float RayleighPhase(float cos_th) {
+    return 3.0 * (1 + cos_th*cos_th) / (16.0 * 3.14159265);
+}
+
+float RayleighDensity(float h) {
+    return exp(-h/0.008);
+}
+
+float MiePhase(float cos_th) {
+    const float g = 0.8;
+    // Henyey-Greenstein phase func
+    return (1 - g*g) / (pow(1 + g*g - 2*g*cos_th, 1.5) * 4 * 3.14159265);
+}
+
+float MieDensity(float h) {
+    return exp(-h/0.0012);
+}
+
+float OzonePhase() {
+    return 1 / (4.0 * 3.14159265);
+}
+
+float OzoneDensity(float h) {
+    return max(0.0, 1.0 - abs(h - 0.025)/0.015);
+}
+
+float OuterCircleIntersection(float polar_radius, float outer_radius, float cos_zenith)
 {
-    float b = polar_radius * cos_theta;
+    float b = polar_radius * cos_zenith;
     float det = b*b - polar_radius*polar_radius + outer_radius*outer_radius;
     return -b + sqrt(det);
 }
@@ -55,8 +81,37 @@ vec2 AltitudeZenithInverseMap(vec2 uv)
     );
 }
 
-void Transmittance(float org_height, float cos_theta)
+#define STEP_COUNT 512.0
+vec3 Transmittance(float altitude, float cos_zenith)
 {
+    float polar_radius = altitude + base_radius;
+    float exit_depth = OuterCircleIntersection(polar_radius, outer_radius, cos_zenith);
+
+    vec3 optical_depths = vec3(0.0);
+
+    float step_size = exit_depth / STEP_COUNT;
+    for (float sample_index = 0.0; sample_index < STEP_COUNT; ++sample_index)
+    {
+        float sample_altitude = altitude + step_size * cos_zenith * sample_index;
+
+        vec3 densities = vec3(
+            RayleighDensity(sample_altitude),
+            MieDensity(sample_altitude),
+            OzoneDensity(sample_altitude)
+        );
+        vec3 optical_step = densities * step_size;
+
+        optical_depths += optical_step;
+    }
+
+    vec3 total_extinction =
+        rayleigh_scattering * optical_depths.x
+        + (mie_scattering+mie_absorption).xxx * optical_depths.y
+        + ozone_absorption * optical_depths.z;
+
+    vec3 transmittance = exp(-total_extinction);
+
+    return transmittance;
 }
 
 void main()
@@ -66,5 +121,7 @@ void main()
     float altitude = alt_zen.x;
     float cos_zenith = alt_zen.y;
 
-    oFS_color = vec4(altitude, cos_zenith, 0.0, 1.0);
+    vec3 tr = Transmittance(altitude, cos_zenith);
+
+    oFS_color = vec4(tr, 1.0);
 }
