@@ -983,13 +983,28 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->transmittance_runtime.OnModuleScopeOpen(_state->transmittance_runtime);
     {
         atmosphere_runtime::Args args = {};
-        args.render_size = numtk::vec2i{ 128, 128 };
-
-        args.output_texture = _vulkan->CreateTexture(
-            args.render_size.x(), args.render_size.y(), 1,
+        args.transmittance_size = numtk::vec2i{ 128, 128 };
+        args.transmittance_texture = _vulkan->CreateTexture(
+            args.transmittance_size.x(), args.transmittance_size.y(), 1,
             VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
             VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
             | VK_IMAGE_USAGE_SAMPLED_BIT);
+
+        args.irradiance_size = numtk::vec2i{ 512, 256 };
+        args.irradiance_texture = _vulkan->CreateTexture(
+            args.irradiance_size.x(), args.irradiance_size.y(), 1,
+            VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+            | VK_IMAGE_USAGE_SAMPLED_BIT);
+
+        numtk::vec3f sun_dir = numtk::vec3f{
+            std::cos(_state->sun_spherical[1]) * std::cos(_state->sun_spherical[0]),
+            std::sin(_state->sun_spherical[1]),
+            std::cos(_state->sun_spherical[1]) * std::sin(_state->sun_spherical[0])
+        }.normalise();
+
+        args.light_dir = sun_dir;
+        args.altitude = 500.f;
 
         vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
         command_buffer.Begin();
