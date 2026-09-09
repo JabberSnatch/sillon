@@ -33,9 +33,9 @@ struct TransmittancePushConstants
 
 struct IrradiancePushConstants
 {
-    numtk::vec2i render_size;
     numtk::vec3f light_dir;
     float altitude;
+    numtk::vec2i render_size;
 };
 
 struct Impl

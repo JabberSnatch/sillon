@@ -8,9 +8,9 @@ layout(location = 0) out vec4 oFS_color;
 layout(set = 0, binding = 0) uniform sampler2D transmittance;
 
 layout(push_constant, std430) uniform PushConstants {
-    ivec2 render_size;
     vec3 light_dir;
     float altitude;
+    ivec2 render_size;
 };
 
 #include "atmosphere_parameters.glsl"
