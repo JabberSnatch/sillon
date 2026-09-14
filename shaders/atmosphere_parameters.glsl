@@ -43,6 +43,13 @@ float OuterCircleIntersection(float polar_radius, float outer_radius, float cos_
     return -b + sqrt(det);
 }
 
+float SampleAltitude(float base_altitude, float distance, float cos_zenith)
+{
+    return sqrt(base_altitude*base_altitude
+                + distance*distance
+                + 2.0*distance*base_altitude*cos_zenith);
+}
+
 vec2 AltitudeZenithMap(float altitude, float cos_zenith)
 {
     float polar_radius = altitude + base_radius;

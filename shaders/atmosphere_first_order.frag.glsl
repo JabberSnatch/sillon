@@ -40,7 +40,7 @@ vec3 FirstOrderIrradiance(float altitude, float cos_zenith, float cos_light)
     vec3 total_inscattering = vec3(0.0);
     for (float sample_index = 0.0; sample_index < STEP_COUNT; ++sample_index)
     {
-        float sample_altitude = altitude + step_size * cos_zenith * sample_index;
+        float sample_altitude = SampleAltitude(altitude, step_size*sample_index, cos_zenith);
 
         vec3 rayleigh_inscattering =
             rayleigh_scattering * RayleighDensity(sample_altitude) * RayleighPhase(cos_light);
