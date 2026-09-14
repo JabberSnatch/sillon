@@ -43,6 +43,13 @@ float OuterCircleIntersection(float polar_radius, float outer_radius, float cos_
     return -b + sqrt(det);
 }
 
+float InnerCircleIntersection(float polar_radius, float inner_radius, float cos_zenith)
+{
+    float b = polar_radius * cos_zenith;
+    float det = b*b - polar_radius*polar_radius + inner_radius*inner_radius;
+    return -b - sqrt(det);
+}
+
 float SampleAltitude(float base_altitude, float distance, float cos_zenith)
 {
     return sqrt(base_altitude*base_altitude
