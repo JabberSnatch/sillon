@@ -2607,12 +2607,24 @@ DispatchContext::GenerateFramebufferRuntime(VkFormat const* _swapchain_format)
 
             if (parent_pass->mode == layout::DispatchMode_Graphics)
             {
+                std::vector<vktk::Context::BlendState> const* blend_states =
+                    &dispatch_stage->graphics.blend_states;
+
+                std::vector<vktk::Context::BlendState> default_blend_states = {};
+                if (dispatch_stage->graphics.blend_states.empty())
+                {
+                    default_blend_states.resize(parent_pass->graphics.attachments.size());
+                    for (vktk::Context::BlendState state : default_blend_states)
+                        state.blend_enable = VK_FALSE;
+                    blend_states = &default_blend_states;
+                }
+
                 VkPipeline pipeline = vulkan.CreatePipeline(
                     runtime.pipeline_layout,
                     *render_pass,
                     pipeline_stages,
                     dispatch_stage->graphics.state_overrides,
-                    dispatch_stage->graphics.blend_states,
+                    *blend_states,
                     dispatch_stage->graphics.topology,
                     dispatch_stage->graphics.input_layout
                     );
