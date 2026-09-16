@@ -294,7 +294,7 @@ vec3 CircleIntersection(float radius, float org_height, float ray_polar)
 
 #define STEP_COUNT 128.0
 #define STEP_COUNT_SECONDARY 8.0
-vec3 AtmosphericScattering(vec3 position, vec3 direction)
+vec3 AtmosphericScattering_Irradiance(vec3 position, vec3 direction)
 {
     const float base_radius = 6.360;
     const float outer_radius = 6.460;
@@ -379,7 +379,12 @@ vec3 AtmosphericScattering(vec3 position, vec3 direction)
         optical_depths += densities * step_size;
     }
 
-    vec3 sky_color = vec3(1.0) - exp(-1.0 * inscattering);
+    return inscattering;
+}
+
+vec3 AtmosphericScattering_Sky(vec3 position, vec3 direction)
+{
+    vec3 sky_color = vec3(1.0) - exp(-1.0 * AtmosphericScattering_Irradiance(position, direction));
     if (sky_color != sky_color)
         sky_color = vec3(1.0, 0.0, 1.0);
     return sky_color;
@@ -460,7 +465,7 @@ void main()
         if (display_mode == 0.0)
         {
             shadow = RegionTraversal4(hitp + light_dir*0.0001, light_dir, payload).w >= 0.0 ? 0.0 : 1.0;
-            diffuse = max(0.0, dot(light_dir, trav.xyz)) * AtmosphericScattering(hitp, light_dir);
+            diffuse = max(0.0, dot(light_dir, trav.xyz)) * AtmosphericScattering_Irradiance(hitp, light_dir);
         }
         else
         {
@@ -484,7 +489,7 @@ void main()
                     {
                         indirect += max(0.0, dot(previous_hit.xyz, light_dir))
                             * current_weight
-                            * AtmosphericScattering(current_org, light_dir);
+                            * AtmosphericScattering_Irradiance(current_org, light_dir);
                     }
                 }
 
@@ -512,7 +517,7 @@ void main()
                 if (current_hit.w < 0.0)
                 {
                     exit_color =
-                        AtmosphericScattering(current_org, current_ray) * current_weight * next_weight;
+                        AtmosphericScattering_Irradiance(current_org, current_ray) * current_weight * next_weight;
                     break;
                 }
 
@@ -548,6 +553,6 @@ void main()
 #endif
     }
     else
-        color.xyz = AtmosphericScattering(org, dir);
+        color.xyz = AtmosphericScattering_Sky(org, dir);
     color.w = 1.0;
 }

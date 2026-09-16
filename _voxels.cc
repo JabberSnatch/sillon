@@ -1004,7 +1004,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
         }.normalise();
 
         args.light_dir = sun_dir;
-        args.altitude = 500.f;
+        args.altitude = 50.f;
 
         vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
         command_buffer.Begin();

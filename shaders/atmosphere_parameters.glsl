@@ -54,7 +54,12 @@ float SampleAltitude(float base_altitude, float distance, float cos_zenith)
 {
     return sqrt(base_altitude*base_altitude
                 + distance*distance
-                + 2.0*distance*base_altitude*cos_zenith);
+                - 2.0*distance*base_altitude*cos_zenith);
+}
+
+float SampleLocalAngle(float base_altitude, float distance, float cos_zenith)
+{
+    return (distance - base_altitude*cos_zenith) / SampleAltitude(base_altitude, distance, cos_zenith);
 }
 
 vec2 AltitudeZenithMap(float altitude, float cos_zenith)
