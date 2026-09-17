@@ -46,8 +46,16 @@ struct TurntableCamera
 
 struct FlightCamera
 {
+#if 0
     numtk::vec2f forward_spherical = { 0.710f, -0.260f };
     numtk::vec3f position = { 37.025f, -36.243f, -18.561f };
+#endif
+#if 0
+    numtk::vec2f forward_spherical = { -4.73f, -1.26f };
+    numtk::vec3f position = { 222.36f, -152.f, -129.64f };
+#endif
+    numtk::vec2f forward_spherical = { -9.45f, -1.57f };
+    numtk::vec3f position = { 248.72f, 223.71f, 152.74f };
 
     float velocity = 5.f;
 
@@ -92,9 +100,9 @@ struct voxel_state_t
     //TurntableCamera camera;
     FlightCamera camera;
 
-    //numtk::vec2f forward_spherical = { 0.710f, -0.260f }
-    //numtk::vec2f sun_spherical = { -2.f, 0.25f };
-    numtk::vec2f sun_spherical = { 0.71f, .7f };
+    numtk::vec2f sun_spherical = { 6.43f, 0.02f };
+    //numtk::vec2f sun_spherical = { 6.46f, 0.01f };
+    //numtk::vec2f sun_spherical = { 0.71f, .7f };
 
     uint32_t frame_index = 0;
 
@@ -1108,6 +1116,13 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
                 + std::to_string(_state->camera.forward_spherical.x()) + " "
                 + std::to_string(_state->camera.forward_spherical.y());
             guitk::Label(_state->gui_context, rotstr.c_str());
+        }
+
+        {
+            std::string lightstr = "light : "
+                + std::to_string(_state->sun_spherical.x()) + " "
+                + std::to_string(_state->sun_spherical.y());
+            guitk::Label(_state->gui_context, lightstr.c_str());
         }
 
         guitk::Checkbox(_state->gui_context, &_state->enable_indirect_light, "Indirect Lighting");

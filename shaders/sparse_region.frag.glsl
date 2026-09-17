@@ -505,15 +505,13 @@ void main()
                     owen_sample.x
                 );
 
-                mat3 tb_mat = genTB(trav.xyz);
+                mat3 tb_mat = genTB(previous_hit.xyz);
                 vec3 current_ray = tb_mat * ts_sample;
-
-                if (dot(current_ray, previous_hit.xyz) < 0.0)
-                    break;
 
                 vec3 next_payload = vec3(0.0);
                 vec4 current_hit = RegionTraversal4(current_org, current_ray, next_payload);
-                float next_weight = max(0.0, dot(-previous_dir, current_ray));
+                // equivalent to dot(previous_hit.xyz, current_ray)
+                float next_weight = ts_sample.z; // dot(previous_hit.xyz, current_ray)
                 if (current_hit.w < 0.0)
                 {
                     exit_color =
