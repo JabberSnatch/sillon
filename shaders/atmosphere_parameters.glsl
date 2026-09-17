@@ -50,20 +50,28 @@ float InnerCircleIntersection(float polar_radius, float inner_radius, float cos_
     return -b - sqrt(det);
 }
 
-float SampleAltitude(float base_altitude, float distance, float cos_zenith)
+float SamplePolarRadius(float base_radius, float distance, float cos_zenith)
 {
-    return sqrt(base_altitude*base_altitude
+    return sqrt(base_radius*base_radius
                 + distance*distance
-                - 2.0*distance*base_altitude*cos_zenith);
+                - 2.0*distance*base_radius*cos_zenith);
 }
 
 float SampleLocalAngle(float base_altitude, float distance, float cos_zenith)
 {
-    return (distance - base_altitude*cos_zenith) / SampleAltitude(base_altitude, distance, cos_zenith);
+    return (distance - base_altitude*cos_zenith) / SamplePolarRadius(base_altitude, distance, cos_zenith);
 }
 
 vec2 AltitudeZenithMap(float altitude, float cos_zenith)
 {
+#if 0
+    return vec2(
+        cos_zenith * 0.5 + 0.5,
+        altitude / (outer_radius-base_radius)
+    );
+
+#else
+
     float polar_radius = altitude + base_radius;
     float horizon_depth = sqrt(polar_radius*polar_radius - base_radius*base_radius);
     float min_depth = outer_radius - polar_radius;
@@ -74,10 +82,19 @@ vec2 AltitudeZenithMap(float altitude, float cos_zenith)
         (exit_depth - min_depth) / (max_depth - min_depth),
         horizon_depth / tangent_depth
     );
+#endif
 }
 
 vec2 AltitudeZenithInverseMap(vec2 uv)
 {
+#if 0
+    return vec2(
+        uv.y * (outer_radius-base_radius),
+        uv.x * 2.0 - 1.0
+    );
+
+#else
+
     float polar_radius = sqrt(uv.y*uv.y*tangent_depth*tangent_depth + base_radius*base_radius);
     float horizon_depth = sqrt(polar_radius*polar_radius - base_radius*base_radius);
     float min_depth = outer_radius - polar_radius;
@@ -89,4 +106,5 @@ vec2 AltitudeZenithInverseMap(vec2 uv)
         -(exit_depth + polar_radius*polar_radius - outer_radius*outer_radius)
         / (2.0 * exit_depth * polar_radius)
     );
+#endif
 }

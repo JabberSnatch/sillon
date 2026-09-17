@@ -985,7 +985,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     _state->transmittance_runtime.OnModuleScopeOpen(_state->transmittance_runtime);
     {
         atmosphere_runtime::Args args = {};
-        args.transmittance_size = numtk::vec2i{ 128, 128 };
+        args.transmittance_size = numtk::vec2i{ 512, 512 };
         args.transmittance_texture = _vulkan->CreateTexture(
             args.transmittance_size.x(), args.transmittance_size.y(), 1,
             VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,

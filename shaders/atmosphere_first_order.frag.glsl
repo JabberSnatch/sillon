@@ -64,9 +64,9 @@ vec3 FirstOrderIrradiance(float altitude,
     for (float sample_index = 0.0; sample_index < STEP_COUNT; ++sample_index)
     {
         float sample_distance = step_size*(sample_index+1.0);
-        float sample_polar = SampleAltitude(polar_radius,
-                                            sample_distance,
-                                            -cos_zenith);
+        float sample_polar = SamplePolarRadius(polar_radius,
+                                               sample_distance,
+                                               -cos_zenith);
         float sample_altitude = sample_polar - base_radius;
 
         vec3 rayleigh_inscattering =
@@ -78,10 +78,10 @@ vec3 FirstOrderIrradiance(float altitude,
 
         float sample_cos_light = dot(normalize(ray_org+ray_dir*sample_distance), light_dir);
         vec3 tr_sky = TransmittanceLookup(sample_altitude, sample_cos_light);
-
         vec3 tr_source = Transmittance(altitude, sample_altitude, cos_zenith);
+        vec3 tr_total = tr_sky * tr_source;
 
-        total_inscattering += inscattering_factor * tr_source * tr_sky * step_size * 40.0;
+        total_inscattering += inscattering_factor * tr_total * step_size * 40.0;
     }
 
     //total_inscattering += direct_radiance;
@@ -124,7 +124,7 @@ vec3 FirstOrderIrradiance_baseline(float altitude,
 
     for (float index_primary = 0.0; index_primary < STEP_COUNT; ++index_primary)
     {
-        vec3 step = ray_org + ray_dir * step_size * (index_primary + 0.5);
+        vec3 step = ray_org + ray_dir * step_size * (index_primary + 1.0);
         float sample_height = length(step) - base_radius;
 
         vec3 densities = vec3(
@@ -134,6 +134,8 @@ vec3 FirstOrderIrradiance_baseline(float altitude,
         );
 
         vec3 optical_step = densities * step_size;
+        optical_depths += optical_step;
+
         vec3 light_optical_depths = vec3(0.0);
         float light_exit_depth =
             OuterCircleIntersection(sample_height + base_radius,
@@ -143,7 +145,7 @@ vec3 FirstOrderIrradiance_baseline(float altitude,
         float light_step_size = light_exit_depth * dx;
         for (float index_light = 0.0; index_light < STEP_COUNT; ++index_light)
         {
-            vec3 light_step = step + light_dir * light_step_size * (index_light + 0.5);
+            vec3 light_step = step + light_dir * light_step_size * (index_light + 1.0);
             float light_height = length(light_step) - base_radius;
 
             vec3 light_densities = vec3(
@@ -156,6 +158,18 @@ vec3 FirstOrderIrradiance_baseline(float altitude,
         }
 
         vec3 current_depths = optical_depths + light_optical_depths;
+        vec3 tr_sky = exp(
+            -rayleigh_scattering * light_optical_depths.x
+            -(mie_scattering+mie_absorption).xxx * light_optical_depths.y
+            -ozone_absorption * light_optical_depths.z);
+
+        vec3 tr_source = exp(
+            -rayleigh_scattering * optical_depths.x
+            -(mie_scattering+mie_absorption).xxx * optical_depths.y
+            -ozone_absorption * optical_depths.z);
+
+        vec3 tr_total = tr_sky * tr_source;
+
         vec3 transmittance = exp(
             -rayleigh_scattering * current_depths.x
             -(mie_scattering+mie_absorption).xxx * current_depths.y
@@ -168,7 +182,7 @@ vec3 FirstOrderIrradiance_baseline(float altitude,
             (rayleigh_scattering * RayleighPhase(cos_ray_light) * rayleigh_transmittance
              + mie_scattering * MiePhase(cos_ray_light) * mie_transmittance);
 
-        optical_depths += densities * step_size;
+        //optical_depths += densities * step_size;
     }
 
     return inscattering;

@@ -22,9 +22,10 @@ vec3 Transmittance(float altitude, float cos_zenith)
     float step_size = exit_depth / STEP_COUNT;
     for (float sample_index = 0.0; sample_index < STEP_COUNT; ++sample_index)
     {
-        float sample_altitude = SampleAltitude(altitude,
+        float sample_polar = SamplePolarRadius(polar_radius,
                                                step_size*(sample_index+1.0),
                                                -cos_zenith);
+        float sample_altitude = sample_polar - base_radius;
 
         vec3 densities = vec3(
             RayleighDensity(sample_altitude),
