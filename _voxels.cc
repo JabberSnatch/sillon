@@ -92,7 +92,9 @@ struct voxel_state_t
     //TurntableCamera camera;
     FlightCamera camera;
 
-    numtk::vec2f sun_spherical = { -2.f, 0.25f };
+    //numtk::vec2f forward_spherical = { 0.710f, -0.260f }
+    //numtk::vec2f sun_spherical = { -2.f, 0.25f };
+    numtk::vec2f sun_spherical = { 0.71f, .7f };
 
     uint32_t frame_index = 0;
 
@@ -992,6 +994,11 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
         args.irradiance_size = numtk::vec2i{ 512, 256 };
         args.irradiance_texture = _vulkan->CreateTexture(
+            args.irradiance_size.x(), args.irradiance_size.y(), 1,
+            VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+            | VK_IMAGE_USAGE_SAMPLED_BIT);
+        args.baseline_texture = _vulkan->CreateTexture(
             args.irradiance_size.x(), args.irradiance_size.y(), 1,
             VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
             VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT

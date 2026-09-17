@@ -12,6 +12,7 @@ struct Args
 
     numtk::vec2i irradiance_size;
     vktk::Texture irradiance_texture;
+    vktk::Texture baseline_texture;
 
     numtk::vec3f light_dir;
     float altitude;
@@ -158,7 +159,7 @@ void Impl::UpdateBindings(vkrg::runtime::DispatchContext _context,
     {
         _context.BindAttachments(
             _context.graph["IrPass"], _args.irradiance_size.cast<uint32_t>(),
-            { _args.irradiance_texture.view }
+            { _args.irradiance_texture.view, _args.baseline_texture.view }
         );
 
         numtk::bounds2u scissor{ { 0, 0 },
@@ -239,7 +240,11 @@ vkrg::layout::DispatchGraph RenderGraph(dstk::Registry& _registry)
                 {
                     VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
                     numtk::vec4f::Constant(0.f)
-                }
+                },
+                {
+                    VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
+                    numtk::vec4f::Constant(0.f)
+                },
             }
         }
     });

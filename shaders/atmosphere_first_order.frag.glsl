@@ -4,6 +4,7 @@
 
 layout(location = 0) in vec3 iFS_csPosition;
 layout(location = 0) out vec4 oFS_color;
+layout(location = 1) out vec4 oFS_baseline;
 
 layout(set = 0, binding = 0) uniform sampler2D transmittance;
 
@@ -80,7 +81,7 @@ vec3 FirstOrderIrradiance(float altitude,
 
         vec3 tr_source = Transmittance(altitude, sample_altitude, cos_zenith);
 
-        total_inscattering += inscattering_factor * tr_source * tr_sky * step_size;
+        total_inscattering += inscattering_factor * tr_source * tr_sky * step_size * 40.0;
     }
 
     //total_inscattering += direct_radiance;
@@ -113,8 +114,6 @@ vec3 FirstOrderIrradiance_baseline(float altitude,
         exit_depth = OuterCircleIntersection(base_radius, polar_radius, -cos_zenith);
         direct_radiance = vec3(0.0);
         step_size = exit_depth;
-
-        //return vec3(0.1);
     }
 
     float dx = 1.0 / STEP_COUNT;
@@ -172,7 +171,8 @@ vec3 FirstOrderIrradiance_baseline(float altitude,
         optical_depths += densities * step_size;
     }
 
-    return vec3(1.0) - exp(-inscattering);
+    return inscattering;
+    //return vec3(1.0) - exp(-inscattering);
 }
 
 
@@ -191,13 +191,16 @@ void main()
     vec3 irradiance = FirstOrderIrradiance(altitude / scale_factor,
                                            ray_dir_world,
                                            light_dir);
-    irradiance *= 40.0; // intensity scale
-    irradiance = vec3(1.0) - exp(-irradiance); // tonemap
-#else
-    vec3 irradiance = FirstOrderIrradiance_baseline(altitude / scale_factor,
-                                                    ray_dir_world,
-                                                    light_dir);
+    //irradiance *= 40.0; // intensity scale
+    //irradiance = vec3(1.0) - exp(-irradiance); // tonemap
+#endif
+
+#if 1
+    vec3 baseline = FirstOrderIrradiance_baseline(altitude / scale_factor,
+                                                  ray_dir_world,
+                                                  light_dir);
 #endif
 
     oFS_color = vec4(irradiance, 1.0);
+    oFS_baseline = vec4(baseline, 1.0);
 }
