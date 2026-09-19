@@ -22,10 +22,11 @@ vec3 TransmittanceLookup(float altitude, float cos_zenith)
     return texture(transmittance, uv).xyz;
 }
 
-vec3 Transmittance(float low, float high, float cos_zenith)
+vec3 Transmittance(float low, float cos_zenith, float high, float distance)
 {
+    float high_cos_zenith = (distance - (min(low, high) + base_radius) * abs(cos_zenith)) / (max(low, high) + base_radius);
     vec3 low_tr = TransmittanceLookup(min(low, high), abs(cos_zenith));
-    vec3 high_tr = TransmittanceLookup(max(high, low), abs(cos_zenith));
+    vec3 high_tr = TransmittanceLookup(max(high, low), abs(high_cos_zenith));
     return low_tr / high_tr;
 }
 
@@ -77,8 +78,13 @@ vec3 FirstOrderIrradiance(float altitude,
         vec3 inscattering_factor = rayleigh_inscattering + mie_inscattering;
 
         float sample_cos_light = dot(normalize(ray_org+ray_dir*sample_distance), light_dir);
+        float sample_cos_horizon = -sqrt(1.0 - min(1.0, (base_radius*base_radius)/(sample_polar*sample_polar)));
+        if (sample_cos_light < sample_cos_horizon)
+            continue;
+
         vec3 tr_sky = TransmittanceLookup(sample_altitude, sample_cos_light);
-        vec3 tr_source = Transmittance(altitude, sample_altitude, cos_zenith);
+
+        vec3 tr_source = Transmittance(altitude, cos_zenith, sample_altitude, sample_distance);
         vec3 tr_total = tr_sky * tr_source;
 
         total_inscattering += inscattering_factor * tr_total * step_size * 40.0;
@@ -125,7 +131,8 @@ vec3 FirstOrderIrradiance_baseline(float altitude,
     for (float index_primary = 0.0; index_primary < STEP_COUNT; ++index_primary)
     {
         vec3 step = ray_org + ray_dir * step_size * (index_primary + 1.0);
-        float sample_height = length(step) - base_radius;
+        float sample_polar = length(step);
+        float sample_height = sample_polar - base_radius;
 
         vec3 densities = vec3(
             RayleighDensity(sample_height),
@@ -135,6 +142,11 @@ vec3 FirstOrderIrradiance_baseline(float altitude,
 
         vec3 optical_step = densities * step_size;
         optical_depths += optical_step;
+
+        float sample_cos_light = dot(normalize(step), light_dir);
+        float sample_cos_horizon = -sqrt(1.0 - min(1.0, (base_radius*base_radius)/(sample_polar*sample_polar)));
+        if (sample_cos_light < sample_cos_horizon)
+            continue;
 
         vec3 light_optical_depths = vec3(0.0);
         float light_exit_depth =
