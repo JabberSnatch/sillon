@@ -105,8 +105,8 @@ struct voxel_state_t
     FlightCamera camera;
 
     //numtk::vec2f sun_spherical = { 5.71f, 0.84f };
-    numtk::vec2f sun_spherical = { 6.43f, 0.02f };
-    //numtk::vec2f sun_spherical = { 6.43f, -0.1f };
+    //numtk::vec2f sun_spherical = { 6.43f, 0.02f };
+    numtk::vec2f sun_spherical = { 6.43f, -0.02f };
     //numtk::vec2f sun_spherical = { 6.46f, 0.01f };
     //numtk::vec2f sun_spherical = { 0.71f, .7f };
 

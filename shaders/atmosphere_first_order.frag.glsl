@@ -24,13 +24,13 @@ vec3 TransmittanceLookup(float altitude, float cos_zenith)
 
 vec3 Transmittance(float low, float cos_zenith, float high, float distance)
 {
-    float high_cos_zenith = (distance - (min(low, high) + base_radius) * abs(cos_zenith)) / (max(low, high) + base_radius);
-    vec3 low_tr = TransmittanceLookup(min(low, high), abs(cos_zenith));
-    vec3 high_tr = TransmittanceLookup(max(high, low), abs(high_cos_zenith));
+    float high_cos_zenith = (distance - (low + base_radius) * -cos_zenith) / (high + base_radius);
+    vec3 low_tr = TransmittanceLookup(low, cos_zenith);
+    vec3 high_tr = TransmittanceLookup(high, high_cos_zenith);
     return low_tr / high_tr;
 }
 
-#define STEP_COUNT 128.0
+#define STEP_COUNT 128
 vec3 FirstOrderIrradiance(float altitude,
                           vec3 ray_dir,
                           vec3 light_dir)
@@ -54,14 +54,22 @@ vec3 FirstOrderIrradiance(float altitude,
     else
     {
         exit_depth = OuterCircleIntersection(base_radius, polar_radius, -cos_zenith);
-        direct_radiance = vec3(0.0);
         step_size = exit_depth;
+
+#if 0
+        vec3 ground_point = ray_org + ray_dir * exit_depth;
+        float ground_cos_light = dot(normalize(ground_point), light_dir);
+
+        direct_radiance = TransmittanceLookup(0.0, ground_cos_light)
+            * Transmittance(0.0, -cos_zenith, altitude, exit_depth)
+            * vec3(0.1) * ground_cos_light * 40.0;
+#endif
+        direct_radiance = vec3(0.0);
     }
 
     float dx = 1.0 / STEP_COUNT;
     step_size *= dx;
     vec3 total_inscattering = vec3(0.0);
-
     for (float sample_index = 0.0; sample_index < STEP_COUNT; ++sample_index)
     {
         float sample_distance = step_size*(sample_index+1.0);
@@ -84,13 +92,16 @@ vec3 FirstOrderIrradiance(float altitude,
 
         vec3 tr_sky = TransmittanceLookup(sample_altitude, sample_cos_light);
 
-        vec3 tr_source = Transmittance(altitude, cos_zenith, sample_altitude, sample_distance);
+        vec3 tr_source = (cos_zenith > cos_horizon)
+            ? Transmittance(altitude, cos_zenith, sample_altitude, sample_distance)
+            : Transmittance(sample_altitude, -cos_zenith, altitude, sample_distance);
+
         vec3 tr_total = tr_sky * tr_source;
 
         total_inscattering += inscattering_factor * tr_total * step_size * 40.0;
     }
 
-    //total_inscattering += direct_radiance;
+    total_inscattering += direct_radiance;
 
     return total_inscattering;
 }
@@ -127,7 +138,6 @@ vec3 FirstOrderIrradiance_baseline(float altitude,
 
     vec3 optical_depths = vec3(0.0);
     vec3 inscattering = vec3(0.0);
-
     for (float index_primary = 0.0; index_primary < STEP_COUNT; ++index_primary)
     {
         vec3 step = ray_org + ray_dir * step_size * (index_primary + 1.0);
@@ -192,13 +202,10 @@ vec3 FirstOrderIrradiance_baseline(float altitude,
 
         inscattering += 40.0 * step_size *
             (rayleigh_scattering * RayleighPhase(cos_ray_light) * rayleigh_transmittance
-             + mie_scattering * MiePhase(cos_ray_light) * mie_transmittance);
-
-        //optical_depths += densities * step_size;
+            + mie_scattering * MiePhase(cos_ray_light) * mie_transmittance);
     }
 
     return inscattering;
-    //return vec3(1.0) - exp(-inscattering);
 }
 
 
@@ -207,10 +214,12 @@ void main()
     vec2 uv = (vec2(gl_FragCoord.xy) + vec2(0.5)) / vec2(render_size.xy);
 
     vec2 ray_dir_spherical = uv * 2.0 - vec2(1.0);
+    ray_dir_spherical.y = sign(ray_dir_spherical.y) * ray_dir_spherical.y*ray_dir_spherical.y;
+    vec2 lat_long = 3.14159265 * vec2(1.0, 0.5) * ray_dir_spherical;
     vec3 ray_dir_world = vec3(
-        cos(ray_dir_spherical.y) * cos(ray_dir_spherical.x),
-        sin(ray_dir_spherical.y),
-        cos(ray_dir_spherical.y) * sin(ray_dir_spherical.x)
+        cos(lat_long.y) * cos(lat_long.x),
+        sin(lat_long.y),
+        cos(lat_long.y) * sin(lat_long.x)
     );
 
 #if 1

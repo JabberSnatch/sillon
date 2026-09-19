@@ -11,7 +11,7 @@ layout(push_constant, std430) uniform PushConstants {
 
 #include "atmosphere_parameters.glsl"
 
-#define STEP_COUNT 512.0
+#define STEP_COUNT 128.0
 vec3 Transmittance(float altitude, float cos_zenith)
 {
     float polar_radius = altitude + base_radius;
@@ -43,7 +43,6 @@ vec3 Transmittance(float altitude, float cos_zenith)
         + ozone_absorption * optical_depths.z;
 
     vec3 transmittance = exp(-total_extinction);
-
     return transmittance;
 }
 
