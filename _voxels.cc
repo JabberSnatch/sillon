@@ -25,6 +25,7 @@
 
 #include <bit>
 #include <chrono>
+#include <format>
 #include <future>
 #include <memory>
 #include <unordered_map>
@@ -103,6 +104,7 @@ struct voxel_state_t
 
     //TurntableCamera camera;
     FlightCamera camera;
+    float fov = 90.f;
 
     //numtk::vec2f sun_spherical = { 5.71f, 0.84f };
     //numtk::vec2f sun_spherical = { 6.43f, 0.02f };
@@ -1063,11 +1065,75 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                     }
                 };
 
+#if 0
+                numtk::vec2u area_dim{ 2, 2 };
+                numtk::vec2u begin{ 431, 6714 };
+                uint32_t voxel_density = 2048;
+                std::string folder_prefix = "ANGERS_COPC";
+                uint32_t z_offset = 0;
+#endif
+
+#if 1
+                numtk::vec2u area_dim{ 2, 2 };
+                numtk::vec2u begin{ 696, 6519 };
+                uint32_t voxel_density = 2048;
+                std::string folder_prefix = "PUYDEDOME_COPC";
+                uint32_t z_offset = 900;
+#endif
+
+                uint32_t upload_count = area_dim.x() * area_dim.y();
+                std::vector<std::future<voxtk::VoxelField>> futures(upload_count);
+
+                for (uint32_t y_index = 0; y_index < area_dim.y(); ++y_index)
+                {
+                    for (uint32_t x_index = 0; x_index < area_dim.x(); ++x_index)
+                    {
+                        uint32_t upload_index = x_index + y_index * area_dim.x();
+
+                        futures[upload_index] = std::async(
+                            std::launch::async,
+                            [x_index, y_index,
+                             &area_dim, &begin,
+                             &voxel_density, &folder_prefix,
+                             &z_offset]() -> voxtk::VoxelField {
+                                systk::Timer scope_time{ "r_" +
+                                    std::to_string(x_index) + "_" +
+                                    std::to_string(y_index),
+                                    [](std::string const& tag, float time) {
+                                        std::cout << "[" << tag << "] " << time << " s" << std::endl;
+                                    }
+                                };
+
+                                numtk::vec2u chunk_index = begin + numtk::vec2u{ x_index, y_index };
+                                std::string path = "../" + folder_prefix + "/"
+                                    + std::format("{:0>4}_{:0>4}",
+                                                  chunk_index.x(),
+                                                  chunk_index.y())
+                                    + ".copc.laz";
+                                return voxtk::importer::ImportCOPC(path, voxel_density, z_offset);
+                            }
+                        );
+                    }
+                }
+
+                for (uint32_t upload_index = 0; upload_index < upload_count; ++upload_index)
+                {
+                    numtk::vec2u chunk_index{
+                        upload_index % area_dim.x(),
+                        area_dim.y() - 1 - (upload_index / area_dim.y())
+                    };
+                    numtk::vec3u offset{ chunk_index.x() * 2048, 0, chunk_index.y() * 2048 };
+                    futures[upload_index].wait();
+                    output.region.SetField(offset.cast<int32_t>(), futures[upload_index].get());
+                }
+
+#if 0
                 output.region =
                     voxtk::importer::ImportCOPC(
                         "../LHD_FXX_0697_6520_PTS_LAMB93_IGN69.copc.laz",
                         //"../LHD_FXX_0697_6520_PTS_C_LAMB93_IGN69.copc.laz",
-                        4096);
+                        2048);//4096);
+#endif
             }
 
             return std::move(output);
@@ -1134,6 +1200,9 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         guitk::Checkbox(_state->gui_context, &_state->enable_indirect_light, "Indirect Lighting");
 
         if (guitk::Slider(_state->gui_context, &_state->sun_power, "Sun Power", 0.f, 1.f))
+            reset_progressive_counter = true;
+
+        if (guitk::Slider(_state->gui_context, &_state->fov, "Field Of View", 5.f, 150.f))
             reset_progressive_counter = true;
 
         guitk::EndFrame(_state->gui_context);
@@ -1213,7 +1282,7 @@ void Draw(void* _pstate,
     progressive_args.voxel_field.view_matrix =
         _state->camera.Matrix();
     progressive_args.voxel_field.projection_matrix =
-        numtk::mat4f::Perspective_VulkanNDC(1.0f, 1000000.f, 90.f*numtk::kDegrees, how);
+        numtk::mat4f::Perspective_VulkanNDC(1.0f, 1000000.f, _state->fov*numtk::kDegrees, how);
     progressive_args.voxel_field.sample_offset = _state->progressive_frame_index;
     progressive_args.voxel_field.sun_spherical = _state->sun_spherical;
     progressive_args.voxel_field.enable_indirect_light = _state->enable_indirect_light;
