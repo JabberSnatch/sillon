@@ -10,7 +10,8 @@
 #include <future>
 #include <vector>
 
-#define VOXEL_CHUNK_SIZE 16u
+#define VOXEL_CHUNK_SIZE 32u
+//#define VOXEL_CHUNK_SIZE 16u
 
 namespace voxel_field_runtime
 {
