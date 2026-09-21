@@ -1101,7 +1101,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                 uint32_t upload_count = area_dim.x() * area_dim.y();
                 std::vector<std::future<voxtk::VoxelField>> futures(upload_count);
 
-                uint32_t const batch_size = 8;
+                uint32_t const batch_size = 16;
                 uint32_t upload_index = 0;
                 while (upload_index < upload_count)
                 {
@@ -1165,6 +1165,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                         };
                         futures[next_upload_index].wait();
                         temp.SetField(offset.cast<int32_t>(), futures[next_upload_index].get());
+                        futures[next_upload_index] = std::future<voxtk::VoxelField>{};
 
                         std::string region_string = std::format(
                             "r_{}_{}", chunk_index.x(), chunk_index.y()
@@ -1174,56 +1175,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 
                     upload_index += batch_size;
                 }
-
-#if 0
-                for (uint32_t y_index = 0; y_index < area_dim.y(); ++y_index)
-                {
-                    for (uint32_t x_index = 0; x_index < area_dim.x(); ++x_index)
-                    {
-                        uint32_t upload_index = x_index + y_index * area_dim.x();
-
-                        futures[upload_index] = std::async(
-                            std::launch::async,
-                            [x_index, y_index,
-                             &area_dim, &begin,
-                             &voxel_density, &folder_prefix,
-                             &z_offset]() -> voxtk::VoxelField {
-                                systk::Timer scope_time{ "r_" +
-                                    std::to_string(x_index) + "_" +
-                                    std::to_string(y_index),
-                                    [](std::string const& tag, float time) {
-                                        std::cout << "[" << tag << "] " << time << " s" << std::endl;
-                                    }
-                                };
-
-                                numtk::vec2u chunk_index = begin + numtk::vec2u{ x_index, y_index };
-                                std::string path = "../" + folder_prefix + "/"
-                                    + std::format("{:0>4}_{:0>4}",
-                                                  chunk_index.x(),
-                                                  chunk_index.y())
-                                    + ".copc.laz";
-                                return voxtk::importer::ImportCOPC(path, voxel_density, z_offset);
-                            }
-                        );
-                    }
-                }
-
-                voxtk::VoxelField temp{};
-                for (uint32_t upload_index = 0; upload_index < upload_count; ++upload_index)
-                {
-                    numtk::vec2u chunk_index{
-                        upload_index % area_dim.x(),
-                        area_dim.y() - 1 - (upload_index / area_dim.x())
-                    };
-                    numtk::vec3u offset{
-                        chunk_index.x() * voxel_density,
-                        0,
-                        chunk_index.y() * voxel_density
-                    };
-                    futures[upload_index].wait();
-                    temp.SetField(offset.cast<int32_t>(), futures[upload_index].get());
-                }
-#endif
 
                 output.region.SetField(-temp.bounds.min, temp);
 #if 0
