@@ -1075,11 +1075,11 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
 #endif
 
 #if 0
-                numtk::vec2u area_dim{ 2, 2 };
+                numtk::vec2u area_dim{ 3, 3 };
                 numtk::vec2u begin{ 696, 6519 };
                 uint32_t voxel_density = 2048;
                 std::string folder_prefix = "PUYDEDOME_COPC";
-                uint32_t z_offset = 900;
+                uint32_t z_offset = 0;
 #endif
 
 #if 1
@@ -1177,6 +1177,7 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
                 }
 
                 output.region.SetField(-temp.bounds.min, temp);
+
 #if 0
                 output.region =
                     voxtk::importer::ImportCOPC(
