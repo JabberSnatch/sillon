@@ -17,6 +17,7 @@ struct Args
     uint32_t swapchain_index;
     VkImage swapchain_image;
     uint32_t progressive_frame_index;
+    float exposure;
 };
 
 dispatch_runtime_t Create(vktk::Context* _vulkan, dstk::Registry* _registry);
@@ -193,23 +194,47 @@ void Impl::OnSwapchainScopeOpen(vkrg::runtime::DispatchContext _context,
         { accumulated_color.view }
     );
 
-    VkDescriptorImageInfo image_info{};
-    image_info.sampler = nearest_sampler;
-    image_info.imageView = primary_pass_color.view;
-    image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    VkWriteDescriptorSet desc_write = _context.BindShaderResource(
-        _context.graph["FramebufferResolve"]["ResolvePass"],
-        vkrg::layout::BindingPoint{
-            .type = vkrg::layout::BindingType_Shader,
-            .shader = { 0, 0 }
-        },
-        0,
-        vkrg::bind::ShaderResources{
-            .images = { image_info }
-        });
 
-    vkUpdateDescriptorSets(_context.vulkan.device, 1, &desc_write, 0u, nullptr);
+    {
+        VkDescriptorImageInfo image_info{};
+        image_info.sampler = nearest_sampler;
+        image_info.imageView = primary_pass_color.view;
+        image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkWriteDescriptorSet desc_write = _context.BindShaderResource(
+            _context.graph["FramebufferResolve"]["ResolvePass"],
+            vkrg::layout::BindingPoint{
+                .type = vkrg::layout::BindingType_Shader,
+                .shader = { 0, 0 }
+            },
+            0,
+            vkrg::bind::ShaderResources{
+                .images = { image_info }
+            });
 
+        vkUpdateDescriptorSets(_context.vulkan.device, 1, &desc_write, 0u, nullptr);
+    }
+
+    _context.BindSwapchain(_context.graph["FramebufferTonemap"], _swapchain);
+    {
+        VkDescriptorImageInfo image_info{};
+        image_info.sampler = nearest_sampler;
+        image_info.imageView = accumulated_color.view;
+        image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkWriteDescriptorSet desc_write = _context.BindShaderResource(
+            _context.graph["FramebufferTonemap"]["TonemapPass"],
+            vkrg::layout::BindingPoint{
+                .type = vkrg::layout::BindingType_Shader,
+                .shader = { 0, 0 }
+            },
+            0,
+            vkrg::bind::ShaderResources{
+                .images = { image_info }
+            });
+
+        vkUpdateDescriptorSets(_context.vulkan.device, 1, &desc_write, 0u, nullptr);
+    }
+
+#if 0
     _context.BindBlitCommand(
         _context.graph["FramebufferBlit"],
         vkrg::bind::BlitCommand{
@@ -232,6 +257,7 @@ void Impl::OnSwapchainScopeOpen(vkrg::runtime::DispatchContext _context,
         },
         accumulated_color.image
     );
+#endif
 
     _context.BindSwapchain(_context.graph["FramebufferScreenSpace"], _swapchain);
 
@@ -275,6 +301,28 @@ void Impl::UpdateBindings(vkrg::runtime::DispatchContext _context,
         _context.graph["FramebufferResolve"],
         { 0, scissor, viewport });
 
+    _context.BindFramebufferArea(
+        _context.graph["FramebufferTonemap"], {
+            _args.swapchain_index, scissor, viewport
+        }
+    );
+
+    {
+        _context.BindGraphicsCommand(
+            _context.graph["FramebufferTonemap"]["TonemapPass"],
+            0,
+            { vkrg::bind::DispatchCommand_Draw, 3, 1 });
+
+        float* push_constants = (float*)_context.BindPushConstants(
+            _context.graph["FramebufferTonemap"]["TonemapPass"],
+            {
+                .type = vkrg::layout::BindingType_PushConstantRange,
+                .push_constant_range = 0
+            }, 0);
+        *push_constants = _args.exposure;
+    }
+
+#if 0
     _context.BindImage(
         _context.graph["FramebufferBlit"],
         vkrg::layout::BindingPoint{
@@ -283,6 +331,7 @@ void Impl::UpdateBindings(vkrg::runtime::DispatchContext _context,
         },
         _args.swapchain_image
     );
+#endif
 
     _context.BindFramebufferArea(
         _context.graph["FramebufferScreenSpace"], {
@@ -290,18 +339,20 @@ void Impl::UpdateBindings(vkrg::runtime::DispatchContext _context,
         }
     );
 
-    _context.BindGraphicsCommand(
-        _context.graph["FramebufferResolve"]["ResolvePass"],
-        0,
-        { vkrg::bind::DispatchCommand_Draw, 3, 1 });
+    {
+        _context.BindGraphicsCommand(
+            _context.graph["FramebufferResolve"]["ResolvePass"],
+            0,
+            { vkrg::bind::DispatchCommand_Draw, 3, 1 });
 
-    float* push_constants = (float*)_context.BindPushConstants(
-        _context.graph["FramebufferResolve"]["ResolvePass"],
-        {
-            .type = vkrg::layout::BindingType_PushConstantRange,
-            .push_constant_range = 0
-        }, 0);
-    *push_constants = 1.f / (float)(_args.progressive_frame_index + 1);
+        float* push_constants = (float*)_context.BindPushConstants(
+            _context.graph["FramebufferResolve"]["ResolvePass"],
+            {
+                .type = vkrg::layout::BindingType_PushConstantRange,
+                .push_constant_range = 0
+            }, 0);
+        *push_constants = 1.f / (float)(_args.progressive_frame_index + 1);
+    }
 }
 
 void Impl::PostSubmit(vkrg::runtime::DispatchContext _context,
@@ -373,6 +424,58 @@ vkrg::layout::DispatchStage ProgressiveResolveStageInfo()
     return output;
 }
 
+vkrg::layout::DispatchStage TonemapStageInfo()
+{
+    vkrg::layout::DispatchStage output = {};
+    output.name = "tonemap";
+
+    output.shaders = std::vector<vkrg::layout::ShaderStage>{
+        { VK_SHADER_STAGE_VERTEX_BIT,
+          vktk::Context::CompileShader_GLSLtoSPIRV(
+              VK_SHADER_STAGE_VERTEX_BIT, "tonemap_vertex",
+              { "#version 450",
+                #include "shaders/full_screen.vert.h"
+              }
+          )
+        },
+        { VK_SHADER_STAGE_FRAGMENT_BIT,
+          vktk::Context::CompileShader_GLSLtoSPIRV(
+              VK_SHADER_STAGE_FRAGMENT_BIT, "tonemap_fragment",
+              { "#version 450",
+                "layout(location = 0) in vec3 iFS_csPosition;"
+                "layout(location = 0) out vec4 oFS_color;"
+                "layout(set = 0, binding = 0) uniform sampler2D framebuffer;"
+                "layout(push_constant, std430) uniform PushConstant {"
+                "float exposure;"
+                "};"
+                "void main() {"
+                //"oFS_color = vec4(texelFetch(framebuffer, ivec2(gl_FragCoord.xy), 0).xyz, 1.0);"
+                "vec3 pre = texelFetch(framebuffer, ivec2(gl_FragCoord.xy), 0).xyz;"
+                "vec3 post = vec3(1.0) - exp(-(pre / exposure));"
+                "oFS_color = vec4(post, 1.0);"
+                "}"
+              }
+          )
+        }
+    };
+
+    output.invocation_count = 1;
+    output.binding_groups.push_back(vkrg::layout::StageBindingGroup{
+        {
+            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              0, 1 }
+        }
+    });
+
+    output.push_constants.push_back(vkrg::layout::PushConstantRange{
+        VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float) }
+    );
+
+    output.graphics.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+    return output;
+}
+
 vkrg::layout::DispatchGraph RenderGraph(dstk::Registry& _registry)
 {
     vkrg::layout::DispatchGraph graph{ &_registry };
@@ -428,6 +531,52 @@ vkrg::layout::DispatchGraph RenderGraph(dstk::Registry& _registry)
                                 }
                             });
 
+
+    _registry.BindComponent(graph["FramebufferTonemap"], vkrg::layout::DispatchPass{
+        .mode = vkrg::layout::DispatchMode_Graphics,
+        .graphics = {
+            .attachments = {
+                {
+                    VK_IMAGE_TYPE_2D, VK_FORMAT_B8G8R8A8_SRGB,
+                    numtk::vec4f::Constant(0.f), VK_ATTACHMENT_LOAD_OP_LOAD
+                },
+            }
+        }
+    });
+
+    graph.MakeSubgraph("FramebufferTonemap");
+    _registry.BindComponent(graph["FramebufferTonemap"]["TonemapPass"],
+                            TonemapStageInfo());
+
+    _registry.BindComponent(graph.MakeEdge("FramebufferResolve", "FramebufferTonemap"),
+                            vkrg::layout::EdgeBindings{
+                                vkrg::layout::EdgeType_Image,
+                                vkrg::layout::BindingPoint{
+                                    .type = vkrg::layout::BindingType_Framebuffer,
+                                    .attachment_index = 0
+                                },
+                                vkrg::layout::BindingPoint{
+                                    .type = vkrg::layout::BindingType_Shader,
+                                    .node_override = graph["FramebufferTonemap"]["TonemapPass"],
+                                    .shader = { 0, 0 }
+                                }
+                            });
+
+    _registry.BindComponent(graph.MakeWeakEdge("FramebufferTonemap", "FramebufferResolve"),
+                            vkrg::layout::EdgeBindings{
+                                vkrg::layout::EdgeType_Image,
+                                vkrg::layout::BindingPoint{
+                                    .type = vkrg::layout::BindingType_Shader,
+                                    .node_override = graph["FramebufferTonemap"]["TonemapPass"],
+                                    .shader = { 0, 0 }
+                                },
+                                vkrg::layout::BindingPoint{
+                                    .type = vkrg::layout::BindingType_Framebuffer,
+                                    .attachment_index = 0
+                                }
+                            });
+
+#if 0
     _registry.BindComponent(graph["FramebufferBlit"], vkrg::layout::NodeTag_BlitImage);
     _registry.BindComponent(graph.MakeEdge("FramebufferResolve", "FramebufferBlit"),
                             vkrg::layout::EdgeBindings{
@@ -460,11 +609,12 @@ vkrg::layout::DispatchGraph RenderGraph(dstk::Registry& _registry)
                             vkrg::layout::EdgeBindings{
                                 vkrg::layout::EdgeType_Image,
                                 {},
-                                    vkrg::layout::BindingPoint{
+                                vkrg::layout::BindingPoint{
                                     .type = vkrg::layout::BindingType_BlitImage,
-                                        .blit_slot = vkrg::layout::BlitImageSlot_Sink
-                                        }
+                                    .blit_slot = vkrg::layout::BlitImageSlot_Sink
+                                }
                             });
+#endif
 
     _registry.BindComponent(graph["FramebufferScreenSpace"], vkrg::layout::DispatchPass{
         .mode = vkrg::layout::DispatchMode_Graphics,
@@ -487,12 +637,27 @@ vkrg::layout::DispatchGraph RenderGraph(dstk::Registry& _registry)
         subpasses.BindSubgraph("GUISubpass", gui_runtime::RenderGraph(_registry));
     }
 
+#if 0
     _registry.BindComponent(graph.MakeEdge("FramebufferBlit", "FramebufferScreenSpace"),
                             vkrg::layout::EdgeBindings{
                                 vkrg::layout::EdgeType_Image,
                                 vkrg::layout::BindingPoint{
                                     .type = vkrg::layout::BindingType_BlitImage,
                                     .blit_slot = vkrg::layout::BlitImageSlot_Sink
+                                },
+                                vkrg::layout::BindingPoint{
+                                    .type = vkrg::layout::BindingType_Framebuffer,
+                                    .attachment_index = 0
+                                }
+                            });
+#endif
+
+    _registry.BindComponent(graph.MakeEdge("FramebufferTonemap", "FramebufferScreenSpace"),
+                            vkrg::layout::EdgeBindings{
+                                vkrg::layout::EdgeType_Image,
+                                vkrg::layout::BindingPoint{
+                                    .type = vkrg::layout::BindingType_Framebuffer,
+                                    .attachment_index = 0
                                 },
                                 vkrg::layout::BindingPoint{
                                     .type = vkrg::layout::BindingType_Framebuffer,

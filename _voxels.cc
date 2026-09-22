@@ -116,6 +116,8 @@ struct voxel_state_t
 
     uint32_t progressive_frame_index = 0;
 
+    float exposure = 1.f;
+
     dstk::Registry core_registry;
     dispatch_runtime_t progressive_runtime;
     dispatch_runtime_t transmittance_runtime;
@@ -1256,6 +1258,9 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         if (guitk::Slider(_state->gui_context, &_state->fov, "Field Of View", 5.f, 150.f))
             reset_progressive_counter = true;
 
+        if (guitk::Slider(_state->gui_context, &_state->exposure, "Exposure", 0.001f, 20.f))
+            reset_progressive_counter = true;
+
         guitk::EndFrame(_state->gui_context);
 
         guitk::WidgetStates const* gui_record = guitk::EndRecord(_state->gui_context);
@@ -1350,6 +1355,7 @@ void Draw(void* _pstate,
     progressive_args.swapchain_index = _swapchain.index;
     progressive_args.swapchain_image = _swapchain.images[_swapchain.index];
     progressive_args.progressive_frame_index = _state->progressive_frame_index;
+    progressive_args.exposure = _state->exposure;
 
     _state->progressive_runtime.Dispatch(_state->progressive_runtime,
                                          &progressive_args,
