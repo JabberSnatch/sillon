@@ -334,7 +334,7 @@ bool Slider(Context context_, float* state_, std::string const& label_, float mi
 
     {
         uint32_t tmp = frame_info.next_row.x();
-        frame_info.next_row.x() += glyph_max.x() + 128u;
+        frame_info.next_row.x() += glyph_max.x() - frame_info.bounds.min.x() + 128u;
         std::string value_string = std::format("{}", *state_);
         _PushText(frame_info, value_string, glyph_max);
         frame_info.next_row.x() = tmp;
