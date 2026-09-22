@@ -1,5 +1,6 @@
 #pragma once
 
+#include <format>
 #include <vector>
 
 #include <dstk.hh>
@@ -329,6 +330,14 @@ bool Slider(Context context_, float* state_, std::string const& label_, float mi
         numtk::bounds2f box_uv = SymbolBounds(SymbolTag_RadioClear, hover);
         frame_info.glyphs[GlyphPage_Symbols].push_back(
             GlyphInfo{ box_bounds, box_uv, GlyphPage_Symbols });
+    }
+
+    {
+        uint32_t tmp = frame_info.next_row.x();
+        frame_info.next_row.x() += glyph_max.x() + 128u;
+        std::string value_string = std::format("{}", *state_);
+        _PushText(frame_info, value_string, glyph_max);
+        frame_info.next_row.x() = tmp;
     }
 
     frame_info.next_row += numtk::vec2u{ 0u, 22u };
