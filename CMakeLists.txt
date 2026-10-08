@@ -18,7 +18,8 @@ add_library(sillon MODULE engine.cc _glyphs.cc _icosphere.cc _voxels.cc _editor.
 set(SHADER_SOURCES
   shaders/sparse_region.frag.glsl
   shaders/atmosphere_transmittance.frag.glsl
-  shaders/atmosphere_first_order.frag.glsl)
+  shaders/atmosphere_first_order.frag.glsl
+  shaders/atmosphere_high_order.frag.glsl)
 
 
 # === SHADER BUILD SETUP ===

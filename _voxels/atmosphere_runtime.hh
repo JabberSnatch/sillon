@@ -10,6 +10,9 @@ struct Args
     numtk::vec2i transmittance_size;
     vktk::Texture transmittance_texture;
 
+    numtk::vec2i multi_scattering_size;
+    vktk::Texture multi_scattering_texture;
+
     numtk::vec2i irradiance_size;
     vktk::Texture irradiance_texture;
     vktk::Texture baseline_texture;
@@ -36,6 +39,11 @@ struct IrradiancePushConstants
 {
     numtk::vec3f light_dir;
     float altitude;
+    numtk::vec2i render_size;
+};
+
+struct MultiScatteringPushConstants
+{
     numtk::vec2i render_size;
 };
 
@@ -158,6 +166,59 @@ void Impl::UpdateBindings(vkrg::runtime::DispatchContext _context,
 
     {
         _context.BindAttachments(
+            _context.graph["MsPass"], _args.transmittance_size.cast<uint32_t>(),
+            { _args.multi_scattering_texture.view }
+        );
+
+        numtk::bounds2u scissor{ { 0, 0 },
+            _args.multi_scattering_size.cast<uint32_t>() };
+        numtk::bounds2f viewport{ { 0.f, 0.f },
+            _args.multi_scattering_size.cast<float>() };
+        _context.BindFramebufferArea(
+            _context.graph["MsPass"],
+            { 0, scissor, viewport }
+        );
+
+        dstk::Registry::Node stage_node =
+            _context.graph["MsPass"]["MsStage"];
+
+        {
+            VkDescriptorImageInfo image_info{};
+            image_info.sampler = linear_sampler;
+            image_info.imageView = _args.transmittance_texture.view;
+            image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            VkWriteDescriptorSet desc_write = _context.BindShaderResource(
+                stage_node,
+                vkrg::layout::BindingPoint{
+                    .type = vkrg::layout::BindingType_Shader,
+                    .shader = { 0, 0 }
+                },
+                0,
+                vkrg::bind::ShaderResources{
+                    .images = { image_info }
+                });
+
+            vkUpdateDescriptorSets(_context.vulkan.device, 1, &desc_write, 0u, nullptr);
+        }
+
+        vkrg::bind::GraphicsCommand command = {};
+        command.command = vkrg::bind::DispatchCommand_Draw;
+        command.vertex_count = 3;
+        command.instance_count = 1;
+        _context.BindGraphicsCommand(stage_node, 0, command);
+
+        MultiScatteringPushConstants* push_constants =
+            (MultiScatteringPushConstants*)_context.BindPushConstants(
+                stage_node,
+                {
+                    .type = vkrg::layout::BindingType_PushConstantRange,
+                    .push_constant_range = 0
+                }, 0);
+        push_constants->render_size = _args.multi_scattering_size;
+    }
+
+    {
+        _context.BindAttachments(
             _context.graph["IrPass"], _args.irradiance_size.cast<uint32_t>(),
             { _args.irradiance_texture.view, _args.baseline_texture.view }
         );
@@ -233,6 +294,18 @@ vkrg::layout::DispatchGraph RenderGraph(dstk::Registry& _registry)
         }
     });
 
+    _registry.BindComponent(output["MsPass"], vkrg::layout::DispatchPass{
+        .mode = vkrg::layout::DispatchMode_Graphics,
+        .graphics = {
+            .attachments = {
+                {
+                    VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
+                    numtk::vec4f::Constant(0.f)
+                }
+            }
+        }
+    });
+
     _registry.BindComponent(output["IrPass"], vkrg::layout::DispatchPass{
         .mode = vkrg::layout::DispatchMode_Graphics,
         .graphics = {
@@ -280,6 +353,43 @@ vkrg::layout::DispatchGraph RenderGraph(dstk::Registry& _registry)
     }
 
     {
+        vkrg::layout::DispatchGraph& ms_pass = output.MakeSubgraph("MsPass");
+        vkrg::layout::DispatchStage ms_stage = {};
+        ms_stage.name = "high_order_irradiance";
+
+        ms_stage.shaders = std::vector<vkrg::layout::ShaderStage>{
+            { VK_SHADER_STAGE_VERTEX_BIT,
+              vktk::Context::CompileShader_GLSLtoSPIRV(
+                  VK_SHADER_STAGE_VERTEX_BIT, "full_screen_draw",
+                  { "#version 450",
+                    #include "../shaders/full_screen.vert.h"
+                  }
+              )
+            },
+            { VK_SHADER_STAGE_FRAGMENT_BIT, {
+                    #include "shaders/atmosphere_high_order.frag.glsl.spv"
+                }
+            }
+        };
+
+        ms_stage.invocation_count = 1;
+        ms_stage.graphics.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+        ms_stage.push_constants = std::vector<vkrg::layout::PushConstantRange>{
+            { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(MultiScatteringPushConstants) }
+        };
+
+        ms_stage.binding_groups.push_back(vkrg::layout::StageBindingGroup{
+            {
+                { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                  0, 1 }
+            }
+        });
+
+        _registry.BindComponent(ms_pass["MsStage"], ms_stage);
+    }
+
+    {
         vkrg::layout::DispatchGraph& ir_pass = output.MakeSubgraph("IrPass");
         vkrg::layout::DispatchStage ir_stage = {};
         ir_stage.name = "first_order_irradiance";
@@ -315,6 +425,20 @@ vkrg::layout::DispatchGraph RenderGraph(dstk::Registry& _registry)
 
         _registry.BindComponent(ir_pass["IrStage"], ir_stage);
     }
+
+    _registry.BindComponent(output.MakeEdge("TrPass", "MsPass"),
+                            vkrg::layout::EdgeBindings{
+                                vkrg::layout::EdgeType_Image,
+                                vkrg::layout::BindingPoint{
+                                    .type = vkrg::layout::BindingType_Framebuffer,
+                                    .attachment_index = 0
+                                },
+                                vkrg::layout::BindingPoint{
+                                    .type = vkrg::layout::BindingType_Shader,
+                                    .node_override = output["MsPass"]["MsStage"],
+                                    .shader = { 0, 0 }
+                                }
+                            });
 
     _registry.BindComponent(output.MakeEdge("TrPass", "IrPass"),
                             vkrg::layout::EdgeBindings{
