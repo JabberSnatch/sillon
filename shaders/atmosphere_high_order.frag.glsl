@@ -46,7 +46,7 @@ vec3 FirstOrderIrradiance(float altitude,
 
         direct_radiance = TransmittanceLookup(0.0, ground_cos_light, transmittance)
             * Transmittance(0.0, -cos_zenith, altitude, exit_depth, transmittance)
-            * vec3(0.05) * ground_cos_light * 40.0;
+            * vec3(0.2) * ground_cos_light * 40.0;
 #endif
         //direct_radiance = vec3(0.0);
     }

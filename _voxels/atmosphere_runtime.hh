@@ -254,6 +254,25 @@ void Impl::UpdateBindings(vkrg::runtime::DispatchContext _context,
             vkUpdateDescriptorSets(_context.vulkan.device, 1, &desc_write, 0u, nullptr);
         }
 
+        {
+            VkDescriptorImageInfo image_info{};
+            image_info.sampler = linear_sampler;
+            image_info.imageView = _args.multi_scattering_texture.view;
+            image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            VkWriteDescriptorSet desc_write = _context.BindShaderResource(
+                stage_node,
+                vkrg::layout::BindingPoint{
+                    .type = vkrg::layout::BindingType_Shader,
+                    .shader = { 0, 1 }
+                },
+                0,
+                vkrg::bind::ShaderResources{
+                    .images = { image_info }
+                });
+
+            vkUpdateDescriptorSets(_context.vulkan.device, 1, &desc_write, 0u, nullptr);
+        }
+
         vkrg::bind::GraphicsCommand command = {};
         command.command = vkrg::bind::DispatchCommand_Draw;
         command.vertex_count = 3;
@@ -419,6 +438,8 @@ vkrg::layout::DispatchGraph RenderGraph(dstk::Registry& _registry)
         ir_stage.binding_groups.push_back(vkrg::layout::StageBindingGroup{
             {
                 { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                  0, 1 },
+                { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                   0, 1 }
             }
         });
@@ -437,6 +458,20 @@ vkrg::layout::DispatchGraph RenderGraph(dstk::Registry& _registry)
                                     .type = vkrg::layout::BindingType_Shader,
                                     .node_override = output["MsPass"]["MsStage"],
                                     .shader = { 0, 0 }
+                                }
+                            });
+
+    _registry.BindComponent(output.MakeEdge("MsPass", "IrPass"),
+                            vkrg::layout::EdgeBindings{
+                                vkrg::layout::EdgeType_Image,
+                                vkrg::layout::BindingPoint{
+                                    .type = vkrg::layout::BindingType_Framebuffer,
+                                    .attachment_index = 0
+                                },
+                                vkrg::layout::BindingPoint{
+                                    .type = vkrg::layout::BindingType_Shader,
+                                    .node_override = output["IrPass"]["IrStage"],
+                                    .shader = { 0, 1 }
                                 }
                             });
 

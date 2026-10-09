@@ -7,6 +7,7 @@ layout(location = 0) out vec4 oFS_color;
 layout(location = 1) out vec4 oFS_baseline;
 
 layout(set = 0, binding = 0) uniform sampler2D transmittance;
+layout(set = 0, binding = 1) uniform sampler2D multi_scattering;
 
 layout(push_constant, std430) uniform PushConstants {
     vec3 light_dir;
@@ -84,7 +85,14 @@ vec3 FirstOrderIrradiance(float altitude,
 
         vec3 tr_total = tr_sky * tr_source;
 
-        total_inscattering += inscattering_factor * tr_total * step_size * 40.0;
+        vec2 multi_scattering_uv = vec2(
+            sample_cos_light * 0.5 + 0.5,
+            (sample_altitude / (outer_radius - base_radius))
+        );
+        vec3 ambient_irradiance = max(vec3(0.0), texture(multi_scattering, multi_scattering_uv).xyz);
+
+        total_inscattering += (inscattering_factor * tr_total * 40.0 + ambient_irradiance)
+            * step_size;
     }
 
     total_inscattering += direct_radiance;
@@ -200,6 +208,7 @@ void main()
     vec2 uv = (vec2(gl_FragCoord.xy) + vec2(0.5)) / vec2(render_size.xy);
 
     vec2 ray_dir_spherical = uv * 2.0 - vec2(1.0);
+    ray_dir_spherical.x = ray_dir_spherical.x*0.5 + 0.5;
     ray_dir_spherical.y = sign(ray_dir_spherical.y) * ray_dir_spherical.y*ray_dir_spherical.y;
     vec2 lat_long = 3.14159265 * vec2(1.0, 0.5) * ray_dir_spherical;
     vec3 ray_dir_world = vec3(
@@ -208,18 +217,18 @@ void main()
         cos(lat_long.y) * sin(lat_long.x)
     );
 
+    vec3 local_light_dir = vec3(sqrt(1.0 - light_dir.y*light_dir.y), light_dir.y, 0.0);
+
 #if 1
     vec3 irradiance = FirstOrderIrradiance(altitude / scale_factor,
                                            ray_dir_world,
-                                           light_dir);
-    //irradiance *= 40.0; // intensity scale
-    //irradiance = vec3(1.0) - exp(-irradiance); // tonemap
+                                           local_light_dir);
 #endif
 
 #if 1
     vec3 baseline = FirstOrderIrradiance_baseline(altitude / scale_factor,
                                                   ray_dir_world,
-                                                  light_dir);
+                                                  local_light_dir);
 #endif
 
     oFS_color = vec4(irradiance, 1.0);
