@@ -10,6 +10,10 @@ const vec3 ozone_absorption = vec3(0.65e-6, 1.881e-6, 0.085e-6) * scale_factor;
 
 const float tangent_depth = sqrt(outer_radius*outer_radius - base_radius*base_radius);
 
+float UniformPhase() {
+    return 1 / (4.0 * 3.14159265);
+}
+
 float RayleighPhase(float cos_th) {
     return 3.0 * (1 + cos_th*cos_th) / (16.0 * 3.14159265);
 }
@@ -29,7 +33,7 @@ float MieDensity(float h) {
 }
 
 float OzonePhase() {
-    return 1 / (4.0 * 3.14159265);
+    return UniformPhase();
 }
 
 float OzoneDensity(float h) {
@@ -107,4 +111,18 @@ vec2 AltitudeZenithInverseMap(vec2 uv)
         / (2.0 * exit_depth * polar_radius)
     );
 #endif
+}
+
+vec3 TransmittanceLookup(float altitude, float cos_zenith, sampler2D tr_tex)
+{
+    vec2 uv = AltitudeZenithMap(altitude, cos_zenith);
+    return texture(tr_tex, uv).xyz;
+}
+
+vec3 Transmittance(float low, float cos_zenith, float high, float distance, sampler2D tr_tex)
+{
+    float high_cos_zenith = (distance - (low + base_radius) * -cos_zenith) / (high + base_radius);
+    vec3 low_tr = TransmittanceLookup(low, cos_zenith, tr_tex);
+    vec3 high_tr = TransmittanceLookup(high, high_cos_zenith, tr_tex);
+    return low_tr / high_tr;
 }

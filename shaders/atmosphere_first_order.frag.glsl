@@ -16,20 +16,6 @@ layout(push_constant, std430) uniform PushConstants {
 
 #include "atmosphere_parameters.glsl"
 
-vec3 TransmittanceLookup(float altitude, float cos_zenith)
-{
-    vec2 uv = AltitudeZenithMap(altitude, cos_zenith);
-    return texture(transmittance, uv).xyz;
-}
-
-vec3 Transmittance(float low, float cos_zenith, float high, float distance)
-{
-    float high_cos_zenith = (distance - (low + base_radius) * -cos_zenith) / (high + base_radius);
-    vec3 low_tr = TransmittanceLookup(low, cos_zenith);
-    vec3 high_tr = TransmittanceLookup(high, high_cos_zenith);
-    return low_tr / high_tr;
-}
-
 #define STEP_COUNT 128
 vec3 FirstOrderIrradiance(float altitude,
                           vec3 ray_dir,
@@ -60,8 +46,8 @@ vec3 FirstOrderIrradiance(float altitude,
         vec3 ground_point = ray_org + ray_dir * exit_depth;
         float ground_cos_light = dot(normalize(ground_point), light_dir);
 
-        direct_radiance = TransmittanceLookup(0.0, ground_cos_light)
-            * Transmittance(0.0, -cos_zenith, altitude, exit_depth)
+        direct_radiance = TransmittanceLookup(0.0, ground_cos_light, transmittance)
+            * Transmittance(0.0, -cos_zenith, altitude, exit_depth, transmittance)
             * vec3(0.1) * ground_cos_light * 40.0;
 #endif
         direct_radiance = vec3(0.0);
@@ -90,11 +76,11 @@ vec3 FirstOrderIrradiance(float altitude,
         if (sample_cos_light < sample_cos_horizon)
             continue;
 
-        vec3 tr_sky = TransmittanceLookup(sample_altitude, sample_cos_light);
+        vec3 tr_sky = TransmittanceLookup(sample_altitude, sample_cos_light, transmittance);
 
         vec3 tr_source = (cos_zenith > cos_horizon)
-            ? Transmittance(altitude, cos_zenith, sample_altitude, sample_distance)
-            : Transmittance(sample_altitude, -cos_zenith, altitude, sample_distance);
+            ? Transmittance(altitude, cos_zenith, sample_altitude, sample_distance, transmittance)
+            : Transmittance(sample_altitude, -cos_zenith, altitude, sample_distance, transmittance);
 
         vec3 tr_total = tr_sky * tr_source;
 
