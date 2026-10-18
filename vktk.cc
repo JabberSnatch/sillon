@@ -89,20 +89,27 @@ Context::Context(uint64_t _hinstance, uint64_t _hwindow)
         std::vector<VkPhysicalDevice> availableDevices{ dev_count };
         vkEnumeratePhysicalDevices(instance, &dev_count, availableDevices.data());
 
-        for (uint32_t devIndex = 0u; devIndex < dev_count; ++devIndex)
+        uint32_t selected_index = 0u;
+        for (uint32_t devIndex = 1u; devIndex < dev_count; ++devIndex)
         {
             VkPhysicalDeviceProperties properties{};
-            VkPhysicalDeviceMemoryProperties memoryProperties{};
             vkGetPhysicalDeviceProperties(availableDevices[devIndex], &properties);
-            vkGetPhysicalDeviceMemoryProperties(availableDevices[devIndex], &memoryProperties);
 
             if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+            //if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)
             {
-                std::cout << "[vktk] [" << properties.deviceName << "]" << std::endl;
-                physical_device = availableDevices[devIndex];
-                memory_properties = memoryProperties;
+                selected_index = devIndex;
                 break;
             }
+        }
+
+        {
+            physical_device = availableDevices[selected_index];
+            vkGetPhysicalDeviceMemoryProperties(physical_device, &memory_properties);
+
+            VkPhysicalDeviceProperties properties{};
+            vkGetPhysicalDeviceProperties(physical_device, &properties);
+            std::cout << "[vktk] [" << properties.deviceName << "]" << std::endl;
         }
     }
 
