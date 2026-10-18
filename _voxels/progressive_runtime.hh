@@ -448,11 +448,42 @@ vkrg::layout::DispatchStage TonemapStageInfo()
                 "layout(push_constant, std430) uniform PushConstant {"
                 "float exposure;"
                 "};"
+
+                R"(
+  float startCompression = 0.8 - 0.04;
+  float desaturation = 0.15;
+
+  vec3 CommerceToneMapping( vec3 color ) {
+    float x = min(color.r, min(color.g, color.b));
+    float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
+    color -= offset;
+
+    float peak = max(color.r, max(color.g, color.b));
+    if (peak < startCompression) return color;
+
+    float d = 1. - startCompression;
+    float newPeak = 1. - d * d / (peak + d - startCompression);
+    color *= newPeak / peak;
+
+    float g = 1. - 1. / (desaturation * (peak - newPeak) + 1.);
+    return mix(color, newPeak * vec3(1, 1, 1), g);
+  }
+)"
+
                 "void main() {"
-                //"oFS_color = vec4(texelFetch(framebuffer, ivec2(gl_FragCoord.xy), 0).xyz, 1.0);"
-                "vec3 pre = texelFetch(framebuffer, ivec2(gl_FragCoord.xy), 0).xyz;"
-                "vec3 post = vec3(1.0) - exp(-(pre / exposure));"
+                "vec3 source = texelFetch(framebuffer, ivec2(gl_FragCoord.xy), 0).xyz;"
+#if 0
+                "oFS_color = vec4(source / exposure, 1.0);"
+#endif
+
+#if 1
+                "oFS_color = vec4(CommerceToneMapping(source / exposure), 1.0);"
+#endif
+
+#if 0
+                "vec3 post = vec3(1.0) - exp(-(source / exposure));"
                 "oFS_color = vec4(post, 1.0);"
+#endif
                 "}"
               }
           )
