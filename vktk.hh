@@ -1067,6 +1067,16 @@ struct DispatchContext {
     void ResetDynamicRuntime(bind::PNextMap const& _pNext_map = {});
     void Dispatch(vktk::CommandBuffer& _command_buffer) const;
 
+    void ScopeOpenDescriptorPools();
+    void ScopeOpenPipelineLayouts();
+    void ScopeOpenRenderPasses(VkFormat _dynamic_format = VK_FORMAT_UNDEFINED);
+    void ScopeOpenPipelines();
+
+    void ScopeClosePipelines();
+    void ScopeCloseRenderPasses();
+    void ScopeClosePipelineLayouts();
+    void ScopeCloseDescriptorPools();
+
     std::vector<vktk::Context::RenderPassAttachment> RenderPassDescription(
         dstk::Registry::Node _node,
         VkFormat const* _swapchain_format = nullptr) const;

@@ -3053,6 +3053,249 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
     });
 }
 
+void
+DispatchContext::ScopeOpenDescriptorPools()
+{
+    std::vector<layout::DispatchStage const*> stages =
+        registry.ComponentGlobalLookup<layout::DispatchStage>();
+
+    for (layout::DispatchStage const* stage : stages)
+    {
+        dstk::Registry::Node node = registry.NodeLookup(stage);
+        std::vector<vktk::DynamicDescriptorPool>& pools =
+            registry.ComponentRequest<std::vector<vktk::DynamicDescriptorPool>>(node);
+
+        for (layout::StageBindingGroup const& binding_group : stage->binding_groups)
+        {
+            std::vector<vktk::Context::DescriptorSetBindingPoint> bindings = {};
+            for (layout::StageBinding const& binding : binding_group.bindings)
+                bindings.push_back(vktk::Context::DescriptorSetBindingPoint{
+                    binding.type,
+                    binding.flags,
+                    binding.stages,
+                    binding.count
+                });
+
+            pools.push_back(vulkan.CreateDynamicDescriptorPool(bindings));
+        }
+    }
+}
+
+void
+DispatchContext::ScopeCloseDescriptorPools()
+{
+    std::vector<layout::DispatchStage const*> stages =
+        registry.ComponentGlobalLookup<layout::DispatchStage>();
+
+    for (layout::DispatchStage const* stage : stages)
+    {
+        dstk::Registry::Node node = registry.NodeLookup(stage);
+        std::vector<vktk::DynamicDescriptorPool>& pools =
+            *registry.ComponentLookup<std::vector<vktk::DynamicDescriptorPool>>(node);
+
+        for (vktk::DynamicDescriptorPool& pool : pools)
+            vulkan.DestroyDynamicDescriptorPool(pool);
+
+        registry.ComponentErase(node, &pools);
+    }
+}
+
+void
+DispatchContext::ScopeOpenPipelineLayouts()
+{
+    std::vector<layout::DispatchStage const*> stages =
+        registry.ComponentGlobalLookup<layout::DispatchStage>();
+
+    for (layout::DispatchStage const* stage : stages)
+    {
+        dstk::Registry::Node node = registry.NodeLookup(stage);
+
+        std::vector<vktk::DynamicDescriptorPool> const& pools =
+            *registry.ComponentLookup<std::vector<vktk::DynamicDescriptorPool>>(node);
+        std::vector<VkDescriptorSetLayout> set_layouts = {};
+        for (vktk::DynamicDescriptorPool const& pool : pools)
+            set_layouts.push_back(pool.layout);
+
+        std::vector<VkPushConstantRange> push_constant_ranges = {};
+        for (layout::PushConstantRange const& push_constants : stage->push_constants)
+            push_constant_ranges.push_back(VkPushConstantRange{
+                push_constants.stages,
+                push_constants.offset,
+                push_constants.size
+            });
+
+        VkPipelineLayout pipeline_layout = {};
+        VkPipelineLayoutCreateInfo pipeline_create = {};
+        pipeline_create.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipeline_create.pNext = nullptr;
+        pipeline_create.flags = 0u;
+        pipeline_create.setLayoutCount = set_layouts.size();
+        pipeline_create.pSetLayouts = set_layouts.data();
+        pipeline_create.pushConstantRangeCount = push_constant_ranges.size();
+        pipeline_create.pPushConstantRanges = push_constant_ranges.data();
+        CHECKCALL(vkCreatePipelineLayout, vulkan.device, &pipeline_create, nullptr,
+                  &pipeline_layout);
+
+        registry.BindComponent(node, pipeline_layout);
+    }
+}
+
+void
+DispatchContext::ScopeClosePipelineLayouts()
+{
+    std::vector<layout::DispatchStage const*> stages =
+        registry.ComponentGlobalLookup<layout::DispatchStage>();
+
+    for (layout::DispatchStage const* stage : stages)
+    {
+        dstk::Registry::Node node = registry.NodeLookup(stage);
+        VkPipelineLayout* pipeline_layout = registry.ComponentLookup<VkPipelineLayout>(node);
+        vkDestroyPipelineLayout(vulkan.device, *pipeline_layout, nullptr);
+        registry.ComponentErase(node, pipeline_layout);
+    }
+}
+
+void
+DispatchContext::ScopeOpenRenderPasses(VkFormat _dynamic_format)
+{
+    std::vector<layout::DispatchPass const*> passes =
+        registry.ComponentGlobalLookup<layout::DispatchPass>();
+
+    for (layout::DispatchPass const* pass : passes)
+    {
+        if (pass->mode != layout::DispatchMode_Graphics)
+            continue;
+
+        dstk::Registry::Node node = registry.NodeLookup(pass);
+        registry.BindComponent(
+            node,
+            vulkan.CreateRenderPass(
+                RenderPassDescription(node, _dynamic_format)));
+    }
+}
+
+void
+DispatchContext::ScopeCloseRenderPasses()
+{
+    std::vector<layout::DispatchPass const*> passes =
+        registry.ComponentGlobalLookup<layout::DispatchPass>();
+
+    for (layout::DispatchPass const* pass : passes)
+    {
+        if (pass->mode != layout::DispatchMode_Graphics)
+            continue;
+
+        dstk::Registry::Node node = registry.NodeLookup(pass);
+        VkRenderPass* render_pass = registry.ComponentLookup<VkRenderPass>(node);
+        vkDestroyRenderPass(vulkan.device, *render_pass, nullptr);
+        registry.ComponentErase(node, render_pass);
+    }
+}
+
+void
+DispatchContext::ScopeOpenPipelines()
+{
+    std::vector<layout::DispatchStage const*> stages =
+        registry.ComponentGlobalLookup<layout::DispatchStage>();
+
+    for (layout::DispatchStage const* stage : stages)
+    {
+        dstk::Registry::Node node = registry.NodeLookup(stage);
+
+        dstk::Registry::Node parent_pass_node = dstk::FreeList::kInvalidIndex;
+        layout::DispatchPass const* parent_pass = nullptr;
+        {
+            layout::DispatchGraph::Data* current_data =
+                *registry.ComponentLookup<layout::DispatchGraph::Data*>(node);
+            while (current_data->parent_node)
+            {
+                parent_pass =
+                    registry.ComponentLookup<layout::DispatchPass>(current_data->parent_node);
+                if (parent_pass)
+                {
+                    parent_pass_node = current_data->parent_node;
+                    break;
+                }
+
+                current_data =
+                    *registry.ComponentLookup<layout::DispatchGraph::Data*>(
+                        current_data->parent_node);
+            }
+        }
+        assert(parent_pass);
+
+        VkRenderPass render_pass = *registry.ComponentLookup<VkRenderPass>(parent_pass_node);
+        VkPipelineLayout pipeline_layout = *registry.ComponentLookup<VkPipelineLayout>(node);
+
+        std::vector<vktk::Context::PipelineStage> pipeline_stages = {};
+        for (layout::ShaderStage const& shader : stage->shaders)
+        {
+            std::string shader_name = stage->name;
+            switch (shader.stage)
+            {
+            case VK_SHADER_STAGE_VERTEX_BIT: shader_name += "_vertex"; break;
+            case VK_SHADER_STAGE_FRAGMENT_BIT: shader_name += "_fragment"; break;
+            default: shader_name += "_unknown"; break;
+            }
+
+            VkShaderModule shader_module = vulkan.CompileShader_SPIRV(shader.binary);
+            pipeline_stages.push_back(vktk::Context::PipelineStage{
+                shader_module,
+                shader.stage
+            });
+        }
+
+        if (parent_pass->mode == layout::DispatchMode_Graphics)
+        {
+            std::vector<vktk::Context::BlendState> const* blend_states =
+                &stage->graphics.blend_states;
+
+            std::vector<vktk::Context::BlendState> default_blend_states = {};
+            if (stage->graphics.blend_states.empty())
+            {
+                default_blend_states.resize(parent_pass->graphics.attachments.size());
+                for (vktk::Context::BlendState state : default_blend_states)
+                    state.blend_enable = VK_FALSE;
+                blend_states = &default_blend_states;
+            }
+
+            VkPipeline pipeline = vulkan.CreatePipeline(
+                pipeline_layout,
+                render_pass,
+                pipeline_stages,
+                stage->graphics.state_overrides,
+                *blend_states,
+                stage->graphics.topology,
+                stage->graphics.input_layout
+            );
+
+            registry.BindComponent(node, pipeline);
+        }
+
+        for (vktk::Context::PipelineStage const& pipeline_stage : pipeline_stages)
+            vkDestroyShaderModule(vulkan.device, pipeline_stage.module, nullptr);
+    }
+}
+
+void
+DispatchContext::ScopeClosePipelines()
+{
+    std::vector<layout::DispatchStage const*> stages =
+        registry.ComponentGlobalLookup<layout::DispatchStage>();
+
+    for (layout::DispatchStage const* stage : stages)
+    {
+        dstk::Registry::Node node = registry.NodeLookup(stage);
+
+        VkPipeline* pipeline = registry.ComponentLookup<VkPipeline>(node);
+        if (!pipeline)
+            continue;
+
+        vkDestroyPipeline(vulkan.device, *pipeline, nullptr);
+        registry.ComponentErase(node, pipeline);
+    }
+}
+
 std::vector<vktk::Context::RenderPassAttachment>
 DispatchContext::RenderPassDescription(
     dstk::Registry::Node _node,
