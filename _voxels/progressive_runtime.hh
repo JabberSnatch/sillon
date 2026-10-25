@@ -57,17 +57,19 @@ dispatch_runtime_t Create(vktk::Context* _vulkan, dstk::Registry* _registry)
     runtime.impl = new Impl{};
 
     {
-        dstk::Registry::Node node = runtime.graph["FramebufferDispatch"]["SparseRegionSubpass"];
-        dispatch_runtime_t runtime = voxel_field_runtime::Create(_vulkan, _registry);
-        runtime.graph = *runtime.registry->ComponentLookup<vkrg::layout::DispatchGraph>(node);
-        runtime.registry->BindComponent(node, runtime);
+        dstk::Registry::Node node = runtime.graph["FramebufferDispatch"];
+        dispatch_runtime_t* component = _registry->BindComponent(
+            node,
+            voxel_field_runtime::Create(_vulkan, _registry));
+        runtime.graph.BindSubgraph(node, &component->graph);
     }
 
     {
         dstk::Registry::Node node = runtime.graph["FramebufferScreenSpace"]["GUISubpass"];
-        dispatch_runtime_t runtime = gui_runtime::Create(_vulkan, _registry);
-        runtime.graph = *runtime.registry->ComponentLookup<vkrg::layout::DispatchGraph>(node);
-        runtime.registry->BindComponent(node, runtime);
+        dispatch_runtime_t* component = _registry->BindComponent(
+            node,
+            gui_runtime::Create(_vulkan, _registry));
+        runtime.graph.BindSubgraph(node, &component->graph);
     }
 
     runtime.Destroy = [](dispatch_runtime_t& _rt){
@@ -145,7 +147,7 @@ void Impl::OnSwapchainScopeOpen(vkrg::runtime::DispatchContext _context,
                            vktk::Swapchain const& _swapchain)
 {
     _context.ClearFramebufferRuntime();
-    _context.GenerateFramebufferRuntime(&_swapchain.format);
+    _context.GenerateFramebufferRuntime(_swapchain.format);
 
     {
         _context.vulkan.DestroyTexture(primary_pass_color);
@@ -277,7 +279,7 @@ void Impl::UpdateBindings(vkrg::runtime::DispatchContext _context,
     {
         dispatch_runtime_t& runtime =
             *_context.registry.ComponentLookup<dispatch_runtime_t>(
-                _context.graph["FramebufferDispatch"]["SparseRegionSubpass"]);
+                _context.graph["FramebufferDispatch"]);
         runtime.UpdateBindings(runtime, &_args.voxel_field);
     }
 
@@ -528,8 +530,7 @@ vkrg::layout::DispatchGraph RenderGraph(dstk::Registry& _registry)
     });
 
     {
-        vkrg::layout::DispatchGraph& subpasses = graph.MakeSubgraph("FramebufferDispatch");
-        subpasses.BindSubgraph("SparseRegionSubpass", voxel_field_runtime::RenderGraph(_registry));
+        graph.BindSubgraph("FramebufferDispatch", voxel_field_runtime::RenderGraph(_registry));
     }
 
     _registry.BindComponent(graph["FramebufferResolve"], vkrg::layout::DispatchPass{

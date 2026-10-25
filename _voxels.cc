@@ -1859,7 +1859,7 @@ dispatch_runtime_t SparseRenderingPipeline(
                                 vktk::Swapchain const& _swapchain)
     {
         _rt.Context().ClearFramebufferRuntime();
-        _rt.Context().GenerateFramebufferRuntime(&_swapchain.format);
+        _rt.Context().GenerateFramebufferRuntime(_swapchain.format);
         _rt.Context().BindSwapchain(_rt.graph["FramebufferDispatch"],
                                     _swapchain);
 

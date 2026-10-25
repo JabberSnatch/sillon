@@ -644,10 +644,29 @@ struct DispatchGraph
         data->data_node = data_node;
     }
 
-    DispatchGraph(DispatchGraph const&) = default;
-    DispatchGraph& operator=(DispatchGraph const&) = default;
-    DispatchGraph(DispatchGraph&&) = default;
-    DispatchGraph& operator=(DispatchGraph&&) = default;
+    DispatchGraph(DispatchGraph const&) = delete;
+    DispatchGraph& operator=(DispatchGraph const&) = delete;
+
+    DispatchGraph(DispatchGraph&& _o)
+        : data{ _o.data } {
+        _o.data = nullptr;
+    }
+
+    DispatchGraph& operator=(DispatchGraph&& _o) {
+        std::swap(data, _o.data);
+        return *this;
+    }
+
+    ~DispatchGraph() {
+        if (!data)
+            return;
+
+        for (dstk::Registry::Node edge : data->edges)
+            data->registry->EraseNode(edge);
+        for (auto const& pair : data->name_lookup.pairs)
+            data->registry->EraseNode(pair.first);
+        data->registry->EraseNode(data->data_node);
+    }
 
     struct EdgeDesc {
         dstk::Registry::Node source;
@@ -657,7 +676,7 @@ struct DispatchGraph
     struct NodeView {
         operator dstk::Registry::Node() const { return node; }
         NodeView operator[](std::string const& name) const {
-            return (*graph->data->registry->ComponentLookup<DispatchGraph>(node))[name];
+            return (**graph->data->registry->ComponentLookup<DispatchGraph*>(node))[name];
         }
         NodeView operator[](char const* name) {
             return this->operator[](std::string{ name });
@@ -668,17 +687,28 @@ struct DispatchGraph
 
     DispatchGraph& MakeSubgraph(std::string const& parent_node) {
         dstk::Registry::Node node = this->operator[](parent_node);
-        DispatchGraph output{ data->registry };
-        output.data->parent_node = node;
+        data->registry->BindComponent(node, DispatchGraph{ data->registry });
+        DispatchGraph* output = data->registry->ComponentLookup<DispatchGraph>(node);
+        output->data->parent_node = node;
         data->registry->BindComponent(node, output);
-        return *data->registry->ComponentLookup<DispatchGraph>(node);
+        return *output;
     }
 
-    void BindSubgraph(std::string const& parent_node, DispatchGraph const& graph) {
+    void BindSubgraph(std::string const& parent_node, DispatchGraph&& graph) {
         dstk::Registry::Node node = this->operator[](parent_node);
         DispatchGraph& output = data->registry->ComponentRequest<DispatchGraph>(node);
-        output = graph;
+        output = std::move(graph);
         output.data->parent_node = node;
+        data->registry->ComponentRequest<DispatchGraph*>(node) = &output;
+    }
+
+    void BindSubgraph(dstk::Registry::Node node, DispatchGraph* graph) {
+        data->registry->ComponentRequest<DispatchGraph*>(node) = graph;
+        graph->data->parent_node = node;
+
+        DispatchGraph* stored_graph = data->registry->ComponentLookup<DispatchGraph>(node);
+        if (stored_graph)
+            data->registry->ComponentErase(node, stored_graph);
     }
 
     dstk::Registry::Node MakeNode(std::string const& name = "") {
@@ -694,6 +724,7 @@ struct DispatchGraph
         dstk::Registry::Node sink_node = data->name_lookup[sink];
 
         dstk::Registry::Node edge = data->registry->handle_pool.Reserve();
+        data->edges.push_back(edge);
         data->edges_in[sink_node].push_back(edge);
         data->edges_out[source_node].push_back(edge);
         data->registry->BindComponent(edge, EdgeDesc{ source_node, sink_node });
@@ -707,7 +738,7 @@ struct DispatchGraph
     }
 
     DispatchGraph const& Subgraph(std::string const& name) const {
-        return *data->registry->ComponentLookup<DispatchGraph>((*this)[name]);
+        return **data->registry->ComponentLookup<DispatchGraph*>((*this)[name]);
     }
 
     std::vector<dstk::Registry::Node> Inputs() const {
@@ -835,10 +866,10 @@ struct DispatchGraph
                 dstk::Registry::Node node = node_queue[node_queue.size() - 1 - index];
                 callback(depth, node);
 
-                DispatchGraph const* subgraph =
-                    graph->data->registry->ComponentLookup<DispatchGraph>(node);
+                DispatchGraph** subgraph =
+                    graph->data->registry->ComponentLookup<DispatchGraph*>(node);
                 if (subgraph)
-                    recursion(subgraph, callback, recursion, depth+1);
+                    recursion(*subgraph, callback, recursion, depth+1);
             }
         };
 
@@ -861,17 +892,17 @@ struct DispatchGraph
             while (!node_stack.empty())
             {
                 dstk::Registry::Node current_node = node_stack.back();
-                vkrg::layout::DispatchGraph const* subgraph = root->data->registry->ComponentLookup<vkrg::layout::DispatchGraph>(current_node);
-
                 callback(graph_stack.size() + base_depth, invoc_stack, current_node);
 
+                DispatchGraph** subgraph =
+                    root->data->registry->ComponentLookup<DispatchGraph*>(current_node);
                 if (subgraph)
                 {
                     uint32_t node_invoc_count =
                         root->data->invoc_count.count(current_node)
                         ? root->data->invoc_count.at(current_node) : 1u;
 
-                    graph_stack.push_back(subgraph);
+                    graph_stack.push_back(*subgraph);
                     invoc_stack.push_back(0u);
                     for (uint32_t invoc_index = 0u; invoc_index < node_invoc_count; ++invoc_index)
                     {
@@ -920,6 +951,7 @@ struct DispatchGraph
         dstk::Registry::Node parent_node = dstk::FreeList::kInvalidIndex;
         std::unordered_map<dstk::Registry::Node, std::vector<dstk::Registry::Node>> edges_in;
         std::unordered_map<dstk::Registry::Node, std::vector<dstk::Registry::Node>> edges_out;
+        std::vector<dstk::Registry::Node> edges;
         dstk::BijectiveMap<dstk::Registry::Node, std::string> name_lookup;
         InvocCountMap invoc_count;
     };
@@ -941,6 +973,11 @@ struct GraphicsCommand {
     DispatchCommand command;
     uint32_t vertex_count;
     uint32_t instance_count;
+};
+
+struct FramebufferDesc {
+    numtk::vec2u size;
+    std::vector<VkImageView> views;
 };
 
 struct FramebufferArea {
@@ -1026,6 +1063,7 @@ struct BlitBindings {
 namespace runtime
 {
 
+#if 0
 struct StageBindingGroupStatic {
     vktk::DynamicDescriptorPool pool;
 };
@@ -1034,6 +1072,7 @@ struct DispatchStageStatic {
     VkPipelineLayout pipeline_layout;
     std::vector<StageBindingGroupStatic> binding_groups;
 };
+#endif
 
 struct StageBindingGroupDynamic {
     std::vector<VkDescriptorSet> sets;
@@ -1063,7 +1102,7 @@ struct DispatchContext {
     void ClearDynamicRuntime();
 
     void GenerateStaticRuntime();
-    void GenerateFramebufferRuntime(VkFormat const* _swapchain_format = nullptr);
+    void GenerateFramebufferRuntime(VkFormat _dynamic_format = VK_FORMAT_UNDEFINED);
     void ResetDynamicRuntime(bind::PNextMap const& _pNext_map = {});
     void Dispatch(vktk::CommandBuffer& _command_buffer) const;
 
@@ -1071,7 +1110,9 @@ struct DispatchContext {
     void ScopeOpenPipelineLayouts();
     void ScopeOpenRenderPasses(VkFormat _dynamic_format = VK_FORMAT_UNDEFINED);
     void ScopeOpenPipelines();
+    void ScopeOpenFramebuffers();
 
+    void ScopeCloseFramebuffers();
     void ScopeClosePipelines();
     void ScopeCloseRenderPasses();
     void ScopeClosePipelineLayouts();
@@ -1079,7 +1120,7 @@ struct DispatchContext {
 
     std::vector<vktk::Context::RenderPassAttachment> RenderPassDescription(
         dstk::Registry::Node _node,
-        VkFormat const* _swapchain_format = nullptr) const;
+        VkFormat _dynamic_format = VK_FORMAT_UNDEFINED) const;
 
     vkrg::layout::BindingPointSync BindingPointSyncRequirements(
         dstk::Registry::Node _node,

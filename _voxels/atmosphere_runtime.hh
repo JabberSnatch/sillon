@@ -105,7 +105,7 @@ void Impl::OnModuleScopeOpen(vkrg::runtime::DispatchContext _context)
     _context.GenerateStaticRuntime();
     _context.ResetDynamicRuntime();
     _context.ClearFramebufferRuntime();
-    _context.GenerateFramebufferRuntime(nullptr);
+    _context.GenerateFramebufferRuntime();
 
     VkSamplerCreateInfo sampler_create{};
     sampler_create.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
