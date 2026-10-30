@@ -628,7 +628,35 @@ enum EdgeBindingSlot {
     EdgeBindingSlot_Sink,
 };
 
-using InvocCountMap = std::unordered_map<dstk::Registry::Node, uint32_t>;
+struct _DispatchGraph
+{
+    dstk::NodeTree hierarchy;
+    dstk::DirectedGraph* root;
+
+    struct NodeView {
+        operator dstk::Registry::Node() const;
+        NodeView operator[](std::string const& name) const;
+        dstk::DirectedGraph const* graph;
+        dstk::Registry::Node node;
+    };
+
+    dstk::DirectedGraph& SubgraphCreate(std::string const& parent_node);
+    void SubgraphBind(std::string const& parent_node, dstk::DirectedGraph&& graph);
+    void SubgraphBind(dstk::Registry::Node node, dstk::DirectedGraph* graph);
+    dstk::DirectedGraph const& SubgraphLookup(std::string const& name) const;
+
+    NodeView operator[](std::string const& name);
+    NodeView operator[](std::string const& name) const;
+
+    struct RecursiveIterator {
+        uint32_t Depth() const { return (uint32_t)index_stack.size(); }
+        dstk::Registry::Node node;
+        std::vector<uint32_t> index_stack;
+    };
+
+    RecursiveIterator ForwardTraversal() const;
+    RecursiveIterator BackwardTraversal() const;
+};
 
 struct DispatchGraph
 {
