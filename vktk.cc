@@ -3075,6 +3075,31 @@ DispatchContext::Dispatch(vktk::CommandBuffer& _command_buffer) const
 void
 DispatchContext::ScopeOpenDescriptorPools()
 {
+    graph.DepthFirstTraversal([this](uint32_t,
+                                     dstk::Registry::Node node) {
+        layout::DispatchStage const* stage = registry.ComponentLookup<layout::DispatchStage>(node);
+        if (!stage)
+            return;
+
+        std::vector<vktk::DynamicDescriptorPool>& pools =
+            registry.ComponentRequest<std::vector<vktk::DynamicDescriptorPool>>(node);
+
+        for (layout::StageBindingGroup const& binding_group : stage->binding_groups)
+        {
+            std::vector<vktk::Context::DescriptorSetBindingPoint> bindings = {};
+            for (layout::StageBinding const& binding : binding_group.bindings)
+                bindings.push_back(vktk::Context::DescriptorSetBindingPoint{
+                    binding.type,
+                    binding.flags,
+                    binding.stages,
+                    binding.count
+                });
+
+            pools.push_back(vulkan.CreateDynamicDescriptorPool(bindings));
+        }
+    });
+
+#if 0
     std::vector<layout::DispatchStage const*> stages =
         registry.ComponentGlobalLookup<layout::DispatchStage>();
 
@@ -3098,11 +3123,28 @@ DispatchContext::ScopeOpenDescriptorPools()
             pools.push_back(vulkan.CreateDynamicDescriptorPool(bindings));
         }
     }
+#endif
 }
 
 void
 DispatchContext::ScopeCloseDescriptorPools()
 {
+    graph.DepthFirstTraversal([this](uint32_t,
+                                     dstk::Registry::Node node) {
+        layout::DispatchStage const* stage = registry.ComponentLookup<layout::DispatchStage>(node);
+        if (!stage)
+            return;
+
+        std::vector<vktk::DynamicDescriptorPool>& pools =
+            *registry.ComponentLookup<std::vector<vktk::DynamicDescriptorPool>>(node);
+
+        for (vktk::DynamicDescriptorPool& pool : pools)
+            vulkan.DestroyDynamicDescriptorPool(pool);
+
+        registry.ComponentErase(node, &pools);
+    });
+
+#if 0
     std::vector<layout::DispatchStage const*> stages =
         registry.ComponentGlobalLookup<layout::DispatchStage>();
 
@@ -3117,11 +3159,48 @@ DispatchContext::ScopeCloseDescriptorPools()
 
         registry.ComponentErase(node, &pools);
     }
+#endif
 }
 
 void
 DispatchContext::ScopeOpenPipelineLayouts()
 {
+    graph.DepthFirstTraversal([this](uint32_t,
+                                     dstk::Registry::Node node) {
+        layout::DispatchStage const* stage = registry.ComponentLookup<layout::DispatchStage>(node);
+        if (!stage)
+            return;
+
+        std::vector<vktk::DynamicDescriptorPool> const& pools =
+            *registry.ComponentLookup<std::vector<vktk::DynamicDescriptorPool>>(node);
+        std::vector<VkDescriptorSetLayout> set_layouts = {};
+        for (vktk::DynamicDescriptorPool const& pool : pools)
+            set_layouts.push_back(pool.layout);
+
+        std::vector<VkPushConstantRange> push_constant_ranges = {};
+        for (layout::PushConstantRange const& push_constants : stage->push_constants)
+            push_constant_ranges.push_back(VkPushConstantRange{
+                push_constants.stages,
+                push_constants.offset,
+                push_constants.size
+            });
+
+        VkPipelineLayout pipeline_layout = {};
+        VkPipelineLayoutCreateInfo pipeline_create = {};
+        pipeline_create.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipeline_create.pNext = nullptr;
+        pipeline_create.flags = 0u;
+        pipeline_create.setLayoutCount = set_layouts.size();
+        pipeline_create.pSetLayouts = set_layouts.data();
+        pipeline_create.pushConstantRangeCount = push_constant_ranges.size();
+        pipeline_create.pPushConstantRanges = push_constant_ranges.data();
+        CHECKCALL(vkCreatePipelineLayout, vulkan.device, &pipeline_create, nullptr,
+                  &pipeline_layout);
+
+        registry.BindComponent(node, pipeline_layout);
+    });
+
+#if 0
     std::vector<layout::DispatchStage const*> stages =
         registry.ComponentGlobalLookup<layout::DispatchStage>();
 
@@ -3157,11 +3236,24 @@ DispatchContext::ScopeOpenPipelineLayouts()
 
         registry.BindComponent(node, pipeline_layout);
     }
+#endif
 }
 
 void
 DispatchContext::ScopeClosePipelineLayouts()
 {
+    graph.DepthFirstTraversal([this](uint32_t,
+                                     dstk::Registry::Node node) {
+        layout::DispatchStage const* stage = registry.ComponentLookup<layout::DispatchStage>(node);
+        if (!stage)
+            return;
+
+        VkPipelineLayout* pipeline_layout = registry.ComponentLookup<VkPipelineLayout>(node);
+        vkDestroyPipelineLayout(vulkan.device, *pipeline_layout, nullptr);
+        registry.ComponentErase(node, pipeline_layout);
+    });
+
+#if 0
     std::vector<layout::DispatchStage const*> stages =
         registry.ComponentGlobalLookup<layout::DispatchStage>();
 
@@ -3172,11 +3264,28 @@ DispatchContext::ScopeClosePipelineLayouts()
         vkDestroyPipelineLayout(vulkan.device, *pipeline_layout, nullptr);
         registry.ComponentErase(node, pipeline_layout);
     }
+#endif
 }
 
 void
 DispatchContext::ScopeOpenRenderPasses(VkFormat _dynamic_format)
 {
+    graph.DepthFirstTraversal([this, _dynamic_format](uint32_t,
+                                                      dstk::Registry::Node node) {
+        layout::DispatchPass const* pass = registry.ComponentLookup<layout::DispatchPass>(node);
+        if (!pass)
+            return;
+
+        if (pass->mode != layout::DispatchMode_Graphics)
+            return;
+
+        registry.BindComponent(
+            node,
+            vulkan.CreateRenderPass(
+                RenderPassDescription(node, _dynamic_format)));
+    });
+
+#if 0
     std::vector<layout::DispatchPass const*> passes =
         registry.ComponentGlobalLookup<layout::DispatchPass>();
 
@@ -3191,11 +3300,27 @@ DispatchContext::ScopeOpenRenderPasses(VkFormat _dynamic_format)
             vulkan.CreateRenderPass(
                 RenderPassDescription(node, _dynamic_format)));
     }
+#endif
 }
 
 void
 DispatchContext::ScopeCloseRenderPasses()
 {
+    graph.DepthFirstTraversal([this](uint32_t,
+                                     dstk::Registry::Node node) {
+        layout::DispatchPass const* pass = registry.ComponentLookup<layout::DispatchPass>(node);
+        if (!pass)
+            return;
+
+        if (pass->mode != layout::DispatchMode_Graphics)
+            return;
+
+        VkRenderPass* render_pass = registry.ComponentLookup<VkRenderPass>(node);
+        vkDestroyRenderPass(vulkan.device, *render_pass, nullptr);
+        registry.ComponentErase(node, render_pass);
+    });
+
+#if 0
     std::vector<layout::DispatchPass const*> passes =
         registry.ComponentGlobalLookup<layout::DispatchPass>();
 
@@ -3209,11 +3334,93 @@ DispatchContext::ScopeCloseRenderPasses()
         vkDestroyRenderPass(vulkan.device, *render_pass, nullptr);
         registry.ComponentErase(node, render_pass);
     }
+#endif
 }
 
 void
 DispatchContext::ScopeOpenPipelines()
 {
+    graph.DepthFirstTraversal([this](uint32_t,
+                                     dstk::Registry::Node node) {
+        layout::DispatchStage const* stage = registry.ComponentLookup<layout::DispatchStage>(node);
+        if (!stage)
+            return;
+
+        dstk::Registry::Node parent_pass_node = dstk::FreeList::kInvalidIndex;
+        layout::DispatchPass const* parent_pass = nullptr;
+        {
+            layout::DispatchGraph::Data* current_data =
+                *registry.ComponentLookup<layout::DispatchGraph::Data*>(node);
+            while (current_data->parent_node)
+            {
+                parent_pass =
+                    registry.ComponentLookup<layout::DispatchPass>(current_data->parent_node);
+                if (parent_pass)
+                {
+                    parent_pass_node = current_data->parent_node;
+                    break;
+                }
+
+                current_data =
+                    *registry.ComponentLookup<layout::DispatchGraph::Data*>(
+                        current_data->parent_node);
+            }
+        }
+        assert(parent_pass);
+
+        VkRenderPass render_pass = *registry.ComponentLookup<VkRenderPass>(parent_pass_node);
+        VkPipelineLayout pipeline_layout = *registry.ComponentLookup<VkPipelineLayout>(node);
+
+        std::vector<vktk::Context::PipelineStage> pipeline_stages = {};
+        for (layout::ShaderStage const& shader : stage->shaders)
+        {
+            std::string shader_name = stage->name;
+            switch (shader.stage)
+            {
+            case VK_SHADER_STAGE_VERTEX_BIT: shader_name += "_vertex"; break;
+            case VK_SHADER_STAGE_FRAGMENT_BIT: shader_name += "_fragment"; break;
+            default: shader_name += "_unknown"; break;
+            }
+
+            VkShaderModule shader_module = vulkan.CompileShader_SPIRV(shader.binary);
+            pipeline_stages.push_back(vktk::Context::PipelineStage{
+                shader_module,
+                shader.stage
+            });
+        }
+
+        if (parent_pass->mode == layout::DispatchMode_Graphics)
+        {
+            std::vector<vktk::Context::BlendState> const* blend_states =
+                &stage->graphics.blend_states;
+
+            std::vector<vktk::Context::BlendState> default_blend_states = {};
+            if (stage->graphics.blend_states.empty())
+            {
+                default_blend_states.resize(parent_pass->graphics.attachments.size());
+                for (vktk::Context::BlendState state : default_blend_states)
+                    state.blend_enable = VK_FALSE;
+                blend_states = &default_blend_states;
+            }
+
+            VkPipeline pipeline = vulkan.CreatePipeline(
+                pipeline_layout,
+                render_pass,
+                pipeline_stages,
+                stage->graphics.state_overrides,
+                *blend_states,
+                stage->graphics.topology,
+                stage->graphics.input_layout
+            );
+
+            registry.BindComponent(node, pipeline);
+        }
+
+        for (vktk::Context::PipelineStage const& pipeline_stage : pipeline_stages)
+            vkDestroyShaderModule(vulkan.device, pipeline_stage.module, nullptr);
+    });
+
+#if 0
     std::vector<layout::DispatchStage const*> stages =
         registry.ComponentGlobalLookup<layout::DispatchStage>();
 
@@ -3294,11 +3501,27 @@ DispatchContext::ScopeOpenPipelines()
         for (vktk::Context::PipelineStage const& pipeline_stage : pipeline_stages)
             vkDestroyShaderModule(vulkan.device, pipeline_stage.module, nullptr);
     }
+#endif
 }
 
 void
 DispatchContext::ScopeClosePipelines()
 {
+    graph.DepthFirstTraversal([this](uint32_t,
+                                     dstk::Registry::Node node) {
+        layout::DispatchStage const* stage = registry.ComponentLookup<layout::DispatchStage>(node);
+        if (!stage)
+            return;
+
+        VkPipeline* pipeline = registry.ComponentLookup<VkPipeline>(node);
+        if (!pipeline)
+            return;
+
+        vkDestroyPipeline(vulkan.device, *pipeline, nullptr);
+        registry.ComponentErase(node, pipeline);
+    });
+
+#if 0
     std::vector<layout::DispatchStage const*> stages =
         registry.ComponentGlobalLookup<layout::DispatchStage>();
 
@@ -3313,11 +3536,32 @@ DispatchContext::ScopeClosePipelines()
         vkDestroyPipeline(vulkan.device, *pipeline, nullptr);
         registry.ComponentErase(node, pipeline);
     }
+#endif
 }
 
 void
 DispatchContext::ScopeOpenFramebuffers()
 {
+    graph.DepthFirstTraversal([this](uint32_t,
+                                     dstk::Registry::Node node) {
+        std::vector<bind::FramebufferDesc> const* desc =
+            registry.ComponentLookup<std::vector<bind::FramebufferDesc>>(node);
+        if (!desc)
+            return;
+
+        VkRenderPass render_pass = *registry.ComponentLookup<VkRenderPass>(node);
+
+        std::vector<VkFramebuffer> framebuffers = {};
+        for (bind::FramebufferDesc const& attachments : *desc)
+            framebuffers.push_back(
+                vulkan.CreateFramebuffer(render_pass,
+                                         attachments.size,
+                                         attachments.views));
+
+        registry.ComponentRequest<std::vector<VkFramebuffer>>(node) = framebuffers;
+    });
+
+#if 0
     std::vector<std::vector<bind::FramebufferDesc> const*> descs =
         registry.ComponentGlobalLookup<std::vector<bind::FramebufferDesc>>();
 
@@ -3335,11 +3579,26 @@ DispatchContext::ScopeOpenFramebuffers()
 
         registry.ComponentRequest<std::vector<VkFramebuffer>>(node) = framebuffers;
     }
+#endif
 }
 
 void
 DispatchContext::ScopeCloseFramebuffers()
 {
+    graph.DepthFirstTraversal([this](uint32_t,
+                                     dstk::Registry::Node node) {
+        std::vector<VkFramebuffer> const* framebuffers =
+            registry.ComponentLookup<std::vector<VkFramebuffer>>(node);
+        if (!framebuffers)
+            return;
+
+        for (VkFramebuffer framebuffer : *framebuffers)
+            vkDestroyFramebuffer(vulkan.device, framebuffer, nullptr);
+
+        registry.ComponentErase(node, framebuffers);
+    });
+
+#if 0
     std::vector<std::vector<VkFramebuffer> const*> components =
         registry.ComponentGlobalLookup<std::vector<VkFramebuffer>>();
 
@@ -3351,6 +3610,7 @@ DispatchContext::ScopeCloseFramebuffers()
         dstk::Registry::Node node = registry.NodeLookup(framebuffers);
         registry.ComponentErase(node, framebuffers);
     }
+#endif
 }
 
 std::vector<vktk::Context::RenderPassAttachment>
