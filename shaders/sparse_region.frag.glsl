@@ -22,6 +22,8 @@ layout(std430, set = 0, binding = 1) buffer ResidencyBlock {
     uint residency_mask[];
 };
 
+layout(set = 0, binding = 2) uniform sampler2D skybox;
+
 layout(push_constant, std430) uniform PushConstants {
     vec3 light_dir;
 
@@ -519,6 +521,6 @@ void main()
 #endif
     }
     else
-        color.xyz = AtmosphericScattering_Sky(org, dir);
+        color.xyz = AtmosphericScattering_Irradiance(org, dir);
     color.w = 1.0;
 }

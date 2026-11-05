@@ -4,6 +4,7 @@
 
 #include "gui_runtime.hh"
 #include "voxel_field_runtime.hh"
+#include "atmosphere_runtime.hh"
 
 namespace progressive_runtime
 {
@@ -12,6 +13,7 @@ struct Args
 {
     voxel_field_runtime::Args voxel_field;
     gui_runtime::Args gui;
+    atmosphere_runtime::Args atmosphere;
 
     numtk::vec2u framebuffer_size;
     uint32_t swapchain_index;
@@ -69,6 +71,14 @@ dispatch_runtime_t Create(vktk::Context* _vulkan, dstk::Registry* _registry)
         dispatch_runtime_t* component = _registry->BindComponent(
             node,
             gui_runtime::Create(_vulkan, _registry));
+        runtime.graph.BindSubgraph(node, &component->graph);
+    }
+
+    {
+        dstk::Registry::Node node = runtime.graph["AtmosphereDispatch"];
+        dispatch_runtime_t* component = _registry->BindComponent(
+            node,
+            atmosphere_runtime::Create(_vulkan, _registry));
         runtime.graph.BindSubgraph(node, &component->graph);
     }
 
@@ -288,6 +298,13 @@ void Impl::UpdateBindings(vkrg::runtime::DispatchContext _context,
             *_context.registry.ComponentLookup<dispatch_runtime_t>(
                 _context.graph["FramebufferScreenSpace"]["GUISubpass"]);
         runtime.UpdateBindings(runtime, &_args.gui);
+    }
+
+    {
+        dispatch_runtime_t& runtime =
+            *_context.registry.ComponentLookup<dispatch_runtime_t>(
+                _context.graph["AtmosphereDispatch"]);
+        runtime.UpdateBindings(runtime, &_args.atmosphere);
     }
 
     numtk::bounds2u scissor{ { 0, 0 },
@@ -513,6 +530,10 @@ vkrg::layout::DispatchGraph RenderGraph(dstk::Registry& _registry)
 {
     vkrg::layout::DispatchGraph graph{ &_registry };
 
+    {
+        graph.BindSubgraph("AtmosphereDispatch", atmosphere_runtime::RenderGraph(_registry));
+    }
+
     _registry.BindComponent(graph["FramebufferDispatch"], vkrg::layout::DispatchPass{
         .mode = vkrg::layout::DispatchMode_Graphics,
         .graphics = {
@@ -532,6 +553,21 @@ vkrg::layout::DispatchGraph RenderGraph(dstk::Registry& _registry)
     {
         graph.BindSubgraph("FramebufferDispatch", voxel_field_runtime::RenderGraph(_registry));
     }
+
+    _registry.BindComponent(graph.MakeEdge("AtmosphereDispatch", "FramebufferDispatch"),
+                            vkrg::layout::EdgeBindings{
+                                vkrg::layout::EdgeType_Image,
+                                vkrg::layout::BindingPoint{
+                                    .type = vkrg::layout::BindingType_Framebuffer,
+                                    .node_override = graph["AtmosphereDispatch"]["IrPass"],
+                                    .attachment_index = 0
+                                },
+                                vkrg::layout::BindingPoint{
+                                    .type = vkrg::layout::BindingType_Shader,
+                                    .node_override = graph["FramebufferDispatch"]["SparseRegion"],
+                                    .shader = { 0, 2 }
+                                }
+                            });
 
     _registry.BindComponent(graph["FramebufferResolve"], vkrg::layout::DispatchPass{
         .mode = vkrg::layout::DispatchMode_Graphics,

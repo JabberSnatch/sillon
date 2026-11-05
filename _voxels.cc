@@ -999,54 +999,6 @@ void ConstantResources(void* _pstate, vktk::Context* _vulkan)
     voxel_state_t* _state = (voxel_state_t*)_pstate;
     _state->gui_context = guitk::CreateContext();
 
-    _state->transmittance_runtime = atmosphere_runtime::Create(_vulkan, &_state->core_registry);
-    _state->transmittance_runtime.OnModuleScopeOpen(_state->transmittance_runtime);
-    {
-        atmosphere_runtime::Args args = {};
-        args.transmittance_size = numtk::vec2i{ 128, 128 };
-        args.transmittance_texture = _vulkan->CreateTexture(
-            args.transmittance_size.x(), args.transmittance_size.y(), 1,
-            VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
-            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
-            | VK_IMAGE_USAGE_SAMPLED_BIT);
-
-        args.multi_scattering_size = numtk::vec2i{ 128, 128 };
-        args.multi_scattering_texture = _vulkan->CreateTexture(
-            args.multi_scattering_size.x(), args.multi_scattering_size.y(), 1,
-            VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
-            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
-            | VK_IMAGE_USAGE_SAMPLED_BIT);
-
-        args.irradiance_size = numtk::vec2i{ 512, 256 };
-        args.irradiance_texture = _vulkan->CreateTexture(
-            args.irradiance_size.x(), args.irradiance_size.y(), 1,
-            VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
-            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
-            | VK_IMAGE_USAGE_SAMPLED_BIT);
-        args.baseline_texture = _vulkan->CreateTexture(
-            args.irradiance_size.x(), args.irradiance_size.y(), 1,
-            VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
-            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
-            | VK_IMAGE_USAGE_SAMPLED_BIT);
-
-        numtk::vec3f sun_dir = numtk::vec3f{
-            std::cos(_state->sun_spherical[1]) * std::cos(_state->sun_spherical[0]),
-            std::sin(_state->sun_spherical[1]),
-            std::cos(_state->sun_spherical[1]) * std::sin(_state->sun_spherical[0])
-        }.normalise();
-
-        args.light_dir = sun_dir;
-        args.altitude = 50.f;
-
-        vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
-        command_buffer.Begin();
-        _state->transmittance_runtime.Dispatch(_state->transmittance_runtime,
-                                               &args,
-                                               command_buffer);
-        command_buffer.End();
-        command_buffer.Submit();
-    }
-
     _state->progressive_runtime = progressive_runtime::Create(_vulkan, &_state->core_registry);
 
 #if 1
@@ -1331,9 +1283,6 @@ void Draw(void* _pstate,
 {
     voxel_state_t* _state = (voxel_state_t*)_pstate;
 
-    vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
-    command_buffer.Begin();
-
     progressive_runtime::Args progressive_args = {};
 
     float how = (float)_swapchain.size.height / (float)_swapchain.size.width;
@@ -1356,6 +1305,47 @@ void Draw(void* _pstate,
         (float)_swapchain.size.width,
         (float)_swapchain.size.height };
 
+    {
+        numtk::vec2i transmittance_size{ 128, 128 };
+        numtk::vec2i multi_scattering_size{ 128, 128 };
+        numtk::vec2i irradiance_size{ 512, 256 };
+
+        numtk::vec3f sun_dir = numtk::vec3f{
+            std::cos(_state->sun_spherical[1]) * std::cos(_state->sun_spherical[0]),
+            std::sin(_state->sun_spherical[1]),
+            std::cos(_state->sun_spherical[1]) * std::sin(_state->sun_spherical[0])
+        }.normalise();
+
+        progressive_args.atmosphere.transmittance_size = transmittance_size;
+        progressive_args.atmosphere.transmittance_texture = _vulkan->CreateTexture(
+            transmittance_size.x(), transmittance_size.y(), 1,
+            VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+            | VK_IMAGE_USAGE_SAMPLED_BIT);
+
+        progressive_args.atmosphere.multi_scattering_size = multi_scattering_size;
+        progressive_args.atmosphere.multi_scattering_texture = _vulkan->CreateTexture(
+            multi_scattering_size.x(), multi_scattering_size.y(), 1,
+            VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+            | VK_IMAGE_USAGE_SAMPLED_BIT);
+
+        progressive_args.atmosphere.irradiance_size = irradiance_size;
+        progressive_args.atmosphere.irradiance_texture = _vulkan->CreateTexture(
+            irradiance_size.x(), irradiance_size.y(), 1,
+            VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+            | VK_IMAGE_USAGE_SAMPLED_BIT);
+        progressive_args.atmosphere.baseline_texture = _vulkan->CreateTexture(
+            irradiance_size.x(), irradiance_size.y(), 1,
+            VK_IMAGE_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+            | VK_IMAGE_USAGE_SAMPLED_BIT);
+
+        progressive_args.atmosphere.light_dir = sun_dir;
+        progressive_args.atmosphere.altitude = 50.f;
+    }
+
     progressive_args.framebuffer_size = numtk::vec2u{
         _swapchain.size.width,
         _swapchain.size.height };
@@ -1364,11 +1354,27 @@ void Draw(void* _pstate,
     progressive_args.progressive_frame_index = _state->progressive_frame_index;
     progressive_args.exposure = _state->exposure;
 
+    vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
+    command_buffer.Begin();
+
     _state->progressive_runtime.Dispatch(_state->progressive_runtime,
                                          &progressive_args,
                                          command_buffer);
 
     command_buffer.End();
+
+    command_buffer.post_submit_tasks.emplace_back(
+        [
+            tr_tex = progressive_args.atmosphere.transmittance_texture,
+            ms_tex = progressive_args.atmosphere.multi_scattering_texture,
+            ir_tex = progressive_args.atmosphere.irradiance_texture,
+            bl_tex = progressive_args.atmosphere.baseline_texture
+        ](vktk::Context& _context){
+            _context.DestroyTexture(tr_tex);
+            _context.DestroyTexture(ms_tex);
+            _context.DestroyTexture(ir_tex);
+            _context.DestroyTexture(bl_tex);
+        });
 
     VkPipelineStageFlags wait_dst_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     command_buffer.Submit(nullptr, &_acquire_semaphore, &wait_dst_stage, 1u,

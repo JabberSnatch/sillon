@@ -2413,6 +2413,10 @@ DispatchContext::ClearStaticRuntime()
 void
 DispatchContext::ClearFramebufferRuntime()
 {
+    ScopeClosePipelines();
+    ScopeCloseRenderPasses();
+
+#if 0
     graph.DepthFirstTraversal([this](uint32_t, dstk::Registry::Node node) {
         auto const* dispatch_pass = registry.ComponentLookup<layout::DispatchPass>(node);
         auto const* dispatch_stage = registry.ComponentLookup<layout::DispatchStage>(node);
@@ -2446,6 +2450,7 @@ DispatchContext::ClearFramebufferRuntime()
             }
         }
     });
+#endif
 }
 
 void
@@ -3035,6 +3040,9 @@ DispatchContext::ScopeCloseRenderPasses()
             return;
 
         VkRenderPass* render_pass = registry.ComponentLookup<VkRenderPass>(node);
+        if (!render_pass)
+            return;
+
         vkDestroyRenderPass(vulkan.device, *render_pass, nullptr);
         registry.ComponentErase(node, render_pass);
     });

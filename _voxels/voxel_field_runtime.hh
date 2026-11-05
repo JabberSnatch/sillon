@@ -596,6 +596,8 @@ vkrg::layout::DispatchStage SparseRegionDispatchStageInfo()
               0, 1 },
             { VK_SHADER_STAGE_ALL, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
               0, 1 },
+            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              0, 1 }
         }
     });
 
