@@ -92,6 +92,7 @@ struct Args
     numtk::vec2f sun_spherical;
     bool enable_indirect_light;
     float sun_power;
+    vktk::Texture skybox;
 };
 
 dispatch_runtime_t Create(vktk::Context* _vulkan, dstk::Registry* _registry);
@@ -377,6 +378,24 @@ void Impl::UpdateBindings(vkrg::runtime::DispatchContext _context,
         }.normalise();
 
         dstk::Registry::Node sparse_region_node = _context.graph["SparseRegion"];
+
+        VkWriteDescriptorSet desc_write =
+            _context.BindShaderResource(sparse_region_node,
+                                        vkrg::layout::BindingPoint{
+                                            .type = vkrg::layout::BindingType_Shader,
+                                            .shader = { 0, 2 }
+                                        },
+                                        0,
+                                        vkrg::bind::ShaderResources{
+                                            .images = {
+                                                VkDescriptorImageInfo{
+                                                    nearest_sampler,
+                                                    _args.skybox.view,
+                                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                                }
+                                            }
+                                        });
+        vkUpdateDescriptorSets(_context.vulkan.device, 1u, &desc_write, 0u, nullptr);
 
         vkrg::bind::GraphicsCommand command = {};
         command.command = vkrg::bind::DispatchCommand_Draw;

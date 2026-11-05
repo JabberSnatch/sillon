@@ -1287,24 +1287,6 @@ void Draw(void* _pstate,
 
     float how = (float)_swapchain.size.height / (float)_swapchain.size.width;
 
-    progressive_args.voxel_field.field_descriptor = _state->field_desc.get();
-    progressive_args.voxel_field.framebuffer_size = numtk::vec2f{
-        (float)_swapchain.size.width,
-        (float)_swapchain.size.height };
-    progressive_args.voxel_field.view_matrix =
-        _state->camera.Matrix();
-    progressive_args.voxel_field.projection_matrix =
-        numtk::mat4f::Perspective_VulkanNDC(1.0f, 1000000.f, _state->fov*numtk::kDegrees, how);
-    progressive_args.voxel_field.sample_offset = _state->progressive_frame_index;
-    progressive_args.voxel_field.sun_spherical = _state->sun_spherical;
-    progressive_args.voxel_field.enable_indirect_light = _state->enable_indirect_light;
-    progressive_args.voxel_field.sun_power = _state->sun_power;
-
-    progressive_args.gui.gui_record = _state->current_gui_record;
-    progressive_args.gui.framebuffer_size = numtk::vec2f{
-        (float)_swapchain.size.width,
-        (float)_swapchain.size.height };
-
     {
         numtk::vec2i transmittance_size{ 128, 128 };
         numtk::vec2i multi_scattering_size{ 128, 128 };
@@ -1345,6 +1327,25 @@ void Draw(void* _pstate,
         progressive_args.atmosphere.light_dir = sun_dir;
         progressive_args.atmosphere.altitude = 50.f;
     }
+
+    progressive_args.voxel_field.field_descriptor = _state->field_desc.get();
+    progressive_args.voxel_field.framebuffer_size = numtk::vec2f{
+        (float)_swapchain.size.width,
+        (float)_swapchain.size.height };
+    progressive_args.voxel_field.view_matrix =
+        _state->camera.Matrix();
+    progressive_args.voxel_field.projection_matrix =
+        numtk::mat4f::Perspective_VulkanNDC(1.0f, 1000000.f, _state->fov*numtk::kDegrees, how);
+    progressive_args.voxel_field.sample_offset = _state->progressive_frame_index;
+    progressive_args.voxel_field.sun_spherical = _state->sun_spherical;
+    progressive_args.voxel_field.enable_indirect_light = _state->enable_indirect_light;
+    progressive_args.voxel_field.sun_power = _state->sun_power;
+    progressive_args.voxel_field.skybox = progressive_args.atmosphere.irradiance_texture;
+
+    progressive_args.gui.gui_record = _state->current_gui_record;
+    progressive_args.gui.framebuffer_size = numtk::vec2f{
+        (float)_swapchain.size.width,
+        (float)_swapchain.size.height };
 
     progressive_args.framebuffer_size = numtk::vec2u{
         _swapchain.size.width,

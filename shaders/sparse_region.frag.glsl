@@ -360,6 +360,22 @@ vec3 AtmosphericScattering_Sky(vec3 position, vec3 direction)
     return sky_color;
 }
 
+vec2 WorldToSkybox(vec3 dir)
+{
+    float theta = asin(dir.y);
+    float phi = acos(dir.x / cos(theta));
+
+    vec2 uv = vec2(phi, theta) / (3.14159265 * vec2(1.0, 0.5));
+    uv.y = sign(uv.y) * sqrt(uv.y) * 0.5 + 0.5;
+
+    return uv;
+}
+
+vec3 AtmosphericScattering_LUT(vec3, vec3 direction)
+{
+    return texture(skybox, WorldToSkybox(direction)).xyz;
+}
+
 void main()
 {
     vec3 box_scale = region_scale;
@@ -435,7 +451,7 @@ void main()
         if (display_mode == 0.0)
         {
             shadow = RegionTraversal4(hitp + light_dir*0.0001, light_dir, payload).w >= 0.0 ? 0.0 : 1.0;
-            diffuse = max(0.0, dot(light_dir, trav.xyz)) * AtmosphericScattering_Irradiance(hitp, light_dir);
+            diffuse = max(0.0, dot(light_dir, trav.xyz)) * AtmosphericScattering_LUT(hitp, light_dir);
         }
         else
         {
@@ -459,7 +475,7 @@ void main()
                     {
                         indirect += max(0.0, dot(previous_hit.xyz, light_dir))
                             * current_weight
-                            * AtmosphericScattering_Irradiance(current_org, light_dir);
+                            * AtmosphericScattering_LUT(current_org, light_dir);
                     }
                 }
 
@@ -485,7 +501,7 @@ void main()
                 if (current_hit.w < 0.0)
                 {
                     exit_color =
-                        AtmosphericScattering_Irradiance(current_org, current_ray) * current_weight * next_weight;
+                        AtmosphericScattering_LUT(current_org, current_ray) * current_weight * next_weight;
                     break;
                 }
 
@@ -521,6 +537,6 @@ void main()
 #endif
     }
     else
-        color.xyz = AtmosphericScattering_Irradiance(org, dir);
+        color.xyz = AtmosphericScattering_LUT(org, dir);
     color.w = 1.0;
 }
