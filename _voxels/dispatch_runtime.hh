@@ -21,12 +21,23 @@ struct dispatch_runtime_t
                   vktk::CommandBuffer& _command_buffer)
     {
         _rt.UpdateBindings(_rt, _args);
-        _rt.Context().Dispatch(_command_buffer);
+
+        _rt.Context().ScopeOpenFramebuffers(dispatch_index);
+        _rt.Context().Dispatch(_command_buffer, dispatch_index);
+
+        _command_buffer.post_submit_tasks.emplace_back([index = dispatch_index,
+                                                        context = _rt.Context()]
+                                                       (vktk::Context&) mutable {
+            context.ScopeCloseFramebuffers(index);
+        });
+
+        ++dispatch_index;
     }
 
     vkrg::layout::DispatchGraph graph;
     vktk::Context* vulkan;
     dstk::Registry* registry;
+    uint32_t dispatch_index = 0;
     impl_t impl;
 
     void (*Destroy)(dispatch_runtime_t&);

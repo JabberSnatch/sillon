@@ -79,6 +79,8 @@ struct FPTable
 
 struct Context;
 
+using SynchronisedRoutine = std::function<void(Context&)>;
+
 struct Allocation
 {
     uint32_t memory_type;
@@ -221,6 +223,7 @@ struct CommandBuffer {
     Queue const& queue;
     VkCommandBuffer handle;
     std::vector<Buffer> pending_destroys = {};
+    std::vector<SynchronisedRoutine> post_submit_tasks = {};
     operator VkCommandBuffer() { return handle; }
 
     struct SubmitInfo {
@@ -481,7 +484,6 @@ struct Context
     FencePool fence_pool = {};
     uint32_t fence_count = 0;
 
-    using SynchronisedRoutine = std::function<void(Context&)>;
     void ScheduleRoutine(VkFence _fence, SynchronisedRoutine _routine);
     void ScheduleFenceDestroy(VkFence _fence);
     void TryScheduledRoutines();
@@ -1063,17 +1065,6 @@ struct BlitBindings {
 namespace runtime
 {
 
-#if 0
-struct StageBindingGroupStatic {
-    vktk::DynamicDescriptorPool pool;
-};
-
-struct DispatchStageStatic {
-    VkPipelineLayout pipeline_layout;
-    std::vector<StageBindingGroupStatic> binding_groups;
-};
-#endif
-
 struct StageBindingGroupDynamic {
     std::vector<VkDescriptorSet> sets;
 };
@@ -1104,15 +1095,15 @@ struct DispatchContext {
     void GenerateStaticRuntime();
     void GenerateFramebufferRuntime(VkFormat _dynamic_format = VK_FORMAT_UNDEFINED);
     void ResetDynamicRuntime(bind::PNextMap const& _pNext_map = {});
-    void Dispatch(vktk::CommandBuffer& _command_buffer) const;
+    void Dispatch(vktk::CommandBuffer& _command_buffer, uint32_t _index);
 
     void ScopeOpenDescriptorPools();
     void ScopeOpenPipelineLayouts();
     void ScopeOpenRenderPasses(VkFormat _dynamic_format = VK_FORMAT_UNDEFINED);
     void ScopeOpenPipelines();
-    void ScopeOpenFramebuffers();
+    void ScopeOpenFramebuffers(uint32_t index);
 
-    void ScopeCloseFramebuffers();
+    void ScopeCloseFramebuffers(uint32_t index);
     void ScopeClosePipelines();
     void ScopeCloseRenderPasses();
     void ScopeClosePipelineLayouts();
