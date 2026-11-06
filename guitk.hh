@@ -55,7 +55,7 @@ void BeginFrame(Context, Frame&);
 void EndFrame(Context);
 
 void Label(Context, std::string const& label_);
-void Checkbox(Context, bool* state_, std::string const& label_, std::string const& id_ = "");
+bool Checkbox(Context, bool* state_, std::string const& label_, std::string const& id_ = "");
 bool Slider(Context, float* state_, std::string const& label_, float min_, float max_, std::string const& id_ = "");
 
 struct TextureData
@@ -249,12 +249,13 @@ void Label(Context context_, std::string const& label_)
     frame_info.next_row += numtk::vec2u{ 0, 22 };
 }
 
-void Checkbox(Context context_, bool* state_, std::string const& label_, std::string const& id_)
+bool Checkbox(Context context_, bool* state_, std::string const& label_, std::string const& id_)
 {
+    bool triggered = false;
     WidgetStates& states = context_->current_record;
 
     if (context_->current_frame == kNullHandle)
-        return;
+        return triggered;
 
     numtk::vec2u glyph_max = numtk::vec2u{ 0, 0 };
     FrameInfo& frame_info = context_->registered_frames[context_->current_frame];
@@ -269,7 +270,10 @@ void Checkbox(Context context_, bool* state_, std::string const& label_, std::st
 
         if (hover
             && iotk::MouseRelease(iotk::kLeftBtn, *context_->input, *context_->past_input))
+        {
             *state_ = !(*state_);
+            triggered = true;
+        }
 
         SymbolTag symbol_tag = !(*state_) ? SymbolTag_CheckboxClear : SymbolTag_CheckboxTicked;
         numtk::bounds2f box_uv = SymbolBounds(symbol_tag, hover);
@@ -283,16 +287,18 @@ void Checkbox(Context context_, bool* state_, std::string const& label_, std::st
 
     frame_info.bounds = frame_info.bounds.Expand(glyph_max + numtk::vec2u{ 15, 15 });
     frame_info.next_row += numtk::vec2u{ -20u, 22u };
+
+    return triggered;
 }
 
 bool Slider(Context context_, float* state_, std::string const& label_, float min_, float max_, std::string const& id_)
 {
-    bool value_changed = false;
+    bool triggered = false;
 
     WidgetStates& states = context_->current_record;
 
     if (context_->current_frame == kNullHandle)
-        return value_changed;
+        return triggered;
 
     numtk::vec2u glyph_max = numtk::vec2u{ 0, 0 };
     FrameInfo& frame_info = context_->registered_frames[context_->current_frame];
@@ -316,7 +322,7 @@ bool Slider(Context context_, float* state_, std::string const& label_, float mi
         if (context_->grabbed_widget == widget_handle)
         {
             numtk::vec2i mouse_delta = iotk::MouseDelta(*context_->input, *context_->past_input);
-            value_changed = (mouse_delta != numtk::vec2i::Constant(0));
+            triggered = (mouse_delta != numtk::vec2i::Constant(0));
             offset += mouse_delta.x();
             *state_ = (float)(offset / 128.f) * (max_ - min_) + min_;
 
@@ -343,7 +349,7 @@ bool Slider(Context context_, float* state_, std::string const& label_, float mi
     frame_info.next_row += numtk::vec2u{ 0u, 22u };
     frame_info.bounds = frame_info.bounds.Expand(glyph_max + numtk::vec2u{ 128u, 16u });
 
-    return value_changed;
+    return triggered;
 }
 
 Handle_t GenerateHandle(std::string const& id_, Handle_t parent_handle_) {
