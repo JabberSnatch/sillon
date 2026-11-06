@@ -1955,8 +1955,12 @@ Texture Context::CreateTexture(uint32_t _width, uint32_t _height, uint32_t _dept
 
 void Context::DestroyTexture(Texture const& _texture)
 {
+    if (_texture.image == VK_NULL_HANDLE)
+        return;
+
     vkDestroyImageView(device, _texture.view, nullptr);
     vkDestroyImage(device, _texture.image, nullptr);
+    allocator.Free(_texture.alloc);
 }
 
 void Context::CommitStaging(DeferredUpload& _upload)
