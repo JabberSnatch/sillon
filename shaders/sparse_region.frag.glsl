@@ -34,6 +34,7 @@ layout(push_constant, std430) uniform PushConstants {
     uint sample_offset;
     uint leaves_begin;
     float sun_power;
+    int precomputed_sky;
 };
 
 layout(set = 1, binding = 0) uniform usampler3D masks[];
@@ -371,9 +372,12 @@ vec2 WorldToSkybox(vec3 dir)
     return uv;
 }
 
-vec3 AtmosphericScattering_LUT(vec3, vec3 direction)
+vec3 AtmosphericScattering_LUT(vec3 position, vec3 direction)
 {
-    return texture(skybox, WorldToSkybox(direction)).xyz;
+    if (precomputed_sky != 0)
+        return texture(skybox, WorldToSkybox(direction)).xyz;
+    else
+        return AtmosphericScattering_Irradiance(position, direction);
 }
 
 void main()

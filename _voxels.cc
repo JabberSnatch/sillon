@@ -51,7 +51,7 @@ struct FlightCamera
     numtk::vec2f forward_spherical = { 0.710f, -0.260f };
     numtk::vec3f position = { 37.025f, -36.243f, -18.561f };
 #endif
-#if 0
+#if 1
     numtk::vec2f forward_spherical = { -4.73f, -1.26f };
     numtk::vec3f position = { 222.36f, -152.f, -129.64f };
 #endif
@@ -59,8 +59,10 @@ struct FlightCamera
     numtk::vec2f forward_spherical = { -9.45f, -1.57f };
     numtk::vec3f position = { 248.72f, 223.71f, 152.74f };
 #endif
+#if 0
     numtk::vec2f forward_spherical = { -11.58f, 0.4f };
     numtk::vec3f position = { -0.8f, -215.33f, 86.65f };
+#endif
 
     float velocity = 5.f;
 
@@ -100,6 +102,8 @@ struct voxel_state_t
     float framerate_average = 0.f;
     std::string framerate_label;
     bool enable_indirect_light = false;
+    bool baseline_skybox = false;
+    bool precomputed_sky = true;
     float sun_power = 0.f;
 
     //TurntableCamera camera;
@@ -1209,7 +1213,17 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
             guitk::Label(_state->gui_context, lightstr.c_str());
         }
 
-        guitk::Checkbox(_state->gui_context, &_state->enable_indirect_light, "Indirect Lighting");
+        if (guitk::Checkbox(_state->gui_context,
+                            &_state->enable_indirect_light, "Indirect Lighting"))
+            reset_progressive_counter = true;
+
+        if (guitk::Checkbox(_state->gui_context,
+                            &_state->baseline_skybox, "Baseline Skybox"))
+            reset_progressive_counter = true;
+
+        if (guitk::Checkbox(_state->gui_context,
+                            &_state->precomputed_sky, "Precomputed Sky"))
+            reset_progressive_counter = true;
 
         if (guitk::Slider(_state->gui_context, &_state->sun_power, "Sun Power", 0.f, 1.f))
             reset_progressive_counter = true;
@@ -1340,7 +1354,11 @@ void Draw(void* _pstate,
     progressive_args.voxel_field.sun_spherical = _state->sun_spherical;
     progressive_args.voxel_field.enable_indirect_light = _state->enable_indirect_light;
     progressive_args.voxel_field.sun_power = _state->sun_power;
-    progressive_args.voxel_field.skybox = progressive_args.atmosphere.irradiance_texture;
+    if (!_state->baseline_skybox)
+        progressive_args.voxel_field.skybox = progressive_args.atmosphere.irradiance_texture;
+    else
+        progressive_args.voxel_field.skybox = progressive_args.atmosphere.baseline_texture;
+    progressive_args.voxel_field.precomputed_sky = _state->precomputed_sky;
 
     progressive_args.gui.gui_record = _state->current_gui_record;
     progressive_args.gui.framebuffer_size = numtk::vec2f{

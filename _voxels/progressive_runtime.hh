@@ -569,6 +569,21 @@ vkrg::layout::DispatchGraph RenderGraph(dstk::Registry& _registry)
                                 }
                             });
 
+    _registry.BindComponent(graph.MakeEdge("AtmosphereDispatch", "FramebufferDispatch"),
+                            vkrg::layout::EdgeBindings{
+                                vkrg::layout::EdgeType_Image,
+                                vkrg::layout::BindingPoint{
+                                    .type = vkrg::layout::BindingType_Framebuffer,
+                                    .node_override = graph["AtmosphereDispatch"]["IrPass"],
+                                    .attachment_index = 1
+                                },
+                                vkrg::layout::BindingPoint{
+                                    .type = vkrg::layout::BindingType_Shader,
+                                    .node_override = graph["FramebufferDispatch"]["SparseRegion"],
+                                    .shader = { 0, 2 }
+                                }
+                            });
+
     _registry.BindComponent(graph["FramebufferResolve"], vkrg::layout::DispatchPass{
         .mode = vkrg::layout::DispatchMode_Graphics,
         .graphics = {

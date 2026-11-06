@@ -92,6 +92,7 @@ struct Args
     numtk::vec2f sun_spherical;
     bool enable_indirect_light;
     float sun_power;
+    bool precomputed_sky;
     vktk::Texture skybox;
 };
 
@@ -125,6 +126,7 @@ struct SparseRegionPushConstants
     uint32_t sample_offset;
     uint32_t leaves_begin;
     float sun_power;
+    int32_t precomputed_sky;
 };
 
 struct Impl
@@ -418,6 +420,7 @@ void Impl::UpdateBindings(vkrg::runtime::DispatchContext _context,
         push_constants->sample_offset = _args.sample_offset;
         push_constants->leaves_begin = descriptor.leaves_begin;
         push_constants->sun_power = _args.sun_power;
+        push_constants->precomputed_sky = _args.precomputed_sky ? 1 : 0;
     }
 }
 
