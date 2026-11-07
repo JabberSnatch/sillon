@@ -88,6 +88,7 @@ struct Allocation
     VkDeviceSize offset;
     VkDeviceSize size;
     void* map;
+    uint64_t block_index;
 };
 
 struct Allocator

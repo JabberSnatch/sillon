@@ -805,6 +805,7 @@ Allocation Allocator::Allocate(VkMemoryPropertyFlags _memory_flags,
 
     VkDeviceSize offset = (range.first % kChunkBlockCount) * kBlockSize;
     uint64_t block_count = (_size / kBlockSize) + ((_size % kBlockSize != 0) ? 1 : 0);
+    uint64_t first_block = range.first;
     range.first = range.first + block_count;
     if (range.first == range.second)
         storage.free_list.erase(storage.free_list.begin() + range_index);
@@ -813,7 +814,7 @@ Allocation Allocator::Allocate(VkMemoryPropertyFlags _memory_flags,
     if (!storage.maps.empty())
         map = ((uint8_t*)storage.maps[chunk_index]) + offset;
 
-    return Allocation{ memory_type, chunk, offset, _size, map };
+    return Allocation{ memory_type, chunk, offset, _size, map, first_block };
 }
 
 Allocation Allocator::Allocate(VkMemoryPropertyFlags _memory_flags,
@@ -847,7 +848,7 @@ void Allocator::Free(Allocation const& _alloc)
                          return _memory == _alloc.memory;
                      })
     );
-    uint64_t alloc_begin = (_alloc.offset / kBlockSize) + chunk_index * kChunkBlockCount;
+    uint64_t alloc_begin = _alloc.block_index;
     uint64_t alloc_end = alloc_begin + (_alloc.size / kBlockSize) + ((_alloc.size % kBlockSize != 0) ? 1 : 0);
 
     auto range_iterator = std::lower_bound(storage.free_list.begin(), storage.free_list.end(), alloc_begin,
