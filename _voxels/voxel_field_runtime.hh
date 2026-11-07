@@ -127,12 +127,14 @@ struct SparseRegionPushConstants
     uint32_t leaves_begin;
     float sun_power;
     int32_t precomputed_sky;
+    float light_phi;
 };
 
 struct Impl
 {
     bool region_ready = false;
     VkSampler nearest_sampler;
+    VkSampler skybox_sampler;
     vktk::Buffer matrix_buffer;
     vktk::Buffer staging_buffer;
 
@@ -186,6 +188,7 @@ dispatch_runtime_t Create(vktk::Context* _vulkan, dstk::Registry* _registry)
 void Impl::Destroy(vkrg::runtime::DispatchContext _context)
 {
     vkDestroySampler(_context.vulkan.device, nearest_sampler, nullptr);
+    vkDestroySampler(_context.vulkan.device, skybox_sampler, nullptr);
     _context.vulkan.DestroyBuffer(matrix_buffer);
     _context.vulkan.DestroyBuffer(staging_buffer);
 }
@@ -206,6 +209,12 @@ void Impl::OnModuleScopeOpen(vkrg::runtime::DispatchContext _context)
     sampler_create.maxLod = 0.0;
     CHECKCALL(vkCreateSampler, _context.vulkan.device,
               &sampler_create, nullptr, &nearest_sampler);
+
+    sampler_create.magFilter = VK_FILTER_LINEAR;
+    sampler_create.minFilter = VK_FILTER_LINEAR;
+    sampler_create.addressModeU = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+    CHECKCALL(vkCreateSampler, _context.vulkan.device,
+              &sampler_create, nullptr, &skybox_sampler);
 
     staging_buffer = _context.vulkan.CreateBuffer(
         sizeof(MatrixBlock),
@@ -391,7 +400,7 @@ void Impl::UpdateBindings(vkrg::runtime::DispatchContext _context,
                                         vkrg::bind::ShaderResources{
                                             .images = {
                                                 VkDescriptorImageInfo{
-                                                    nearest_sampler,
+                                                    skybox_sampler,
                                                     _args.skybox.view,
                                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
                                                 }
@@ -421,6 +430,7 @@ void Impl::UpdateBindings(vkrg::runtime::DispatchContext _context,
         push_constants->leaves_begin = descriptor.leaves_begin;
         push_constants->sun_power = _args.sun_power;
         push_constants->precomputed_sky = _args.precomputed_sky ? 1 : 0;
+        push_constants->light_phi = _args.sun_spherical[0];
     }
 }
 

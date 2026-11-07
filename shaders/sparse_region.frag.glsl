@@ -35,6 +35,7 @@ layout(push_constant, std430) uniform PushConstants {
     uint leaves_begin;
     float sun_power;
     int precomputed_sky;
+    float light_phi;
 };
 
 layout(set = 1, binding = 0) uniform usampler3D masks[];
@@ -364,10 +365,11 @@ vec3 AtmosphericScattering_Sky(vec3 position, vec3 direction)
 vec2 WorldToSkybox(vec3 dir)
 {
     float theta = asin(dir.y);
-    float phi = acos(dir.x / cos(theta));
+    float major_axis = dot(dir.xz, vec2(cos(light_phi), sin(light_phi)));
+    float phi = acos(clamp(major_axis / cos(theta), -1.0, 1.0));
 
     vec2 uv = vec2(phi, theta) / (3.14159265 * vec2(1.0, 0.5));
-    uv.y = sign(uv.y) * sqrt(uv.y) * 0.5 + 0.5;
+    uv.y = sign(uv.y) * sqrt(abs(uv.y)) * 0.5 + 0.5;
 
     return uv;
 }
@@ -375,9 +377,9 @@ vec2 WorldToSkybox(vec3 dir)
 vec3 AtmosphericScattering_LUT(vec3 position, vec3 direction)
 {
     if (precomputed_sky != 0)
-        return texture(skybox, WorldToSkybox(direction)).xyz;
+        return texture(skybox, WorldToSkybox(normalize(direction))).xyz;
     else
-        return AtmosphericScattering_Irradiance(position, direction);
+        return AtmosphericScattering_Irradiance(position, normalize(direction));
 }
 
 void main()
