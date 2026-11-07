@@ -45,13 +45,14 @@ vec3 FirstOrderIrradiance(float altitude,
 
 #if 0
         vec3 ground_point = ray_org + ray_dir * exit_depth;
-        float ground_cos_light = dot(normalize(ground_point), light_dir);
+        float ground_cos_light = max(0.0, dot(normalize(ground_point), light_dir));
 
         direct_radiance = TransmittanceLookup(0.0, ground_cos_light, transmittance)
             * Transmittance(0.0, -cos_zenith, altitude, exit_depth, transmittance)
-            * vec3(0.1) * ground_cos_light * 40.0;
-#endif
+            * ground_albedo * ground_cos_light * sun_intensity;
+#else
         direct_radiance = vec3(0.0);
+#endif
     }
 
     float dx = 1.0 / STEP_COUNT;
@@ -91,7 +92,7 @@ vec3 FirstOrderIrradiance(float altitude,
         );
         vec3 ambient_irradiance = max(vec3(0.0), texture(multi_scattering, multi_scattering_uv).xyz);
 
-        total_inscattering += (inscattering_factor * tr_total * 40.0 + ambient_irradiance)
+        total_inscattering += (inscattering_factor * tr_total * sun_intensity + ambient_irradiance)
             * step_size;
     }
 
@@ -194,7 +195,7 @@ vec3 FirstOrderIrradiance_baseline(float altitude,
         vec3 rayleigh_transmittance = densities.x * transmittance;
         vec3 mie_transmittance = densities.y * transmittance;
 
-        inscattering += 40.0 * step_size *
+        inscattering += sun_intensity * step_size *
             (rayleigh_scattering * RayleighPhase(cos_ray_light) * rayleigh_transmittance
             + mie_scattering * MiePhase(cos_ray_light) * mie_transmittance);
     }
@@ -229,6 +230,18 @@ void main()
     vec3 baseline = FirstOrderIrradiance_baseline(altitude / scale_factor,
                                                   ray_dir_world,
                                                   local_light_dir);
+#endif
+
+#if 0
+    if (dot(ray_dir_world, local_light_dir) > 0.9997
+        && ray_dir_world.y > 0.0)
+    {
+        float polar_radius = altitude/scale_factor + base_radius;
+        float exit_depth = OuterCircleIntersection(polar_radius, outer_radius, ray_dir_world.y);
+        irradiance = vec3(sun_intensity)
+            * Transmittance(altitude/scale_factor, ray_dir_world.y,
+                            outer_radius-base_radius, exit_depth, transmittance);
+    }
 #endif
 
     oFS_color = vec4(irradiance, 1.0);

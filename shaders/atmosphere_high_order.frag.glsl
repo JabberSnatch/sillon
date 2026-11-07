@@ -42,13 +42,14 @@ vec3 FirstOrderIrradiance(float altitude,
 
 #if 1
         vec3 ground_point = ray_org + ray_dir * exit_depth;
-        float ground_cos_light = dot(normalize(ground_point), light_dir);
+        float ground_cos_light = max(0.0, dot(normalize(ground_point), light_dir));
 
         direct_radiance = TransmittanceLookup(0.0, ground_cos_light, transmittance)
             * Transmittance(0.0, -cos_zenith, altitude, exit_depth, transmittance)
-            * vec3(0.2) * ground_cos_light * 40.0;
+            * ground_albedo * ground_cos_light * sun_intensity;
+#else
+        direct_radiance = vec3(0.0);
 #endif
-        //direct_radiance = vec3(0.0);
     }
 
     float dx = 1.0 / STEP_COUNT;
@@ -82,7 +83,7 @@ vec3 FirstOrderIrradiance(float altitude,
 
         vec3 tr_total = tr_sky * tr_source;
 
-        total_inscattering += inscattering_factor * tr_total * step_size * 40.0;
+        total_inscattering += inscattering_factor * tr_total * step_size * sun_intensity;
     }
 
     total_inscattering += direct_radiance;
