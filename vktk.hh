@@ -94,7 +94,7 @@ struct Allocation
 struct Allocator
 {
     static constexpr VkDeviceSize kBlockSize = 128;
-    static constexpr VkDeviceSize kChunkBlockCount = 1024 * 1024;
+    static constexpr VkDeviceSize kChunkBlockCount = 1024 * 1024 * 8;
     static constexpr VkDeviceSize kChunkSize = kBlockSize * kChunkBlockCount;
 
     using BlockRange = std::pair<uint64_t, uint64_t>;
