@@ -10,7 +10,7 @@ const vec3 ozone_absorption = vec3(0.65e-6, 1.881e-6, 0.085e-6) * scale_factor;
 
 const float tangent_depth = sqrt(outer_radius*outer_radius - base_radius*base_radius);
 
-const float sun_intensity = 40.0;
+const float sun_intensity = 1.0;//40.0;
 const vec3 ground_albedo = vec3(0.2);
 
 float UniformPhase() {

@@ -47,11 +47,11 @@ struct TurntableCamera
 
 struct FlightCamera
 {
-#if 0
+#if 1
     numtk::vec2f forward_spherical = { 0.710f, -0.260f };
     numtk::vec3f position = { 37.025f, -36.243f, -18.561f };
 #endif
-#if 1
+#if 0
     numtk::vec2f forward_spherical = { -4.73f, -1.26f };
     numtk::vec3f position = { 222.36f, -152.f, -129.64f };
 #endif
@@ -112,15 +112,16 @@ struct voxel_state_t
 
     //numtk::vec2f sun_spherical = { 5.71f, 0.84f };
     //numtk::vec2f sun_spherical = { 6.43f, 0.02f };
-    numtk::vec2f sun_spherical = { 6.43f, -0.02f };
+    //numtk::vec2f sun_spherical = { 6.43f, -0.02f };
     //numtk::vec2f sun_spherical = { 6.46f, 0.01f };
-    //numtk::vec2f sun_spherical = { 0.71f, .7f };
+    numtk::vec2f sun_spherical = { 0.71f, .7f };
 
     uint32_t frame_index = 0;
 
     uint32_t progressive_frame_index = 0;
 
-    float exposure = 1.f;
+    float exposure = 40.f;
+    float tonemapping = 1.5f;
 
     dstk::Registry core_registry;
     dispatch_runtime_t progressive_runtime;
@@ -1231,7 +1232,10 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         if (guitk::Slider(_state->gui_context, &_state->fov, "Field Of View", 5.f, 150.f))
             reset_progressive_counter = true;
 
-        if (guitk::Slider(_state->gui_context, &_state->exposure, "Exposure", 0.001f, 20.f))
+        if (guitk::Slider(_state->gui_context, &_state->exposure, "Exposure", 0.001f, 1000.f))
+            reset_progressive_counter = true;
+
+        if (guitk::Slider(_state->gui_context, &_state->tonemapping, "Tonemap", 0.f, 2.99f))
             reset_progressive_counter = true;
 
         guitk::EndFrame(_state->gui_context);
@@ -1371,7 +1375,8 @@ void Draw(void* _pstate,
     progressive_args.swapchain_index = _swapchain.index;
     progressive_args.swapchain_image = _swapchain.images[_swapchain.index];
     progressive_args.progressive_frame_index = _state->progressive_frame_index;
-    progressive_args.exposure = _state->exposure;
+    progressive_args.exposure = 1.f / _state->exposure;
+    progressive_args.tonemapping = (uint32_t)std::floor(_state->tonemapping);
 
     vktk::CommandBuffer command_buffer = _vulkan->CreateCommandBuffer(_vulkan->present_queue);
     command_buffer.Begin();

@@ -20,6 +20,7 @@ struct Args
     VkImage swapchain_image;
     uint32_t progressive_frame_index;
     float exposure;
+    uint32_t tonemapping;
 };
 
 dispatch_runtime_t Create(vktk::Context* _vulkan, dstk::Registry* _registry);
@@ -339,6 +340,7 @@ void Impl::UpdateBindings(vkrg::runtime::DispatchContext _context,
                 .push_constant_range = 0
             }, 0);
         *push_constants = _args.exposure;
+        *(uint32_t*)(push_constants+1) = _args.tonemapping;
     }
 
 #if 0
@@ -466,6 +468,7 @@ vkrg::layout::DispatchStage TonemapStageInfo()
                 "layout(set = 0, binding = 0) uniform sampler2D framebuffer;"
                 "layout(push_constant, std430) uniform PushConstant {"
                 "float exposure;"
+                "uint formula;"
                 "};"
 
                 R"(
@@ -491,18 +494,18 @@ vkrg::layout::DispatchStage TonemapStageInfo()
 
                 "void main() {"
                 "vec3 source = texelFetch(framebuffer, ivec2(gl_FragCoord.xy), 0).xyz;"
-#if 0
+
+                "if (formula == 0)"
                 "oFS_color = vec4(source / exposure, 1.0);"
-#endif
 
-#if 1
-                "oFS_color = vec4(CommerceToneMapping(source / exposure), 1.0);"
-#endif
-
-#if 0
+                "if (formula == 1) {"
                 "vec3 post = vec3(1.0) - exp(-(source / exposure));"
                 "oFS_color = vec4(post, 1.0);"
-#endif
+                "}"
+
+                "if (formula == 2)"
+                "oFS_color = vec4(CommerceToneMapping(source / exposure), 1.0);"
+
                 "}"
               }
           )
@@ -518,7 +521,7 @@ vkrg::layout::DispatchStage TonemapStageInfo()
     });
 
     output.push_constants.push_back(vkrg::layout::PushConstantRange{
-        VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float) }
+        VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float) + sizeof(uint32_t) }
     );
 
     output.graphics.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;

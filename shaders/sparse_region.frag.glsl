@@ -6,6 +6,8 @@
 #include "voxel_traversal.glsl"
 #include "sampling.glsl"
 
+#include "atmosphere_parameters.glsl"
+
 layout(location = 0) in vec3 iFS_volume_coords;
 layout(location = 1) in vec3 iFS_camera_position;
 layout(location = 0) out vec4 color;
@@ -227,32 +229,6 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
         return vec4((HitNormalDDAContext(ctx) * 0.5 + vec3(0.5)) * 0.1, -1.0);
 }
 
-float RayleighPhase(float cos_th) {
-    return 3.0 * (1 + cos_th*cos_th) / (16.0 * 3.14159265);
-}
-
-float RayleighDensity(float h) {
-    return exp(-h/0.008);
-}
-
-float MiePhase(float cos_th) {
-    const float g = 0.8;
-    // Henyey-Greenstein phase func
-    return (1 - g*g) / (pow(1 + g*g - 2*g*cos_th, 1.5) * 4 * 3.14159265);
-}
-
-float MieDensity(float h) {
-    return exp(-h/0.0012);
-}
-
-float OzonePhase() {
-    return 1 / (4.0 * 3.14159265);
-}
-
-float OzoneDensity(float h) {
-    return max(0.0, 1.0 - abs(h - 0.025)/0.015);
-}
-
 vec3 CircleIntersection(float radius, float org_height, float ray_polar)
 {
     float b = org_height * ray_polar;
@@ -286,7 +262,8 @@ vec3 AtmosphericScattering_Irradiance(vec3 position, vec3 direction)
     vec3 primary_ground_hit =
         CircleIntersection(base_radius, altitude, direction.y);
     if (primary_ground_hit.x > 0.0)
-        return vec3(0.1);
+        //return vec3(0.1);
+        return vec3(0.0);
 
     vec3 primary_atmosphere_hit =
         CircleIntersection(outer_radius, altitude, direction.y);
@@ -344,7 +321,7 @@ vec3 AtmosphericScattering_Irradiance(vec3 position, vec3 direction)
         vec3 rayleigh_transmittance = densities.x * transmittance;
         vec3 mie_transmittance = densities.y * transmittance;
 
-        inscattering += (20.0 + pow(20.0, sun_power*2.0+1.0)) * step_size *
+        inscattering += sun_intensity * step_size *
             (rayleigh_scattering * RayleighPhase(light_angle) * rayleigh_transmittance
              + mie_scattering * MiePhase(light_angle) * mie_transmittance);
 
