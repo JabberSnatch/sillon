@@ -383,7 +383,7 @@ vec3 ClearSky_Inscattering_LUT(vec3, vec3 direction)
 
 vec3 ClearSky_Direct_LUT(vec3 position)
 {
-    float altitude = base_radius + position.y / scale_factor;
+    float altitude = position.y / scale_factor;
     vec3 tr = TransmittanceLookup(altitude, light_dir.y, trlut);
     return tr * sun_intensity;
 }
@@ -396,11 +396,9 @@ vec3 ClearSky_Irradiance(vec3 position, vec3 direction)
     if (dot(direction, light_dir) > cos(0.02)
         && direction.y > 0.0)
     {
-#if 0
         if (precomputed_sky != 0)
             irradiance += ClearSky_Direct_LUT(position);
         else
-#endif
             irradiance += ClearSky_Direct_Ray(position);
     }
 
