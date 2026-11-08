@@ -94,6 +94,7 @@ struct Args
     float sun_power;
     bool precomputed_sky;
     vktk::Texture skybox;
+    vktk::Texture trlut;
 };
 
 dispatch_runtime_t Create(vktk::Context* _vulkan, dstk::Registry* _registry);
@@ -135,6 +136,7 @@ struct Impl
     bool region_ready = false;
     VkSampler nearest_sampler;
     VkSampler skybox_sampler;
+    VkSampler linear_clamp_sampler;
     vktk::Buffer matrix_buffer;
     vktk::Buffer staging_buffer;
 
@@ -189,6 +191,7 @@ void Impl::Destroy(vkrg::runtime::DispatchContext _context)
 {
     vkDestroySampler(_context.vulkan.device, nearest_sampler, nullptr);
     vkDestroySampler(_context.vulkan.device, skybox_sampler, nullptr);
+    vkDestroySampler(_context.vulkan.device, linear_clamp_sampler, nullptr);
     _context.vulkan.DestroyBuffer(matrix_buffer);
     _context.vulkan.DestroyBuffer(staging_buffer);
 }
@@ -215,6 +218,10 @@ void Impl::OnModuleScopeOpen(vkrg::runtime::DispatchContext _context)
     sampler_create.addressModeU = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
     CHECKCALL(vkCreateSampler, _context.vulkan.device,
               &sampler_create, nullptr, &skybox_sampler);
+
+    sampler_create.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    CHECKCALL(vkCreateSampler, _context.vulkan.device,
+              &sampler_create, nullptr, &linear_clamp_sampler);
 
     staging_buffer = _context.vulkan.CreateBuffer(
         sizeof(MatrixBlock),
@@ -390,7 +397,9 @@ void Impl::UpdateBindings(vkrg::runtime::DispatchContext _context,
 
         dstk::Registry::Node sparse_region_node = _context.graph["SparseRegion"];
 
-        VkWriteDescriptorSet desc_write =
+        std::vector<VkWriteDescriptorSet> desc_writes = {};
+
+        desc_writes.push_back(
             _context.BindShaderResource(sparse_region_node,
                                         vkrg::layout::BindingPoint{
                                             .type = vkrg::layout::BindingType_Shader,
@@ -405,8 +414,28 @@ void Impl::UpdateBindings(vkrg::runtime::DispatchContext _context,
                                                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
                                                 }
                                             }
-                                        });
-        vkUpdateDescriptorSets(_context.vulkan.device, 1u, &desc_write, 0u, nullptr);
+                                        }));
+
+        desc_writes.push_back(
+            _context.BindShaderResource(sparse_region_node,
+                                        vkrg::layout::BindingPoint{
+                                            .type = vkrg::layout::BindingType_Shader,
+                                            .shader = { 0, 3 }
+                                        },
+                                        0,
+                                        vkrg::bind::ShaderResources{
+                                            .images = {
+                                                VkDescriptorImageInfo{
+                                                    linear_clamp_sampler,
+                                                    _args.trlut.view,
+                                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                                }
+                                            }
+                                        }));
+
+        vkUpdateDescriptorSets(_context.vulkan.device,
+                               desc_writes.size(), desc_writes.data(),
+                               0u, nullptr);
 
         vkrg::bind::GraphicsCommand command = {};
         command.command = vkrg::bind::DispatchCommand_Draw;
@@ -627,6 +656,8 @@ vkrg::layout::DispatchStage SparseRegionDispatchStageInfo()
             { VK_SHADER_STAGE_ALL, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
               0, 1 },
             { VK_SHADER_STAGE_ALL, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+              0, 1 },
+            { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
               0, 1 },
             { VK_SHADER_STAGE_FRAGMENT_BIT, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
               0, 1 }

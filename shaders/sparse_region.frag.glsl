@@ -25,6 +25,7 @@ layout(std430, set = 0, binding = 1) buffer ResidencyBlock {
 };
 
 layout(set = 0, binding = 2) uniform sampler2D skybox;
+layout(set = 0, binding = 3) uniform sampler2D trlut;
 
 layout(push_constant, std430) uniform PushConstants {
     vec3 light_dir;
@@ -242,18 +243,8 @@ vec3 CircleIntersection(float radius, float org_height, float ray_polar)
 
 #define STEP_COUNT 128.0
 #define STEP_COUNT_SECONDARY 8.0
-vec3 AtmosphericScattering_Irradiance(vec3 position, vec3 direction)
+vec3 ClearSky_Inscattering_Ray(vec3 position, vec3 direction)
 {
-    const float base_radius = 6.360;
-    const float outer_radius = 6.460;
-
-    const float scale_factor = 1000000;
-
-    const vec3 rayleigh_scattering = vec3(5.802e-6, 13.56e-6, 33.10e-6) * scale_factor;
-    const float mie_scattering = 3.996e-6 * scale_factor;
-    const float mie_absorption = 4.40e-6 * scale_factor;
-    const vec3 ozone_absorption = vec3(0.65e-6, 1.881e-6, 0.085e-6) * scale_factor;
-
     const float light_angle = dot(direction, light_dir);
 
     vec3 origin = vec3(0.0, base_radius + 0.000001, 0.0) + position.xyz / scale_factor;
@@ -325,18 +316,52 @@ vec3 AtmosphericScattering_Irradiance(vec3 position, vec3 direction)
             (rayleigh_scattering * RayleighPhase(light_angle) * rayleigh_transmittance
              + mie_scattering * MiePhase(light_angle) * mie_transmittance);
 
-        optical_depths += densities * step_size;
+        optical_depths += optical_step;
     }
 
     return inscattering;
 }
 
-vec3 AtmosphericScattering_Sky(vec3 position, vec3 direction)
+vec3 ClearSky_Direct_Ray(vec3 position)
 {
-    vec3 sky_color = vec3(1.0) - exp(-1.0 * AtmosphericScattering_Irradiance(position, direction));
-    if (sky_color != sky_color)
-        sky_color = vec3(1.0, 0.0, 1.0);
-    return sky_color;
+    vec3 origin = vec3(0.0, base_radius + 0.000001, 0.0) + position.xyz / scale_factor;
+    float altitude = origin.y;
+    vec3 direction = light_dir;
+
+    vec3 primary_ground_hit =
+        CircleIntersection(base_radius, altitude, direction.y);
+    if (primary_ground_hit.x > 0.0)
+        return vec3(0.0);
+
+    vec3 primary_atmosphere_hit =
+        CircleIntersection(outer_radius, altitude, direction.y);
+    if (primary_atmosphere_hit.x <= 0.0)
+        return direction * 0.5 + vec3(0.5);
+
+    float step_size = primary_atmosphere_hit.z / STEP_COUNT;
+
+    vec3 optical_depths = vec3(0.0);
+
+    for (float index_primary = 0.0; index_primary < STEP_COUNT; ++index_primary)
+    {
+        vec3 step = origin + step_size * (index_primary+0.5) * direction;
+        float sample_height = length(step) - base_radius;
+
+        vec3 densities = vec3(
+            RayleighDensity(sample_height),
+            MieDensity(sample_height),
+            OzoneDensity(sample_height)
+        );
+        vec3 optical_step = densities * step_size;
+        optical_depths += optical_step;
+    }
+
+    vec3 transmittance = exp(
+        -rayleigh_scattering * optical_depths.x
+        -(mie_scattering+mie_absorption).xxx * optical_depths.y
+        -ozone_absorption * optical_depths.z);
+
+    return transmittance * sun_intensity;
 }
 
 vec2 WorldToSkybox(vec3 dir)
@@ -351,12 +376,41 @@ vec2 WorldToSkybox(vec3 dir)
     return uv;
 }
 
-vec3 AtmosphericScattering_LUT(vec3 position, vec3 direction)
+vec3 ClearSky_Inscattering_LUT(vec3, vec3 direction)
 {
+    return texture(skybox, WorldToSkybox(direction)).xyz;
+}
+
+vec3 ClearSky_Direct_LUT(vec3 position)
+{
+    float altitude = base_radius + position.y / scale_factor;
+    vec3 tr = TransmittanceLookup(altitude, light_dir.y, trlut);
+    return tr * sun_intensity;
+}
+
+vec3 ClearSky_Irradiance(vec3 position, vec3 direction)
+{
+    vec3 irradiance = vec3(0.0);
+
+    direction = normalize(direction);
+    if (dot(direction, light_dir) > cos(0.02)
+        && direction.y > 0.0)
+    {
+#if 0
+        if (precomputed_sky != 0)
+            irradiance += ClearSky_Direct_LUT(position);
+        else
+#endif
+            irradiance += ClearSky_Direct_Ray(position);
+    }
+
     if (precomputed_sky != 0)
-        return texture(skybox, WorldToSkybox(normalize(direction))).xyz;
+        irradiance += ClearSky_Inscattering_LUT(position, direction);
     else
-        return AtmosphericScattering_Irradiance(position, normalize(direction));
+        irradiance += ClearSky_Inscattering_Ray(position, direction);
+
+
+    return irradiance;
 }
 
 void main()
@@ -434,7 +488,8 @@ void main()
         if (display_mode == 0.0)
         {
             shadow = RegionTraversal4(hitp + light_dir*0.0001, light_dir, payload).w >= 0.0 ? 0.0 : 1.0;
-            diffuse = max(0.0, dot(light_dir, trav.xyz)) * AtmosphericScattering_LUT(hitp, light_dir);
+            diffuse = max(0.0, dot(light_dir, trav.xyz)) *
+                ClearSky_Irradiance(hitp, light_dir);
         }
         else
         {
@@ -458,7 +513,7 @@ void main()
                     {
                         indirect += max(0.0, dot(previous_hit.xyz, light_dir))
                             * current_weight
-                            * AtmosphericScattering_LUT(current_org, light_dir);
+                            * ClearSky_Irradiance(current_org, light_dir);
                     }
                 }
 
@@ -484,7 +539,9 @@ void main()
                 if (current_hit.w < 0.0)
                 {
                     exit_color =
-                        AtmosphericScattering_LUT(current_org, current_ray) * current_weight * next_weight;
+                        ClearSky_Irradiance(current_org, current_ray)
+                        * current_weight
+                        * next_weight;
                     break;
                 }
 
@@ -520,6 +577,6 @@ void main()
 #endif
     }
     else
-        color.xyz = AtmosphericScattering_LUT(org, dir);
+        color.xyz = ClearSky_Irradiance(org, dir);
     color.w = 1.0;
 }

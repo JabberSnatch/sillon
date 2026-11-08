@@ -1362,6 +1362,7 @@ void Draw(void* _pstate,
         progressive_args.voxel_field.skybox = progressive_args.atmosphere.irradiance_texture;
     else
         progressive_args.voxel_field.skybox = progressive_args.atmosphere.baseline_texture;
+    progressive_args.voxel_field.trlut = progressive_args.atmosphere.transmittance_texture;
     progressive_args.voxel_field.precomputed_sky = _state->precomputed_sky;
 
     progressive_args.gui.gui_record = _state->current_gui_record;
