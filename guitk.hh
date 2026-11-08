@@ -45,6 +45,13 @@ struct WidgetStates
     bool mouse_over;
 };
 
+enum SliderFlag
+{
+    SliderFlag_None = 0,
+    SliderFlag_LogScale = 1,
+};
+using SliderFlags = uint32_t;
+
 Context CreateContext();
 void DeleteContext(Context);
 
@@ -56,7 +63,9 @@ void EndFrame(Context);
 
 void Label(Context, std::string const& label_);
 bool Checkbox(Context, bool* state_, std::string const& label_, std::string const& id_ = "");
-bool Slider(Context, float* state_, std::string const& label_, float min_, float max_, std::string const& id_ = "");
+bool Slider(Context, float* state_, std::string const& label_,
+            float min_, float max_, SliderFlags flags_ = SliderFlag_None,
+            std::string const& id_ = "");
 
 struct TextureData
 {
@@ -291,7 +300,9 @@ bool Checkbox(Context context_, bool* state_, std::string const& label_, std::st
     return triggered;
 }
 
-bool Slider(Context context_, float* state_, std::string const& label_, float min_, float max_, std::string const& id_)
+bool Slider(Context context_, float* state_, std::string const& label_,
+            float min_, float max_, SliderFlags flags_,
+            std::string const& id_)
 {
     bool triggered = false;
 
@@ -308,7 +319,17 @@ bool Slider(Context context_, float* state_, std::string const& label_, float mi
     _PushText(frame_info, label_, glyph_max);
 
     {
-        int32_t offset = (int32_t)(((*state_ - min_) / (max_ - min_)) * 128.f);
+        float ratio = 0.f;
+
+        if ((flags_ & (uint32_t)SliderFlag_LogScale) == 0)
+            ratio = (*state_ - min_) / (max_ - min_);
+        else
+        {
+            const double log_range = (double)max_/(double)min_;
+            ratio = (float)(std::log((double)*state_/(double)min_) / std::log(log_range));
+        }
+
+        int32_t offset = (int32_t)(ratio * 128.f);
 
         numtk::bounds2u box_bounds{ glyph_max + numtk::vec2u{ (uint32_t)offset, (uint32_t)-16 }, { 16, 16 } };
 
@@ -323,8 +344,19 @@ bool Slider(Context context_, float* state_, std::string const& label_, float mi
         {
             numtk::vec2i mouse_delta = iotk::MouseDelta(*context_->input, *context_->past_input);
             triggered = (mouse_delta != numtk::vec2i::Constant(0));
-            offset += mouse_delta.x();
-            *state_ = (float)(offset / 128.f) * (max_ - min_) + min_;
+            if (mouse_delta.x() != 0)
+            {
+                offset += mouse_delta.x();
+                ratio = ((float)offset / 128.f);
+
+                if ((flags_ & (uint32_t)SliderFlag_LogScale) == 0)
+                    *state_ = ratio * (max_ - min_) + min_;
+                else
+                {
+                    const double log_range = (double)max_/(double)min_;
+                    *state_ = (float)(std::pow(log_range, (double)ratio) * (double)min_);
+                }
+            }
 
             if (*state_ > max_) *state_ = max_;
             if (*state_ < min_) *state_ = min_;
