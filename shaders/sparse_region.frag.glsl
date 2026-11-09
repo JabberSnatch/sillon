@@ -79,7 +79,8 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
         {
             while (ctx.mask.w == 1.0)
             {
-                data[depth] = texture(masks[nonuniformEXT(current_tex)], ctx.voxel_coords).xy;
+                data[depth] = texture(masks[nonuniformEXT(current_tex)],
+                                      TextureCoordsDDAContext(ctx)).xy;
                 if (data[depth] != uvec2(0, 0))
                 {
                     hit = true;
@@ -88,8 +89,6 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
                         ctx_cache[depth] = SaveDDAContext(ctx);
                         org_cache[depth] = org;
                         tex_index[depth] = current_tex;
-
-                        //current_tex = current_tex;
 
                         org = RecursionPointDDAContext(ctx, org, dir, node_size);
                         ctx = InitDDAContext(org, dir, CHUNK_SIZE);
@@ -126,7 +125,7 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
                 for (uint index = 0; index < stack_depth; index++)
                 {
                     float voxel_count = ((index & 1) != 0 ? CHUNK_SIZE : node_size);
-                    t += DDAContextSaveT(ctx_cache[index], dir, voxel_count) * level_size;
+                    t += HitTDDAContextSave(ctx_cache[index], dir, voxel_count) * level_size;
                     level_size /= voxel_count;
                 }
                 t += HitTDDAContext(ctx) * level_size;
@@ -137,7 +136,7 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
         {
             while (ctx.mask.w == 1.0)
             {
-                uvec3 int_coords = uvec3(floor(ctx.voxel_coords * CHUNK_SIZE));
+                uvec3 int_coords = VoxelCoordsDDAContext(ctx);
                 uint side_index = int_coords.z / 2;
                 uint voxel_index = int_coords.x + int_coords.y * 4 + (int_coords.z%2)*16;
 
@@ -146,8 +145,9 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
                     hit = true;
                     if (depth < stack_depth)
                     {
-                        uint base_offset = texture(offsets[nonuniformEXT(current_tex)],
-                                                   ctx_cache[depth-1].voxel_coords).x;
+                        uint base_offset =
+                            texture(offsets[nonuniformEXT(current_tex)],
+                                    TextureCoordsDDAContextSave(ctx_cache[depth-1])).x;
 
                         if (base_offset == 0xffffffff)
                         {
@@ -187,8 +187,10 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
                         output_value = HitNormalDDAContext(ctx);
                         vec3 chunk_coords =
                             (vec3(int_coords) + vec3(0.5)) / (CHUNK_SIZE * node_size);
+                        vec3 texture_coords = TextureCoordsDDAContextSave(ctx_cache[depth-1]);
+
                         payload = texture(payloads[nonuniformEXT(current_tex - leaves_begin)],
-                                          ctx_cache[depth-1].voxel_coords - vec3(0.5) / node_size + chunk_coords).xyz;
+                                          texture_coords - vec3(0.5)/node_size + chunk_coords).xyz;
                         ++depth;
                     }
                     break;
@@ -215,7 +217,7 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
                 for (uint index = 0; index < min(depth_bypass, stack_depth); index++)
                 {
                     float voxel_count = ((index & 1) != 0 ? CHUNK_SIZE : node_size);
-                    t += DDAContextSaveT(ctx_cache[index], dir, voxel_count) * level_size;
+                    t += HitTDDAContextSave(ctx_cache[index], dir, voxel_count) * level_size;
                     level_size /= voxel_count;
                 }
                 t += HitTDDAContext(ctx) * level_size;

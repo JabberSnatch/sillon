@@ -93,6 +93,16 @@ vec3 RecursionPointDDAContext(DDAContext ctx, vec3 org, vec3 dir, float region_s
         - floor(ctx.voxel_coords * region_size);
 }
 
+vec3 TextureCoordsDDAContext(DDAContext ctx)
+{
+    return ctx.voxel_coords;
+}
+
+uvec3 VoxelCoordsDDAContext(DDAContext ctx)
+{
+    return uvec3(floor(ctx.voxel_coords / abs(ctx.voxel_step)));
+}
+
 vec3 HitNormalDDAContext(DDAContext ctx)
 {
     return ctx.mask.xyz * -ctx.step_sign;
@@ -111,7 +121,12 @@ struct DDAContextSave
     vec3 max_t;
 };
 
-float DDAContextSaveT(in DDAContextSave ctx, vec3 dir, float voxel_count)
+vec3 TextureCoordsDDAContextSave(DDAContextSave ctx)
+{
+    return ctx.voxel_coords;
+}
+
+float HitTDDAContextSave(in DDAContextSave ctx, vec3 dir, float voxel_count)
 {
     vec3 delta_t = 1.0 / (abs(dir) * voxel_count);
     vec3 max_t = ctx.max_t - delta_t * ctx.mask.xyz * ctx.mask.w;
