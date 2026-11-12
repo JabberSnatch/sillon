@@ -12,6 +12,13 @@ struct DDAContext
 
 #define EPSILON 1.0e-5
 
+vec3 InitDeltaT(vec3 dir, float voxel_count)
+{
+    // bound 1.0/0.0 with largest representable value, we only need to avoid
+    // inf eventually turning into nan through 0 * inf
+    return min(1.0 / (abs(dir) * voxel_count), vec3(3.4028235e38));
+}
+
 DDAContext InitDDAContext(vec3 org, vec3 dir, float voxel_count)
 {
     vec3 voxel_space_org = clamp(org, vec3(0.0), vec3(1.0-EPSILON)) * voxel_count;
@@ -21,17 +28,17 @@ DDAContext InitDDAContext(vec3 org, vec3 dir, float voxel_count)
     ctx.step_sign = sign(dir);
     ctx.exit_value = ctx.step_sign * 0.5 + vec3(0.5);
     vec3 edge_distance = ctx.exit_value - (ctx.step_sign * fract(voxel_space_org));
-    ctx.delta_t = 1.0 / (abs(dir) * voxel_count);
+    ctx.delta_t = InitDeltaT(dir, voxel_count);
     ctx.max_t = abs(edge_distance) * ctx.delta_t;
     ctx.voxel_coords = (floor(voxel_space_org) + vec3(0.5)) / voxel_count;
     ctx.voxel_step = ctx.step_sign / voxel_count;
 
     vec3 order = vec3(
-        // ctx.max_t.x < ctx.max_t.y
+        // ctx.max_t.y > ctx.max_t.x
         1.0 - step(ctx.max_t.y, ctx.max_t.x),
-        // ctx.max_t.x < ctx.max_t.z
+        // ctx.max_t.z > ctx.max_t.x
         1.0 - step(ctx.max_t.z, ctx.max_t.x),
-        // ctx.max_t.y < ctx.max_t.z
+        // ctx.max_t.z > ctx.max_t.y
         1.0 - step(ctx.max_t.z, ctx.max_t.y));
 
     ctx.mask.xyz = vec3(
@@ -60,11 +67,11 @@ DDAContext InitDDAContext(vec3 org, vec3 dir, float voxel_count)
 void StepDDAContext(inout DDAContext ctx)
 {
     vec3 order = vec3(
-        // ctx.max_t.x < ctx.max_t.y
+        // ctx.max_t.y > ctx.max_t.x
         1.0 - step(ctx.max_t.y, ctx.max_t.x),
-        // ctx.max_t.x < ctx.max_t.z
+        // ctx.max_t.z > ctx.max_t.x
         1.0 - step(ctx.max_t.z, ctx.max_t.x),
-        // ctx.max_t.y < ctx.max_t.z
+        // ctx.max_t.z > ctx.max_t.y
         1.0 - step(ctx.max_t.z, ctx.max_t.y));
 
     ctx.mask.xyz = vec3(
@@ -81,7 +88,7 @@ void StepDDAContext(inout DDAContext ctx)
     ctx.max_t += ctx.delta_t * ctx.mask.xyz * ctx.mask.w;
 
     ctx.mask.w =
-        abs(sign(dot(ctx.voxel_step, ctx.mask.xyz))) *
+        //abs(sign(dot(ctx.voxel_step, ctx.mask.xyz))) *
         (1.0 - step(ctx.exit_value.x, ctx.voxel_coords.x * ctx.step_sign.x))
         * (1.0 - step(ctx.exit_value.y, ctx.voxel_coords.y * ctx.step_sign.y))
         * (1.0 - step(ctx.exit_value.z, ctx.voxel_coords.z * ctx.step_sign.z));
@@ -110,7 +117,7 @@ vec3 HitNormalDDAContext(DDAContext ctx)
 
 float HitTDDAContext(DDAContext ctx)
 {
-    vec3 max_t = ctx.max_t - ctx.delta_t * ctx.mask.xyz;// * ctx.mask.w;
+    vec3 max_t = ctx.max_t - ctx.delta_t * ctx.mask.xyz;
     return max(0.0, min(max_t.x, min(max_t.y, max_t.z)));
 }
 
@@ -128,7 +135,7 @@ vec3 TextureCoordsDDAContextSave(DDAContextSave ctx)
 
 float HitTDDAContextSave(in DDAContextSave ctx, vec3 dir, float voxel_count)
 {
-    vec3 delta_t = 1.0 / (abs(dir) * voxel_count);
+    vec3 delta_t = InitDeltaT(dir, voxel_count);
     vec3 max_t = ctx.max_t - delta_t * ctx.mask.xyz * ctx.mask.w;
     return max(0.0, min(max_t.x, min(max_t.y, max_t.z)));
 }
@@ -148,7 +155,7 @@ DDAContext RestoreDDAContext(inout DDAContextSave save, vec3 dir, float voxel_co
 
     ctx.step_sign = sign(dir);
     ctx.exit_value = ctx.step_sign * 0.5 + vec3(0.5);
-    ctx.delta_t = 1.0 / (abs(dir) * voxel_count);
+    ctx.delta_t = InitDeltaT(dir, voxel_count);
     ctx.voxel_step = ctx.step_sign / voxel_count;
 
     ctx.max_t = save.max_t;
