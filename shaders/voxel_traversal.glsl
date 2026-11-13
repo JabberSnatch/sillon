@@ -12,6 +12,147 @@ struct DDAContext
 
 #define EPSILON 1.0e-5
 
+#define FIXED_PRECISION 1073741824
+#define FIXED_BIT_COUNT 30
+#define FIXED_LOW_MASK 0x7fff
+#define FIXED_LOW_OFFSET 15
+
+ivec3 FloatToFixed(vec3 value)
+{
+    return ivec3(value * vec3(1073741824.0));
+}
+
+vec3 FixedToFloat(ivec3 value)
+{
+    return vec3(value) / vec3(1073741824.0);
+}
+
+ivec3 FixedProduct(ivec3 a, ivec3 b)
+{
+    uvec3 al = uvec3(a & ivec3(0x7fff));
+    ivec3 ah = a >> ivec3(15);
+    uvec3 bl = uvec3(b & ivec3(0x7fff));
+    ivec3 bh = b >> ivec3(15);
+
+    uvec3 low = al*bl;
+    ivec3 mid_a = ivec3(al)*bh + ivec3(low >> 15);
+    ivec3 mid_low = mid_a & ivec3(0x7fff);
+    ivec3 mid_high = mid_a >> ivec3(15);
+    mid_low = ivec3(bl)*ah + mid_low;
+    ivec3 high = ah*bh;
+
+    return high + (mid_low >> 15) + mid_high;
+}
+
+struct FixedPointDDA {
+    ivec3 current_voxel;
+    ivec3 step_sign;
+    ivec3 delta_t;
+    ivec3 max_t;
+    int size;
+    ivec4 mask;
+};
+
+struct FixedPointDDABackup {
+    ivec3 current_voxel;
+    ivec3 max_t;
+    ivec4 mask;
+};
+
+FixedPointDDA FixedPointDDAInit(vec3 org, vec3 dir, int log_voxel_count)
+{
+    ivec3 forg = FloatToFixed(org);
+
+    FixedPointDDA ctx;
+    ctx.current_voxel = forg >> (FIXED_BIT_COUNT - log_voxel_count);
+    ctx.step_sign = ivec3(sign(dir));
+
+    {
+        int voxel_precision = FIXED_PRECISION >> log_voxel_count;
+        int voxel_mask = voxel_precision - 1;
+        ivec3 forg_subvoxel = forg & voxel_mask;
+
+        ivec3 exit_value = ((voxel_precision * ctx.step_sign) >> 1) + (voxel_precision >> 1);
+        ivec3 edge_distance = (exit_value - (ctx.step_sign * forg_subvoxel)) << log_voxel_count;
+        float voxel_count = float(1 << log_voxel_count);
+
+        ctx.delta_t = FloatToFixed(min(1.0 / (abs(dir) * voxel_count), vec3(voxel_count)));
+        ctx.max_t = FixedProduct(edge_distance, ctx.delta_t);
+    }
+
+    ctx.size = 1 << log_voxel_count;
+
+    ivec3 order = ivec3(
+        1 - step(ctx.max_t.y, ctx.max_t.x),
+        1 - step(ctx.max_t.z, ctx.max_t.x),
+        1 - step(ctx.max_t.z, ctx.max_t.y));
+
+    ctx.mask.xyz = ivec3(
+        order.x * order.y,
+        (1 - order.x) * order.z,
+        order.x * (1 - order.y) + (1 - order.x) * (1 - order.z)
+    );
+
+    ivec3 exit_value = ((ctx.size.xxx * ctx.step_sign) + ctx.size.xxx) >> 1;
+    ctx.mask.w =
+        int((ctx.current_voxel.x * ctx.step_sign.x < exit_value.x)
+            || (ctx.current_voxel.y * ctx.step_sign.y < exit_value.y)
+            || (ctx.current_voxel.z * ctx.step_sign.z < exit_value.z));
+
+    return ctx;
+}
+
+void FixedPointDDAStep(inout FixedPointDDA ctx)
+{
+    ivec3 order = ivec3(
+        1 - step(ctx.max_t.y, ctx.max_t.x),
+        1 - step(ctx.max_t.z, ctx.max_t.x),
+        1 - step(ctx.max_t.z, ctx.max_t.y));
+
+    ctx.mask.xyz = ivec3(
+        order.x * order.y,
+        (1 - order.x) * order.z,
+        order.x * (1 - order.y) + (1 - order.x) * (1 - order.z)
+    );
+
+    ctx.current_voxel += ctx.mask.xyz * ctx.step_sign;
+    ivec3 min_t = ctx.mask.xyz * ctx.max_t;
+    ctx.max_t += ctx.mask.xyz * ctx.delta_t - (min_t.x + min_t.y + min_t.z);
+
+    ivec3 exit_value = ((ctx.size.xxx * ctx.step_sign) + ctx.size.xxx) >> 1;
+    ctx.mask.w =
+        int((ctx.current_voxel.x * ctx.step_sign.x < exit_value.x)
+            || (ctx.current_voxel.y * ctx.step_sign.y < exit_value.y)
+            || (ctx.current_voxel.z * ctx.step_sign.z < exit_value.z));
+}
+
+FixedPointDDABackup FixedPointDDASave(inout FixedPointDDA ctx)
+{
+    FixedPointDDABackup save;
+    save.current_voxel = ctx.current_voxel;
+    save.mask = ctx.mask;
+    save.max_t = ctx.max_t;
+    return save;
+}
+
+FixedPointDDA FixedPointDDARestore(inout FixedPointDDABackup save, vec3 dir, int log_voxel_count)
+{
+    FixedPointDDA ctx;
+    ctx.current_voxel = save.current_voxel;
+    ctx.step_sign = ivec3(sign(dir));
+
+    float voxel_count = float(1 << log_voxel_count);
+    ctx.delta_t = FloatToFixed(min(1.0 / (abs(dir) * voxel_count), vec3(voxel_count)));
+
+    ctx.max_t = save.max_t;
+    ctx.size = 1 << log_voxel_count;
+    ctx.mask = save.mask;
+
+    return ctx;
+}
+
+
+
 vec3 InitDeltaT(vec3 dir, float voxel_count)
 {
     // bound 1.0/0.0 with largest representable value, we only need to avoid
@@ -19,6 +160,7 @@ vec3 InitDeltaT(vec3 dir, float voxel_count)
     return min(1.0 / (abs(dir) * voxel_count), vec3(3.4028235e38));
 }
 
+// Amanatides & Woo 87
 DDAContext InitDDAContext(vec3 org, vec3 dir, float voxel_count)
 {
     vec3 voxel_space_org = clamp(org, vec3(0.0), vec3(1.0-EPSILON)) * voxel_count;
