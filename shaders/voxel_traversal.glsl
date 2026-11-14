@@ -44,43 +44,113 @@ ivec3 FixedProduct(ivec3 a, ivec3 b)
     return high + (mid_low >> 15) + mid_high;
 }
 
+ivec3 FixedQuotient(ivec3 a, ivec3 b)
+{
+    return (a / (b >> 15)) << 15;
+}
+
 struct FixedPointDDA {
-    ivec3 current_voxel;
-    ivec3 step_sign;
+    ivec3 current_position;
+    //ivec3 current_voxel;
+    //ivec3 step_sign;
+    ivec3 direction;
     ivec3 delta_t;
     ivec3 max_t;
-    int size;
+    int log_size;
     ivec4 mask;
+
+    ivec3 forg;
+
+#if 0
+    vec3 dir;
+    ivec3 fdir;
+#endif
 };
 
 struct FixedPointDDABackup {
-    ivec3 current_voxel;
+    ivec3 current_position;
+    //ivec3 current_voxel;
     ivec3 max_t;
     ivec4 mask;
+
+    ivec3 forg;
 };
 
-FixedPointDDA FixedPointDDAInit(vec3 org, vec3 dir, int log_voxel_count)
+ivec3 FixedPointDDACurrentVoxel(FixedPointDDA dda)
 {
-    ivec3 forg = FloatToFixed(org);
+    return dda.current_position >> (FIXED_BIT_COUNT - dda.log_size);
+}
+
+int FixedPointDDAPrecision(FixedPointDDA dda)
+{
+    return FIXED_PRECISION >> dda.log_size;
+}
+
+vec3 FixedPointDDATextureCoords(FixedPointDDA dda)
+{
+    return (vec3(FixedPointDDACurrentVoxel(dda)) + 0.5) / float(1 << log_size);
+}
+
+vec3 FixedPointDDAHitNormal(FixedPointDDA dda)
+{
+    ivec3 voxel_size = FixedPointDDAPrecision(dda);
+    ivec3 current_voxel = FixedPointDDACurrentVoxel(dda);
+    ivec3 direction = dda.current_position - (current_voxel * voxel_size + voxel_size / 2);
+
+    ivec3 order = ivec3(
+        1 - step(direction.x, direction.y),
+        1 - step(direction.x, direction.z),
+        1 - step(direction.y, direction.z));
+
+    ivec3 normal = ivec3(
+        order.x * order.y,
+        (1 - order.x) * order.z,
+        order.x * (1 - order.y) + (1 - order.x) * (1 - order.z)
+    );
+
+    return vec3(-normal * sign(dda.fdir));
+}
+
+float FixedPointDDAHitT(FixedPointDDA dda)
+{
+    vec3 ray = FixedToFloat(dda.current_position - dda.forg);
+    return length(ray);
+}
+
+FixedPointDDA FixedPointDDAInit_Base(ivec3 forg, vec3 dir, int log_voxel_count)
+{
+    //org = clamp(org, vec3(0.0), vec3(1.0-EPSILON));
+
+    //ivec3 forg = clamp(FloatToFixed(org), 0, (FIXED_PRECISION-1));
 
     FixedPointDDA ctx;
-    ctx.current_voxel = forg >> (FIXED_BIT_COUNT - log_voxel_count);
-    ctx.step_sign = ivec3(sign(dir));
+#if 0
+    ctx.dir = dir;
+    ctx.fdir = FloatToFixed(dir);
+#endif
+    ctx.forg = forg;
+
+    ctx.current_position = forg;
+    //ctx.current_voxel = forg >> (FIXED_BIT_COUNT - log_voxel_count);
+    //ctx.step_sign = ivec3(sign(dir));
+    ctx.direction = FloatToFixed(dir);
+    ivec3 step_sign = sign(ctx.direction);
+
+    //ctx.size = 1 << log_voxel_count;
+    ctx.log_size = log_voxel_count;
 
     {
-        int voxel_precision = FIXED_PRECISION >> log_voxel_count;
+        int voxel_precision = FIXED_PRECISION >> ctx.log_size;
         int voxel_mask = voxel_precision - 1;
         ivec3 forg_subvoxel = forg & voxel_mask;
 
-        ivec3 exit_value = ((voxel_precision * ctx.step_sign) >> 1) + (voxel_precision >> 1);
-        ivec3 edge_distance = (exit_value - (ctx.step_sign * forg_subvoxel)) << log_voxel_count;
-        float voxel_count = float(1 << log_voxel_count);
+        ivec3 exit_value = ((voxel_precision * step_sign) >> 1) + (voxel_precision >> 1);
+        ivec3 edge_distance = (exit_value - (step_sign * forg_subvoxel)) << ctx.log_size;
+        float voxel_count = float(1 << ctx.log_size);
 
-        ctx.delta_t = FloatToFixed(min(1.0 / (abs(dir) * voxel_count), vec3(voxel_count)));
+        ctx.delta_t = FloatToFixed(min(1.0 / (abs(dir) * voxel_count), vec3(1.0)));
         ctx.max_t = FixedProduct(edge_distance, ctx.delta_t);
     }
-
-    ctx.size = 1 << log_voxel_count;
 
     ivec3 order = ivec3(
         1 - step(ctx.max_t.y, ctx.max_t.x),
@@ -93,11 +163,13 @@ FixedPointDDA FixedPointDDAInit(vec3 org, vec3 dir, int log_voxel_count)
         order.x * (1 - order.y) + (1 - order.x) * (1 - order.z)
     );
 
-    ivec3 exit_value = ((ctx.size.xxx * ctx.step_sign) + ctx.size.xxx) >> 1;
+    int size = (1 << ctx.log_size) - 1;
+    ivec3 exit_value = ((size.xxx * step_sign) + size.xxx) >> 1;
+    ivec3 current_voxel = FixedPointDDACurrentVoxel(ctx);
     ctx.mask.w =
-        int((ctx.current_voxel.x * ctx.step_sign.x < exit_value.x)
-            || (ctx.current_voxel.y * ctx.step_sign.y < exit_value.y)
-            || (ctx.current_voxel.z * ctx.step_sign.z < exit_value.z));
+        int((current_voxel.x * step_sign.x <= exit_value.x)
+            && (current_voxel.y * step_sign.y <= exit_value.y)
+            && (current_voxel.z * step_sign.z <= exit_value.z));
 
     return ctx;
 }
@@ -115,43 +187,91 @@ void FixedPointDDAStep(inout FixedPointDDA ctx)
         order.x * (1 - order.y) + (1 - order.x) * (1 - order.z)
     );
 
-    ctx.current_voxel += ctx.mask.xyz * ctx.step_sign;
+    ivec3 step_sign = sign(ctx.direction);
+    //ctx.current_voxel += ctx.mask.xyz * step_sign;
     ivec3 min_t = ctx.mask.xyz * ctx.max_t;
-    ctx.max_t += ctx.mask.xyz * ctx.delta_t - (min_t.x + min_t.y + min_t.z);
+    int step_factor = min_t.x + min_t.y + min_t.z;
+    ivec3 step = ctx.mask.xyz * ctx.delta_t;
+    ctx.max_t += step - step_factor;
 
-    ivec3 exit_value = ((ctx.size.xxx * ctx.step_sign) + ctx.size.xxx) >> 1;
+    ivec3 offset = FixedProduct(step_factor.xxx, ctx.direction) * (1 - ctx.mask.xyz);
+    int voxel_mask = (FIXED_PRECISION >> ctx.log_size) - 1;
+
+    ivec3 position_check = (ctx.current_position + offset) & voxel_mask;
+
+    ivec3 position_mask = ~(voxel_mask * ctx.mask.xyz);
+    ivec3 position_intermediate = ctx.current_position + offset;
+    ivec3 current_position = ctx.current_position;
+    ivec3 next_position =
+        ((ctx.current_position + offset) & position_mask)
+        // manually align along the direction of movement
+        + ctx.mask.xyz * (max(step_sign, ivec3(0)) * voxel_mask + step_sign);
+    ctx.current_position = next_position;
+
+    ivec3 current_voxel = FixedPointDDACurrentVoxel(ctx);
+
+    {
+        int voxel_mask = (FIXED_PRECISION >> ctx.log_size) - 1;
+        ivec3 alignment_check = next_position & voxel_mask;
+        ivec3 voxel_check = next_position >> (FIXED_BIT_COUNT - ctx.log_size);
+        ivec3 previous_voxel = current_position >> (FIXED_BIT_COUNT - ctx.log_size);
+        int i = 0;
+    }
+
+    int size = (1 << ctx.log_size) - 1;
+    ivec3 exit_value = ((size.xxx * step_sign) + size.xxx) >> 1;
     ctx.mask.w =
-        int((ctx.current_voxel.x * ctx.step_sign.x < exit_value.x)
-            || (ctx.current_voxel.y * ctx.step_sign.y < exit_value.y)
-            || (ctx.current_voxel.z * ctx.step_sign.z < exit_value.z));
+        int((current_voxel.x * step_sign.x <= exit_value.x)
+            && (current_voxel.y * step_sign.y <= exit_value.y)
+            && (current_voxel.z * step_sign.z <= exit_value.z));
 }
 
 FixedPointDDABackup FixedPointDDASave(inout FixedPointDDA ctx)
 {
     FixedPointDDABackup save;
-    save.current_voxel = ctx.current_voxel;
+    save.current_position = ctx.current_position;
+    //save.current_voxel = ctx.current_voxel;
     save.mask = ctx.mask;
     save.max_t = ctx.max_t;
+
+    save.forg = ctx.forg;
     return save;
 }
 
 FixedPointDDA FixedPointDDARestore(inout FixedPointDDABackup save, vec3 dir, int log_voxel_count)
 {
     FixedPointDDA ctx;
-    ctx.current_voxel = save.current_voxel;
-    ctx.step_sign = ivec3(sign(dir));
+    ctx.current_position = save.current_position;
+    //ctx.current_voxel = save.current_voxel;
+    //ctx.step_sign = ivec3(sign(dir));
+    ctx.direction = FloatToFixed(dir);
 
     float voxel_count = float(1 << log_voxel_count);
-    ctx.delta_t = FloatToFixed(min(1.0 / (abs(dir) * voxel_count), vec3(voxel_count)));
+    ctx.delta_t = FloatToFixed(min(1.0 / (abs(dir) * voxel_count), vec3(1.0)));
 
     ctx.max_t = save.max_t;
-    ctx.size = 1 << log_voxel_count;
+    //ctx.size = 1 << log_voxel_count;
+    ctx.log_size = log_voxel_count;
     ctx.mask = save.mask;
+
+    ctx.forg = save.forg;
 
     return ctx;
 }
 
+FixedPointDDA FixedPointDDAInit(vec3 org, vec3 dir, int log_voxel_count)
+{
+    ivec3 forg = clamp(FloatToFixed(org), 0, (FIXED_PRECISION-1));
+    return FixedPointDDAInit_Base(forg, dir, log_voxel_count);
+}
 
+FixedPointDDA FixedPointDDARecursion(inout FixedPointDDA parent, vec3 dir, int log_voxel_count)
+{
+    ivec3 parent_subvoxel = parent.current_position & (FixedPointDDAPrecision(parent) - 1);
+    ivec3 forg = parent_subvoxel << parent.log_size;
+
+    return FixedPointDDAInit_Base(forg, dir, log_voxel_count);
+}
 
 vec3 InitDeltaT(vec3 dir, float voxel_count)
 {
