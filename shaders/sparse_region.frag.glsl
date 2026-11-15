@@ -487,7 +487,7 @@ vec3 ClearSky_Irradiance(vec3 position, vec3 direction)
     vec3 irradiance = vec3(0.0);
 
     direction = normalize(direction);
-    if (dot(direction, light_dir) > cos(0.02)
+    if (dot(direction, light_dir) > cos(0.015)
         && direction.y > 0.0)
     {
         if (precomputed_sky != 0)
@@ -521,7 +521,7 @@ void main()
         (inverse(mat3(view_model)) *
          inverse(mat3(projection))
          * vec3(uv * 2.0 - vec2(1.0), 1.0));
-    dir = normalize(dir) * normalize(box_scale);
+    dir = normalize(dir*box_scale);
 
     vec3 step_sign = sign(-dir);
     vec3 max_t = abs(((step_sign * 0.5 + vec3(0.5)) * box_scale - (step_sign * local_coords)) / dir);
