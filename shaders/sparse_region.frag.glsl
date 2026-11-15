@@ -89,15 +89,22 @@ float IterationCheck(inout int iteration_count)
     return 1.0;
 }
 
+#if 1
 #define ITERATION_CONTROL \
     if (IterationCheck(iteration_count) == 0.0) { payload = vec3(0.0 / 0.0); return vec4(1.0); }
+
+#else
+
+#define ITERATION_CONTROL {}
+
+#endif
+
+#define FIXED_CONTEXT
 
 vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
 {
     int iteration_count = 0;
 
-    DDAContextSave ctx_cache[STACK_SIZE];
-    vec3 org_cache[STACK_SIZE];
     uint tex_index[STACK_SIZE];
     uvec2 data[STACK_SIZE+1];
 
@@ -107,12 +114,19 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
     uint depth_bypass = stack_depth;
 
     int depth = 0;
-    DDAContext ctx = InitDDAContext(org, dir, node_size);
     uint current_tex = 0;
 
+#ifdef FLOAT_CONTEXT
+    DDAContext ctx = InitDDAContext(org, dir, node_size);
+    DDAContextSave ctx_cache[STACK_SIZE];
+    vec3 org_cache[STACK_SIZE];
+#endif
+
+#ifdef FIXED_CONTEXT
     int log_node_size = int(log(node_size) / log(2));
     FixedPointDDA alt_ctx = FixedPointDDAInit(org, dir, log_node_size);
     FixedPointDDABackup alt_cache[STACK_SIZE];
+#endif
 
     while (true)
     {
@@ -122,47 +136,68 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
 
         if ((depth & 1) == 0)
         {
-            //while (ctx.mask.w == 1.0)
-            while (alt_ctx.mask.w == 1.0)
+            while (
+#ifdef FIXED_CONTEXT
+                alt_ctx.mask.w == 1.0
+#else
+                ctx.mask.w == 1.0
+#endif
+            )
             {
                 ITERATION_CONTROL;
 
-                vec3 fixed_uvw = FixedPointDDATextureCoords(alt_ctx);
-                vec3 float_uvw = TextureCoordsDDAContext(ctx);
-
+#ifdef FIXED_CONTEXT
                 data[depth] = texture(masks[nonuniformEXT(current_tex)],
                                       FixedPointDDATextureCoords(alt_ctx)).xy;
-                                      //TextureCoordsDDAContext(ctx)).xy;
+#else
+                data[depth] = texture(masks[nonuniformEXT(current_tex)],
+                                      TextureCoordsDDAContext(ctx)).xy;
+#endif
+
                 if (data[depth] != uvec2(0, 0))
                 {
                     hit = true;
                     if (depth < stack_depth)
                     {
-                        ctx_cache[depth] = SaveDDAContext(ctx);
-                        org_cache[depth] = org;
                         tex_index[depth] = current_tex;
 
+#ifdef FLOAT_CONTEXT
+                        ctx_cache[depth] = SaveDDAContext(ctx);
+                        org_cache[depth] = org;
                         org = RecursionPointDDAContext(ctx, org, dir, node_size);
                         ctx = InitDDAContext(org, dir, CHUNK_SIZE);
                         ctx.mask.xyz = ctx_cache[depth].mask.xyz;
+#endif
 
+#ifdef FIXED_CONTEXT
                         alt_cache[depth] = FixedPointDDASave(alt_ctx);
                         alt_ctx = FixedPointDDARecursion(alt_ctx, dir, LOG_CHUNK_SIZE);
+#endif
 
                         ++depth;
                     }
                     else
                     {
-                        //output_value = HitNormalDDAContext(ctx);
+#ifdef FIXED_CONTEXT
                         output_value = FixedPointDDAHitNormal(alt_ctx);
+#else
+                        output_value = HitNormalDDAContext(ctx);
+#endif
+
                         payload = vec3(0.0);
                         ++depth;
                     }
                     break;
                 }
-                StepDDAContext(ctx);
 
+#ifdef FLOAT_CONTEXT
+                StepDDAContext(ctx);
+#endif
+
+#ifdef FIXED_CONTEXT
                 FixedPointDDAStep(alt_ctx);
+#endif
+
                 CHECK_INTERRUPT;
             }
 
@@ -171,13 +206,20 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
                 if (depth > 0)
                 {
                     --depth;
+
+                    current_tex = tex_index[depth];
+
+#ifdef FLOAT_CONTEXT
                     ctx = RestoreDDAContext(ctx_cache[depth], dir, CHUNK_SIZE);
                     org = org_cache[depth];
-                    current_tex = tex_index[depth];
                     StepDDAContext(ctx);
+#endif
 
+#ifdef FIXED_CONTEXT
                     alt_ctx = FixedPointDDARestore(alt_cache[depth], dir, LOG_CHUNK_SIZE);
                     FixedPointDDAStep(alt_ctx);
+#endif
+
                     CHECK_INTERRUPT;
                 }
                 else
@@ -189,24 +231,41 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
                 for (uint index = 0; index < stack_depth; index++)
                 {
                     float voxel_count = ((index & 1) != 0 ? CHUNK_SIZE : node_size);
-                    //t += HitTDDAContextSave(ctx_cache[index], dir, voxel_count) * level_size;
+
+#ifdef FIXED_CONTEXT
                     t += FixedPointDDABackupHitT(alt_cache[index]) * level_size;
+#else
+                    t += HitTDDAContextSave(ctx_cache[index], dir, voxel_count) * level_size;
+#endif
+
                     level_size /= voxel_count;
                 }
-                //t += HitTDDAContext(ctx) * level_size;
+#ifdef FIXED_CONTEXT
                 t += FixedPointDDAHitT(alt_ctx) * level_size;
+#else
+                t += HitTDDAContext(ctx) * level_size;
+#endif
                 break;
             }
         }
         else
         {
-            //while (ctx.mask.w == 1.0)
-            while (alt_ctx.mask.w == 1.0)
+            while (
+#ifdef FIXED_CONTEXT
+                alt_ctx.mask.w == 1.0
+#else
+                ctx.mask.w == 1.0
+#endif
+            )
             {
                 ITERATION_CONTROL;
 
-                //uvec3 int_coords = VoxelCoordsDDAContext(ctx);
+#ifdef FIXED_CONTEXT
                 ivec3 int_coords = FixedPointDDACurrentVoxel(alt_ctx);
+#else
+                uvec3 int_coords = VoxelCoordsDDAContext(ctx);
+#endif
+
                 uint side_index = int_coords.z / 2;
                 uint voxel_index = int_coords.x + int_coords.y * 4 + (int_coords.z%2)*16;
 
@@ -215,23 +274,31 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
                     hit = true;
                     if (depth < stack_depth)
                     {
+
+#ifdef FIXED_CONTEXT
                         uint base_offset =
                             texture(offsets[nonuniformEXT(current_tex)],
-                                    //TextureCoordsDDAContextSave(ctx_cache[depth-1])).x;
                                     FixedPointDDABackupTextureCoords(alt_cache[depth-1])).x;
+#else
+                        uint base_offset =
+                            texture(offsets[nonuniformEXT(current_tex)],
+                                    TextureCoordsDDAContextSave(ctx_cache[depth-1])).x;
+#endif
 
                         if (base_offset == 0xffffffff)
                         {
-                            //output_value = HitNormalDDAContext(ctx);
+#ifdef FIXED_CONTEXT
                             output_value = FixedPointDDAHitNormal(alt_ctx);
+#else
+                            output_value = HitNormalDDAContext(ctx);
+#endif
+
                             payload = vec3(1.0);
                             depth_bypass = depth;
                             depth = stack_depth+1;
                             break;
                         }
 
-                        ctx_cache[depth] = SaveDDAContext(ctx);
-                        org_cache[depth] = org;
                         tex_index[depth] = current_tex;
 
                         uint offset = bitCount(data[depth-1][side_index] & ((1<<voxel_index)-1));
@@ -242,27 +309,41 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
 
                         if (0 == ((residency_mask[current_tex >> 5] >> (current_tex & 0x1fu)) & 1u))
                         {
-                            //output_value = HitNormalDDAContext(ctx);
+#ifdef FIXED_CONTEXT
                             output_value = FixedPointDDAHitNormal(alt_ctx);
+#else
+                            output_value = HitNormalDDAContext(ctx);
+#endif
+
                             payload = vec3(1.0);
                             depth_bypass = depth;
                             depth = stack_depth+1;
                             break;
                         }
 
+#ifdef FLOAT_CONTEXT
+                        ctx_cache[depth] = SaveDDAContext(ctx);
+                        org_cache[depth] = org;
                         org = RecursionPointDDAContext(ctx, org, dir, CHUNK_SIZE);
                         ctx = InitDDAContext(org, dir, node_size);
                         ctx.mask.xyz = ctx_cache[depth].mask.xyz;
+#endif
 
+#ifdef FIXED_CONTEXT
                         alt_cache[depth] = FixedPointDDASave(alt_ctx);
                         alt_ctx = FixedPointDDARecursion(alt_ctx, dir, log_node_size);
+#endif
 
                         ++depth;
                     }
                     else
                     {
-                        //output_value = HitNormalDDAContext(ctx);
+#ifdef FIXED_CONTEXT
                         output_value = FixedPointDDAHitNormal(alt_ctx);
+#else
+                        output_value = HitNormalDDAContext(ctx);
+#endif
+
 #if 0
                         vec3 chunk_coords =
                             (vec3(int_coords) + vec3(0.5)) / (CHUNK_SIZE * node_size);
@@ -277,9 +358,15 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
                     }
                     break;
                 }
-                StepDDAContext(ctx);
 
+#ifdef FLOAT_CONTEXT
+                StepDDAContext(ctx);
+#endif
+
+#ifdef FIXED_CONTEXT
                 FixedPointDDAStep(alt_ctx);
+#endif
+
                 CHECK_INTERRUPT;
             }
 
@@ -288,13 +375,19 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
                 if (depth > 0)
                 {
                     --depth;
+                    current_tex = tex_index[depth];
+
+#ifdef FLOAT_CONTEXT
                     ctx = RestoreDDAContext(ctx_cache[depth], dir, node_size);
                     org = org_cache[depth];
-                    current_tex = tex_index[depth];
                     StepDDAContext(ctx);
+#endif
 
+#ifdef FIXED_CONTEXT
                     alt_ctx = FixedPointDDARestore(alt_cache[depth], dir, log_node_size);
                     FixedPointDDAStep(alt_ctx);
+#endif
+
                     CHECK_INTERRUPT;
                 }
                 else
@@ -306,12 +399,21 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
                 for (uint index = 0; index < min(depth_bypass, stack_depth); index++)
                 {
                     float voxel_count = ((index & 1) != 0 ? CHUNK_SIZE : node_size);
-                    //t += HitTDDAContextSave(ctx_cache[index], dir, voxel_count) * level_size;
+
+#ifdef FIXED_CONTEXT
                     t += FixedPointDDABackupHitT(alt_cache[index]) * level_size;
+#else
+                    t += HitTDDAContextSave(ctx_cache[index], dir, voxel_count) * level_size;
+#endif
+
                     level_size /= voxel_count;
                 }
-                //t += HitTDDAContext(ctx) * level_size;
+
+#ifdef FIXED_CONTEXT
                 t += FixedPointDDAHitT(alt_ctx) * level_size;
+#else
+                t += HitTDDAContext(ctx) * level_size;
+#endif
                 break;
             }
         }
@@ -320,8 +422,11 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
     if (hit)
         return vec4(output_value, t);
     else
-        //return vec4((HitNormalDDAContext(ctx) * 0.5 + vec3(0.5)) * 0.1, -1.0);
+#ifdef FIXED_CONTEXT
         return vec4((FixedPointDDAHitNormal(alt_ctx) * 0.5 + vec3(0.5)) * 0.1, -1.0);
+#else
+        return vec4((HitNormalDDAContext(ctx) * 0.5 + vec3(0.5)) * 0.1, -1.0);
+#endif
 }
 
 vec3 CircleIntersection(float radius, float org_height, float ray_polar)
