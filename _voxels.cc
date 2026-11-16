@@ -47,7 +47,7 @@ struct TurntableCamera
 
 struct FlightCamera
 {
-#if 1
+#if 0
     numtk::vec2f forward_spherical = { 0.710f, -0.260f };
     numtk::vec3f position = { 37.025f, -36.243f, -18.561f };
 #endif
@@ -62,6 +62,10 @@ struct FlightCamera
 #if 0
     numtk::vec2f forward_spherical = { -11.58f, 0.4f };
     numtk::vec3f position = { -0.8f, -215.33f, 86.65f };
+#endif
+#if 1
+    numtk::vec2f forward_spherical = { 0.75f, -0.18f };
+    numtk::vec3f position = { -469.61f, -140.48f, -457.12f };
 #endif
 
     float velocity = 5.f;
@@ -114,7 +118,8 @@ struct voxel_state_t
     //numtk::vec2f sun_spherical = { 6.43f, 0.02f };
     //numtk::vec2f sun_spherical = { 6.43f, -0.02f };
     //numtk::vec2f sun_spherical = { 6.46f, 0.01f };
-    numtk::vec2f sun_spherical = { 0.71f, .7f };
+    //numtk::vec2f sun_spherical = { 0.71f, .7f };
+    numtk::vec2f sun_spherical = { -0.54f, 0.11f };
 
     uint32_t frame_index = 0;
 

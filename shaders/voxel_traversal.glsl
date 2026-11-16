@@ -1,3 +1,5 @@
+#extension GL_EXT_shader_explicit_arithmetic_types_int64: enable
+
 struct DDAContext
 {
     vec3 step_sign;
@@ -27,9 +29,34 @@ vec3 FixedToFloat(ivec3 value)
     return vec3(value) / vec3(1073741824.0);
 }
 
+#if 0
+#define FIXED_PRODUCT_TEMPLATE(ITYPE, UTYPE)                        \
+    ITYPE FixedProduct(ITYPE a, ITYPE b)                            \
+    {                                                               \
+        ITYPE overflow_bit = (a | b) & ITYPE(0x40000000);           \
+                                                                    \
+        UTYPE al = UTYPE(a & ITYPE(0x7fff));                        \
+        ITYPE ah = a >> ITYPE(15);                                  \
+        UTYPE bl = UTYPE(b & ITYPE(0x7fff));                        \
+        ITYPE bh = b >> ITYPE(15);                                  \
+                                                                    \
+        UTYPE low = al*bl;                                          \
+        ITYPE mid_a = ITYPE(al)*bh + ITYPE(low >> 15);              \
+        ITYPE mid_low = mid_a & ITYPE(0x7fff);                      \
+        ITYPE mid_high = mid_a >> ITYPE(15);                        \
+        mid_low = ITYPE(bl)*ah + mid_low;                           \
+        ITYPE high = ah*bh;                                         \
+                                                                    \
+        return (high + (mid_low >> 15) + mid_high) | overflow_bit;  \
+    }                                                               \
+
+FIXED_PRODUCT_TEMPLATE(ivec3, uvec3)
+FIXED_PRODUCT_TEMPLATE(ivec2, uvec2)
+#endif
+
 ivec3 FixedProduct(ivec3 a, ivec3 b)
 {
-    ivec3 overflow_bit = (a | b) & ivec3(0x40000000);
+    ivec3 overflow_bit = (abs(a) | abs(b)) & ivec3(0x40000000);
 
     uvec3 al = uvec3(a & ivec3(0x7fff));
     ivec3 ah = a >> ivec3(15);
@@ -46,23 +73,44 @@ ivec3 FixedProduct(ivec3 a, ivec3 b)
     return (high + (mid_low >> 15) + mid_high) | overflow_bit;
 }
 
+ivec2 FixedProduct(ivec2 a, ivec2 b)
+{
+    ivec2 overflow_bit = (abs(a) | abs(b)) & ivec2(0x40000000);
+
+    uvec2 al = uvec2(a & ivec2(0x7fff));
+    ivec2 ah = a >> ivec2(15);
+    uvec2 bl = uvec2(b & ivec2(0x7fff));
+    ivec2 bh = b >> ivec2(15);
+
+    uvec2 low = al*bl;
+    ivec2 mid_a = ivec2(al)*bh + ivec2(low >> 15);
+    ivec2 mid_low = mid_a & ivec2(0x7fff);
+    ivec2 mid_high = mid_a >> ivec2(15);
+    mid_low = ivec2(bl)*ah + mid_low;
+    ivec2 high = ah*bh;
+
+    return (high + (mid_low >> 15) + mid_high) | overflow_bit;
+}
+
+
 ivec3 OverflowSelect(ivec3 a)
 {
     return sign(a & ivec3(0x40000000));
 }
 
-ivec3 FixedQuotient(ivec3 a, ivec3 b)
-{
-    return (a / (b >> 15)) << 15;
-}
-
 struct FixedPointDDA {
     ivec3 current_position;
+
     //ivec3 current_voxel;
+
     //ivec3 step_sign;
     ivec3 direction;
+
+#if 0
     ivec3 delta_t;
     ivec3 max_t;
+#endif
+
     int log_size;
     ivec4 mask;
 
@@ -81,7 +129,11 @@ struct FixedPointDDABackup {
     ivec3 current_position;
     //ivec3 current_voxel;
     int log_size;
+
+#if 0
     ivec3 max_t;
+#endif
+
     ivec4 mask;
 
     vec3 rmax_t;
@@ -104,11 +156,114 @@ vec3 FixedPointDDATextureCoords(FixedPointDDA dda)
     return (vec3(FixedPointDDACurrentVoxel(dda)) + 0.5) / float(1 << dda.log_size);
 }
 
+int FixedQuotient(int a, int b)
+{
+    int64_t a64 = int64_t(a);
+    int64_t b64 = int64_t(b);
+    int64_t int0 = a64 << 30;
+    int64_t int1 = int0 & 0xffffffff80000000l;
+    return int(int1 / b64);
+}
+
+ivec3 FixedQuotient(ivec3 a, ivec3 b)
+{
+    i64vec3 a64 = i64vec3(a.x, a.y, a.z);
+    i64vec3 b64 = i64vec3(b.x, b.y, b.z);
+
+    i64vec3 int0 = a64 << i64vec3(30);
+    i64vec3 int1 = int0 & i64vec3(0xffffffff80000000l);
+    i64vec3 result = int1 / b64;
+
+    int resx = int(result.x);
+    int resy = int(result.y);
+    int resz = int(result.z);
+
+    return ivec3(resx, resy, resz);
+}
+
+int BoxTest(int d, ivec2 dir, ivec2 org, int radius)
+{
+    ivec2 product = FixedProduct(dir, d.xx);
+    ivec2 sum = org + product;
+    return ((d >= 0) && all(lessThan(abs(sum), ivec2(radius)))) ? 1 : 0;
+}
+
+float BoxTest(float d, vec2 dir, vec2 org, float radius)
+{
+    vec2 product = dir * d.xx;
+    vec2 sum = org + product;
+    return ((d >= 0.0) && all(lessThan(abs(sum), vec2(radius)))) ? 1.0 : 0.0;
+}
+
+ivec3 FixedPointDDAHitP(FixedPointDDA dda)
+{
+    ivec3 forg = dda.forg;
+    ivec3 fdir = dda.direction;
+
+    ivec3 current_voxel = FixedPointDDACurrentVoxel(dda);
+
+#if 0
+    int voxel_size = FixedPointDDAPrecision(dda);
+    ivec3 sign_bit = (-sign(fdir) + 1) >> 1; // -1, 1 > 0, 1
+    ivec3 voxel_faces = (current_voxel + sign_bit) * voxel_size;
+    ivec3 offset = voxel_faces - forg;
+#endif
+
+    int voxel_radius = FixedPointDDAPrecision(dda) >> 1;
+    ivec3 sign_bit = -sign(fdir);
+    ivec3 voxel_center = ((current_voxel << 1) + 1) * voxel_radius;
+    forg -= voxel_center;
+    ivec3 face_distance = voxel_radius * sign_bit - forg;
+
+    //ivec3 d = ivec3(((i64vec3(face_distance) << 30) & i64vec3(0xffffffff80000000l)) / i64vec3(fdir));
+#define FACTOR 0
+    ivec3 d = FixedQuotient(face_distance, fdir << FACTOR);
+
+    //#define TEST(U, VW) (d.U >= 0) && all(lessThan(abs(forg.VW + FixedProduct(fdir.VW, (d.U).xx)), ivec2(voxel_radius)))
+#define TEST(U, VW) BoxTest(d.U, fdir.VW >> FACTOR, forg.VW >> FACTOR, voxel_radius >> FACTOR)
+
+    ivec3 test = ivec3(int(TEST(x, yz)), int(TEST(y, zx)), int(TEST(z, xy)));
+
+#undef TEST
+
+    ivec3 masked_distance = d * (sign_bit * test);
+    int distance = masked_distance.x +
+        (1 - test.x) * (masked_distance.y +
+                        (1 - test.y) * masked_distance.z);
+
+    vec3 check_org = FixedToFloat(forg);
+    vec3 check_dir = FixedToFloat(fdir);
+    float check_voxel_radius = FixedToFloat(voxel_radius.xxx).x;
+    vec3 check_face_distance = check_voxel_radius * vec3(sign_bit) - check_org;
+    vec3 check_d = check_face_distance / check_dir;
+
+#define TEST(U, VW) BoxTest(check_d.U, check_dir.VW, check_org.VW, check_voxel_radius)
+
+    vec3 check_test = vec3(TEST(x, yz), TEST(y, zx), TEST(z, xy));
+
+#undef TEST
+
+    vec3 check_masked_distance = check_d * (vec3(sign_bit) * check_test);
+    float check_distance = check_masked_distance.x +
+        (1.0 - check_test.x) * (check_masked_distance.y +
+                        (1.0 - check_test.y) * check_masked_distance.z);
+
+    vec3 check_dir_distance = check_dir * check_distance;
+    vec3 check_result = check_org + check_dir * check_distance;
+
+    ivec3 dir_distance = FixedProduct(fdir, distance.xxx);
+    ivec3 result = forg + FixedProduct(fdir, distance.xxx);
+    vec3 result_float = FixedToFloat(result);
+
+    return dda.forg + (FixedProduct(fdir, distance.xxx) << FACTOR);
+}
+
 vec3 FixedPointDDAHitNormal(FixedPointDDA dda)
 {
     int voxel_size = FixedPointDDAPrecision(dda);
     ivec3 current_voxel = FixedPointDDACurrentVoxel(dda);
-    ivec3 offset = abs(dda.current_position - (current_voxel * voxel_size + voxel_size / 2));
+    ivec3 current_position = FixedPointDDAHitP(dda);
+    ivec3 offset = abs(current_position - (current_voxel * voxel_size + voxel_size / 2));
 
     ivec3 normal = ivec3(
         greaterThanEqual(offset, ivec3(max(offset.x, max(offset.y, offset.z)))));
@@ -196,11 +351,14 @@ FixedPointDDA FixedPointDDAInit_Base(ivec3 forg, vec3 dir, int log_voxel_count)
         //ivec3 edge_distance = (exit_value - (step_sign * forg_subvoxel));
         float voxel_count = float(1 << ctx.log_size);
 
+#if 0
         //ctx.delta_t = FloatToFixed(min(1.0 / (abs(dir)), vec3(1.0)));
         ctx.delta_t = FloatToFixed(min(1.0 / (abs(dir) * voxel_count), vec3(1.0)));
-        ctx.rdelta_t = 1.0 / (abs(dir) * voxel_count);
         //ctx.delta_t = FloatToFixed(1.0 / (abs(dir) * (voxel_count * 1024)));
         ctx.max_t = FixedProduct(edge_distance, ctx.delta_t);
+#endif
+
+        ctx.rdelta_t = 1.0 / (abs(dir) * voxel_count);
         ctx.rmax_t = FixedToFloat(edge_distance) * ctx.rdelta_t;
     }
 
@@ -223,10 +381,13 @@ void FixedPointDDAStep(inout FixedPointDDA ctx)
 
     ivec3 step_sign = sign(ctx.direction);
     //ctx.current_voxel += ctx.mask.xyz * step_sign;
+
+#if 0
     ivec3 min_t = ctx.mask.xyz * ctx.max_t;
     int step_factor = min_t.x + min_t.y + min_t.z;
     ivec3 step = ctx.mask.xyz * ctx.delta_t;
     ctx.max_t += step - step_factor * OverflowSelect(ctx.delta_t);
+#endif
 
     vec3 rmin_t = ctx.mask.xyz * ctx.rmax_t;
     float rstep_factor = rmin_t.x + rmin_t.y + rmin_t.z;
@@ -275,7 +436,11 @@ FixedPointDDABackup FixedPointDDASave(inout FixedPointDDA ctx)
     //save.current_voxel = ctx.current_voxel;
     save.log_size = ctx.log_size;
     save.mask = ctx.mask;
+
+#if 0
     save.max_t = ctx.max_t;
+#endif
+
     save.rmax_t = ctx.rmax_t;
 
     save.forg = ctx.forg;
@@ -292,10 +457,12 @@ FixedPointDDA FixedPointDDARestore(inout FixedPointDDABackup save, vec3 dir, int
 
     //float voxel_count = float(1 << log_voxel_count);
     float voxel_count = float(1 << save.log_size);
+#if 0
     ctx.delta_t = FloatToFixed(min(1.0 / (abs(dir) * voxel_count), vec3(1.0)));
-    ctx.rdelta_t = 1.0 / (abs(dir) * voxel_count);
-
     ctx.max_t = save.max_t;
+#endif
+
+    ctx.rdelta_t = 1.0 / (abs(dir) * voxel_count);
     ctx.rmax_t = save.rmax_t;
     //ctx.size = 1 << log_voxel_count;
     //ctx.log_size = log_voxel_count;

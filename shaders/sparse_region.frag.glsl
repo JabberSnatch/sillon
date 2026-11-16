@@ -99,6 +99,7 @@ float IterationCheck(inout int iteration_count)
 
 #endif
 
+//#define FLOAT_CONTEXT
 #define FIXED_CONTEXT
 
 vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
