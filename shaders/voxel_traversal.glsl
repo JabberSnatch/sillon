@@ -198,32 +198,19 @@ float BoxTest(float d, vec2 dir, vec2 org, float radius)
     return ((d >= 0.0) && all(lessThan(abs(sum), vec2(radius)))) ? 1.0 : 0.0;
 }
 
-ivec3 FixedPointDDAHitP(FixedPointDDA dda)
+ivec3 FixedPointDDAHitP_Base(ivec3 forg, ivec3 fdir, ivec3 current_voxel, int voxel_radius)
 {
-    ivec3 forg = dda.forg;
-    ivec3 fdir = dda.direction;
-
-    ivec3 current_voxel = FixedPointDDACurrentVoxel(dda);
-
-#if 0
-    int voxel_size = FixedPointDDAPrecision(dda);
-    ivec3 sign_bit = (-sign(fdir) + 1) >> 1; // -1, 1 > 0, 1
-    ivec3 voxel_faces = (current_voxel + sign_bit) * voxel_size;
-    ivec3 offset = voxel_faces - forg;
-#endif
-
-    int voxel_radius = FixedPointDDAPrecision(dda) >> 1;
     ivec3 sign_bit = -sign(fdir);
     ivec3 voxel_center = ((current_voxel << 1) + 1) * voxel_radius;
-    forg -= voxel_center;
-    ivec3 face_distance = voxel_radius * sign_bit - forg;
+    ivec3 local_forg = forg - voxel_center;
+    ivec3 face_distance = voxel_radius * sign_bit - local_forg;
 
     //ivec3 d = ivec3(((i64vec3(face_distance) << 30) & i64vec3(0xffffffff80000000l)) / i64vec3(fdir));
 #define FACTOR 0
     ivec3 d = FixedQuotient(face_distance >> FACTOR, fdir);
 
-    //#define TEST(U, VW) (d.U >= 0) && all(lessThan(abs(forg.VW + FixedProduct(fdir.VW, (d.U).xx)), ivec2(voxel_radius)))
-#define TEST(U, VW) BoxTest(d.U, fdir.VW, forg.VW >> FACTOR, voxel_radius >> FACTOR)
+    //#define TEST(U, VW) (d.U >= 0) && all(lessThan(abs(local_forg.VW + FixedProduct(fdir.VW, (d.U).xx)), ivec2(voxel_radius)))
+#define TEST(U, VW) BoxTest(d.U, fdir.VW, local_forg.VW >> FACTOR, voxel_radius >> FACTOR)
 
     ivec3 test = ivec3(int(TEST(x, yz)), int(TEST(y, zx)), int(TEST(z, xy)));
 
@@ -234,8 +221,8 @@ ivec3 FixedPointDDAHitP(FixedPointDDA dda)
         (1 - test.x) * (masked_distance.y +
                         (1 - test.y) * masked_distance.z);
 
-    vec3 check_dda_org = FixedToFloat(dda.forg);
-    vec3 check_org = FixedToFloat(forg);
+    vec3 check_dda_org = FixedToFloat(forg);
+    vec3 check_org = FixedToFloat(local_forg);
     vec3 check_dir = FixedToFloat(fdir);
     float check_voxel_radius = FixedToFloat(voxel_radius.xxx).x;
     vec3 check_face_distance = check_voxel_radius * vec3(sign_bit) - check_org;
@@ -256,12 +243,22 @@ ivec3 FixedPointDDAHitP(FixedPointDDA dda)
     vec3 check_result = check_dda_org + check_dir * check_distance;
 
     ivec3 dir_distance = FixedProduct(fdir, distance.xxx);
-    ivec3 result = dda.forg + (FixedProduct(fdir, distance.xxx) << FACTOR);
+    ivec3 result = forg + (FixedProduct(fdir, distance.xxx) << FACTOR);
     vec3 result_float = FixedToFloat(result);
     float distance_float = FixedToFloat(distance.xxx).x * pow(2.0, float(FACTOR));
     vec3 dir_distance_float = FixedToFloat(dir_distance) * pow(2.0, float(FACTOR));
 
-    return dda.forg + (FixedProduct(fdir, distance.xxx) << FACTOR);
+    return forg + (FixedProduct(fdir, distance.xxx) << FACTOR);
+}
+
+ivec3 FixedPointDDAHitP(FixedPointDDA dda)
+{
+    ivec3 forg = dda.forg;
+    ivec3 fdir = dda.direction;
+    ivec3 current_voxel = FixedPointDDACurrentVoxel(dda);
+    int voxel_radius = FixedPointDDAPrecision(dda) >> 1;
+
+    return FixedPointDDAHitP_Base(forg, fdir, current_voxel, voxel_radius);
 }
 
 vec3 FixedPointDDAHitNormal(FixedPointDDA dda)
@@ -279,13 +276,8 @@ vec3 FixedPointDDAHitNormal(FixedPointDDA dda)
 
 float FixedPointDDAHitT(FixedPointDDA dda)
 {
-    vec3 ray = FixedToFloat(dda.current_position - dda.forg);
-    return length(ray);
-}
-
-float FixedPointDDABackupHitT(FixedPointDDABackup dda)
-{
-    vec3 ray = FixedToFloat(dda.current_position - dda.forg);
+    ivec3 current_position = FixedPointDDAHitP(dda);
+    vec3 ray = FixedToFloat(current_position - dda.forg);
     return length(ray);
 }
 
@@ -302,6 +294,15 @@ int FixedPointDDABackupPrecision(FixedPointDDABackup dda)
 vec3 FixedPointDDABackupTextureCoords(FixedPointDDABackup dda)
 {
     return (vec3(FixedPointDDABackupCurrentVoxel(dda)) + 0.5) / float(1 << dda.log_size);
+}
+
+float FixedPointDDABackupHitT(FixedPointDDABackup dda, ivec3 fdir)
+{
+    ivec3 current_voxel = FixedPointDDABackupCurrentVoxel(dda);
+    int voxel_radius = FixedPointDDABackupPrecision(dda) >> 1;
+    ivec3 current_position = FixedPointDDAHitP_Base(dda.forg, fdir, current_voxel, voxel_radius);
+    vec3 ray = FixedToFloat(current_position - dda.forg);
+    return length(ray);
 }
 
 ivec3 FixedPointDDAOrderMask(FixedPointDDA dda)

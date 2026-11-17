@@ -234,7 +234,7 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
                     float voxel_count = ((index & 1) != 0 ? CHUNK_SIZE : node_size);
 
 #ifdef FIXED_CONTEXT
-                    t += FixedPointDDABackupHitT(alt_cache[index]) * level_size;
+                    t += FixedPointDDABackupHitT(alt_cache[index], alt_ctx.direction) * level_size;
 #else
                     t += HitTDDAContextSave(ctx_cache[index], dir, voxel_count) * level_size;
 #endif
@@ -402,7 +402,7 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
                     float voxel_count = ((index & 1) != 0 ? CHUNK_SIZE : node_size);
 
 #ifdef FIXED_CONTEXT
-                    t += FixedPointDDABackupHitT(alt_cache[index]) * level_size;
+                    t += FixedPointDDABackupHitT(alt_cache[index], alt_ctx.direction) * level_size;
 #else
                     t += HitTDDAContextSave(ctx_cache[index], dir, voxel_count) * level_size;
 #endif
