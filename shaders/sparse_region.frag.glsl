@@ -185,7 +185,7 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
                         output_value = HitNormalDDAContext(ctx);
 #endif
 
-                        payload = vec3(0.0);
+                        payload = vec3(1.0);
                         ++depth;
                     }
                     break;
