@@ -54,6 +54,11 @@ FIXED_PRODUCT_TEMPLATE(ivec3, uvec3)
 FIXED_PRODUCT_TEMPLATE(ivec2, uvec2)
 #endif
 
+int OverflowBit(int a)
+{
+    return (abs(a) & 0x40000000) >> 30;
+}
+
 ivec3 FixedProduct(ivec3 a, ivec3 b)
 {
     ivec3 overflow_bit = (abs(a) | abs(b)) & ivec3(0x40000000);
@@ -156,15 +161,6 @@ vec3 FixedPointDDATextureCoords(FixedPointDDA dda)
     return (vec3(FixedPointDDACurrentVoxel(dda)) + 0.5) / float(1 << dda.log_size);
 }
 
-int FixedQuotient(int a, int b)
-{
-    int64_t a64 = int64_t(a);
-    int64_t b64 = int64_t(b);
-    int64_t int0 = a64 << 30;
-    int64_t int1 = int0 & 0xffffffff80000000l;
-    return int(int1 / b64);
-}
-
 ivec3 FixedQuotient(ivec3 a, ivec3 b)
 {
     i64vec3 a64 = i64vec3(a.x, a.y, a.z);
@@ -173,10 +169,13 @@ ivec3 FixedQuotient(ivec3 a, ivec3 b)
     i64vec3 int0 = a64 << i64vec3(30);
     i64vec3 int1 = int0 & i64vec3(0xffffffff80000000l);
     i64vec3 result = int1 / b64;
+    ivec3 overflow_bit = ivec3(abs(result.x) >= FIXED_PRECISION,
+                               abs(result.y) >= FIXED_PRECISION,
+                               abs(result.z) >= FIXED_PRECISION);
 
-    int resx = int(result.x);
-    int resy = int(result.y);
-    int resz = int(result.z);
+    int resx = int(result.x) | (FIXED_PRECISION * overflow_bit.x);
+    int resy = int(result.y) | (FIXED_PRECISION * overflow_bit.y);
+    int resz = int(result.z) | (FIXED_PRECISION * overflow_bit.z);
 
     return ivec3(resx, resy, resz);
 }
@@ -185,7 +184,11 @@ int BoxTest(int d, ivec2 dir, ivec2 org, int radius)
 {
     ivec2 product = FixedProduct(dir, d.xx);
     ivec2 sum = org + product;
-    return ((d >= 0) && all(lessThan(abs(sum), ivec2(radius)))) ? 1 : 0;
+    return (OverflowBit(d) == 0
+            && (d >= 0)
+            && all(lessThan(abs(sum), ivec2(radius))))
+        ? 1
+        : 0;
 }
 
 float BoxTest(float d, vec2 dir, vec2 org, float radius)
@@ -217,20 +220,21 @@ ivec3 FixedPointDDAHitP(FixedPointDDA dda)
 
     //ivec3 d = ivec3(((i64vec3(face_distance) << 30) & i64vec3(0xffffffff80000000l)) / i64vec3(fdir));
 #define FACTOR 0
-    ivec3 d = FixedQuotient(face_distance, fdir << FACTOR);
+    ivec3 d = FixedQuotient(face_distance >> FACTOR, fdir);
 
     //#define TEST(U, VW) (d.U >= 0) && all(lessThan(abs(forg.VW + FixedProduct(fdir.VW, (d.U).xx)), ivec2(voxel_radius)))
-#define TEST(U, VW) BoxTest(d.U, fdir.VW >> FACTOR, forg.VW >> FACTOR, voxel_radius >> FACTOR)
+#define TEST(U, VW) BoxTest(d.U, fdir.VW, forg.VW >> FACTOR, voxel_radius >> FACTOR)
 
     ivec3 test = ivec3(int(TEST(x, yz)), int(TEST(y, zx)), int(TEST(z, xy)));
 
 #undef TEST
 
-    ivec3 masked_distance = d * (sign_bit * test);
+    ivec3 masked_distance = d * test;//(sign_bit * test);
     int distance = masked_distance.x +
         (1 - test.x) * (masked_distance.y +
                         (1 - test.y) * masked_distance.z);
 
+    vec3 check_dda_org = FixedToFloat(dda.forg);
     vec3 check_org = FixedToFloat(forg);
     vec3 check_dir = FixedToFloat(fdir);
     float check_voxel_radius = FixedToFloat(voxel_radius.xxx).x;
@@ -243,17 +247,19 @@ ivec3 FixedPointDDAHitP(FixedPointDDA dda)
 
 #undef TEST
 
-    vec3 check_masked_distance = check_d * (vec3(sign_bit) * check_test);
+    vec3 check_masked_distance = check_d * check_test;//(vec3(sign_bit) * check_test);
     float check_distance = check_masked_distance.x +
         (1.0 - check_test.x) * (check_masked_distance.y +
                         (1.0 - check_test.y) * check_masked_distance.z);
 
     vec3 check_dir_distance = check_dir * check_distance;
-    vec3 check_result = check_org + check_dir * check_distance;
+    vec3 check_result = check_dda_org + check_dir * check_distance;
 
     ivec3 dir_distance = FixedProduct(fdir, distance.xxx);
-    ivec3 result = forg + FixedProduct(fdir, distance.xxx);
+    ivec3 result = dda.forg + (FixedProduct(fdir, distance.xxx) << FACTOR);
     vec3 result_float = FixedToFloat(result);
+    float distance_float = FixedToFloat(distance.xxx).x * pow(2.0, float(FACTOR));
+    vec3 dir_distance_float = FixedToFloat(dir_distance) * pow(2.0, float(FACTOR));
 
     return dda.forg + (FixedProduct(fdir, distance.xxx) << FACTOR);
 }
