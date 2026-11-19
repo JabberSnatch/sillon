@@ -57,6 +57,11 @@ layout(set = 3, binding = 0) uniform sampler3D payloads[];
 
 #define LOG_CHUNK_SIZE 2
 
+//#define FLOAT_CONTEXT
+#define FIXED_CONTEXT
+//#define INLINE_RESULTS
+#define TRAVERSAL_BASE
+
 float StepCheck(FixedPointDDA fix, DDAContext floating)
 {
     if (fix.mask.w != floating.mask.w)
@@ -91,23 +96,18 @@ float IterationCheck(inout int iteration_count)
 
 #if 1
 
-/*
 #define ITERATION_CONTROL \
     if (IterationCheck(iteration_count) == 0.0) { payload = vec3(0.0 / 0.0); return vec4(1.0); }
-*/
 
-#define ITERATION_CONTROL \
-    if (IterationCheck(iteration_count) == 0.0) { return false; }
+#define ITERATION_CONTROL_BOOL \
+    if (IterationCheck(iteration_count) == 0.0) { error = (0.0/0.0); return true; }
 
 #else
 
 #define ITERATION_CONTROL {}
+#define ITERATION_CONTROL_BOOL {}
 
 #endif
-
-//#define FLOAT_CONTEXT
-#define FIXED_CONTEXT
-//#define INLINE_RESULTS
 
 #ifdef FLOAT_CONTEXT
 #define HITP_TYPE vec3
@@ -198,7 +198,7 @@ struct TraversalContext
 
 #endif
 
-bool RegionTraversal_Base(inout TraversalContext ctx, vec3 org, vec3 dir)
+bool RegionTraversal_Base(inout TraversalContext ctx, vec3 org, vec3 dir, inout float error)
 {
     bool hit = false;
 
@@ -221,7 +221,7 @@ bool RegionTraversal_Base(inout TraversalContext ctx, vec3 org, vec3 dir)
     tex_data[0].x = 0;
     while (true)
     {
-        ITERATION_CONTROL;
+        ITERATION_CONTROL_BOOL;
         hit = false;
         uint depth_index = ctx.depth_state.x >> 1;
 
@@ -229,7 +229,7 @@ bool RegionTraversal_Base(inout TraversalContext ctx, vec3 org, vec3 dir)
         {
             while (RUN_CONDITION)
             {
-                ITERATION_CONTROL;
+                ITERATION_CONTROL_BOOL;
 
                 tex_data[depth_index].yz = TEXDATA_LOOKUP;
                 if (tex_data[depth_index].yz != uvec2(0, 0))
@@ -277,7 +277,7 @@ bool RegionTraversal_Base(inout TraversalContext ctx, vec3 org, vec3 dir)
         {
             while (RUN_CONDITION)
             {
-                ITERATION_CONTROL;
+                ITERATION_CONTROL_BOOL;
 
                 uvec3 int_coords = CURRENT_VOXEL_LOOKUP;
                 uvec2 indices = // (side_index, voxel_index)
@@ -314,8 +314,8 @@ bool RegionTraversal_Base(inout TraversalContext ctx, vec3 org, vec3 dir)
                             break;
                         }
 
-                        FLOAT_RECURSION(node_size, CHUNK_SIZE);
-                        FIXED_RECURSION(LOG_CHUNK_SIZE);
+                        FLOAT_RECURSION(CHUNK_SIZE, node_size);
+                        FIXED_RECURSION(log_node_size);
                     }
 
                     ++ctx.depth_state.x;
@@ -355,9 +355,14 @@ bool RegionTraversal_Base(inout TraversalContext ctx, vec3 org, vec3 dir)
 
 vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
 {
+#ifdef TRAVERSAL_BASE
     TraversalContext ctx;
-    if (RegionTraversal_Base(ctx, org, dir))
+    float error = 1.0;
+    if (RegionTraversal_Base(ctx, org, dir, error))
     {
+        if (error != error)
+            return vec4(vec3(error), 1.0);
+
         float t = 0.0;
         vec3 output_value = vec3(0.0);
 
@@ -388,7 +393,8 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
     else
         return vec4(vec3(0.0), -1.0);
 
-#if 0
+#else
+
     int iteration_count = 0;
 
     uint tex_index[STACK_SIZE];
@@ -420,7 +426,7 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
 
     while (true)
     {
-        //ITERATION_CONTROL;
+        ITERATION_CONTROL;
 
         hit = false;
 
@@ -434,7 +440,7 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
 #endif
             )
             {
-                //ITERATION_CONTROL;
+                ITERATION_CONTROL;
 
 #ifdef FIXED_CONTEXT
                 data[depth] = texture(masks[nonuniformEXT(current_tex)],
@@ -557,7 +563,7 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
 #endif
             )
             {
-                //ITERATION_CONTROL;
+                ITERATION_CONTROL;
 
 #ifdef FIXED_CONTEXT
                 ivec3 int_coords = FixedPointDDACurrentVoxel(alt_ctx);
