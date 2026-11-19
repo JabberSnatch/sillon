@@ -90,8 +90,14 @@ float IterationCheck(inout int iteration_count)
 }
 
 #if 1
+
+/*
 #define ITERATION_CONTROL \
     if (IterationCheck(iteration_count) == 0.0) { payload = vec3(0.0 / 0.0); return vec4(1.0); }
+*/
+
+#define ITERATION_CONTROL \
+    if (IterationCheck(iteration_count) == 0.0) { return false; }
 
 #else
 
@@ -103,8 +109,286 @@ float IterationCheck(inout int iteration_count)
 #define FIXED_CONTEXT
 //#define INLINE_RESULTS
 
+#ifdef FLOAT_CONTEXT
+#define HITP_TYPE vec3
+#else
+#define HITP_TYPE ivec3
+#endif
+
+// uvw
+// hit_p
+// normal
+
+struct TraversalContext
+{
+    uvec2 depth_state;
+
+#ifdef FLOAT_CONTEXT
+    DDAContext ref_dda;
+    DDAContextSave ref_dda_cache[STACK_SIZE];
+#endif
+
+#ifdef FIXED_CONTEXT
+    FixedPointDDA dda;
+    FixedPointDDABackup dda_cache[STACK_SIZE];
+#endif
+};
+
+#ifdef FIXED_CONTEXT
+
+#define RUN_CONDITION ctx.dda.mask.w == 1
+#define TEXDATA_LOOKUP                                              \
+    texture(masks[nonuniformEXT(tex_data[depth_index].x)],          \
+            FixedPointDDATextureCoords(ctx.dda)).xy
+#define BASE_OFFSET_LOOKUP                                              \
+    texture(offsets[nonuniformEXT(tex_data[depth_index].x)],            \
+            FixedPointDDABackupTextureCoords(ctx.dda_cache[ctx.depth_state.x-1])).x
+#define CURRENT_VOXEL_LOOKUP FixedPointDDACurrentVoxel(ctx.dda)
+#define BACKUP_HITT(INDEX)                                              \
+    FixedPointDDABackupHitT(ctx.dda_cache[INDEX], ctx.dda.direction) * level_size
+#define HITT FixedPointDDAHitT(ctx.dda) * level_size
+#define HITNORMAL FixedPointDDAHitNormal(ctx.dda)
+
+#define FIXED_RECURSION(TGT_SIZE)                               \
+    ctx.dda_cache[ctx.depth_state.x] = FixedPointDDASave(ctx.dda);  \
+    ctx.dda = FixedPointDDARecursion(ctx.dda, dir, TGT_SIZE)
+#define FIXED_STEP FixedPointDDAStep(ctx.dda)
+#define FIXED_RESTORE(TGT_SIZE)                 \
+    ctx.dda = FixedPointDDARestore(ctx.dda_cache[ctx.depth_state.x], dir, TGT_SIZE)
+
+#else
+
+#define RUN_CONDITION ctx.ref_dda.mask.w == 1.0
+#define TEXDATA_LOOKUP                                              \
+    texture(masks[nonuniformEXT(tex_data[depth_index].x)],          \
+            TextureCoordsDDAContext(ctx.ref_dda)).xy
+#define BASE_OFFSET_LOOKUP                                              \
+    texture(offsets[nonuniformEXT(tex_data[depth_index].x)],            \
+            TextureCoordsDDAContextSave(ctx.ref_dda_cache[ctx.depth_state.x-1])).x
+#define CURRENT_VOXEL_LOOKUP VoxelCoordsDDAContext(ctx.ref_dda)
+#define BACKUP_HITT(INDEX)                                              \
+    HitTDDAContextSave(ctx.ref_dda_cache[INDEX], dir, voxel_count) * level_size
+#define HITT HitTDDAContext(ctx.ref_dda) * level_size
+#define HITNORMAL HitNormalDDAContext(ctx.ref_dda)
+
+#define FIXED_RECURSION(TGT_SIZE) {}
+#define FIXED_STEP {}
+#define FIXED_RESTORE(TGT_SIZE) {}
+
+#endif
+
+#ifdef FLOAT_CONTEXT
+
+#define FLOAT_RECURSION(SRC_SIZE, TGT_SIZE)                             \
+    ctx.ref_dda_cache[ctx.depth_state.x] = SaveDDAContext(ctx.ref_dda);     \
+    org_cache[ctx.depth_state.x] = org;                                     \
+    org = RecursionPointDDAContext(ctx.ref_dda, org, dir, SRC_SIZE);    \
+    ctx.ref_dda = InitDDAContext(org, dir, TGT_SIZE);                   \
+    ctx.ref_dda.mask.xyz = ctx.ref_dda_cache[ctx.depth_state.x].mask.xyz
+#define FLOAT_STEP StepDDAContext(ctx.ref_dda)
+#define FLOAT_RESTORE(TGT_SIZE)                                         \
+    ctx.ref_dda = RestoreDDAContext(ctx.ref_dda_cache[ctx.depth_state.x], dir, TGT_SIZE); \
+    org = org_cache[ctx.depth_state.x]
+
+#else
+
+#define FLOAT_RECURSION(SRC_SIZE, TGT_SIZE) {}
+#define FLOAT_STEP {}
+#define FLOAT_RESTORE(TGT_SIZE) {}
+
+#endif
+
+bool RegionTraversal_Base(inout TraversalContext ctx, vec3 org, vec3 dir)
+{
+    bool hit = false;
+
+    int iteration_count = 0;
+    uvec3 tex_data[(STACK_SIZE+1) / 2];
+
+    ctx.depth_state = uvec2(0, stack_depth);
+    //uvec2 depth_state = uvec2(0, stack_depth);
+
+#ifdef FLOAT_CONTEXT
+    vec3 org_cache[STACK_SIZE];
+    ctx.ref_dda = InitDDAContext(org, dir, node_size);
+#endif
+
+#ifdef FIXED_CONTEXT
+    int log_node_size = int(log(node_size) / log(2));
+    ctx.dda = FixedPointDDAInit(org, dir, log_node_size);
+#endif
+
+    tex_data[0].x = 0;
+    while (true)
+    {
+        ITERATION_CONTROL;
+        hit = false;
+        uint depth_index = ctx.depth_state.x >> 1;
+
+        if ((ctx.depth_state.x & 1) == 0)
+        {
+            while (RUN_CONDITION)
+            {
+                ITERATION_CONTROL;
+
+                tex_data[depth_index].yz = TEXDATA_LOOKUP;
+                if (tex_data[depth_index].yz != uvec2(0, 0))
+                {
+                    hit = true;
+
+                    if (ctx.depth_state.x < stack_depth)
+                    {
+                        FLOAT_RECURSION(node_size, CHUNK_SIZE);
+                        FIXED_RECURSION(LOG_CHUNK_SIZE);
+                    }
+
+                    ++ctx.depth_state.x;
+
+                    break;
+                }
+                else
+                {
+                    FLOAT_STEP;
+                    FIXED_STEP;
+                    CHECK_INTERRUPT;
+                }
+            }
+
+            if (!hit)
+            {
+                if (ctx.depth_state.x > 0)
+                {
+                    --ctx.depth_state.x;
+
+                    FLOAT_RESTORE(CHUNK_SIZE);
+                    FLOAT_STEP;
+
+                    FIXED_RESTORE(LOG_CHUNK_SIZE);
+                    FIXED_STEP;
+
+                    CHECK_INTERRUPT;
+                }
+                else break; // no hit
+            }
+            else if (ctx.depth_state.x > stack_depth) break; // hit
+        }
+
+        else // ((ctx.depth_state.x & 1) != 0)
+        {
+            while (RUN_CONDITION)
+            {
+                ITERATION_CONTROL;
+
+                uvec3 int_coords = CURRENT_VOXEL_LOOKUP;
+                uvec2 indices = // (side_index, voxel_index)
+                    uvec2(int_coords.z / 2,
+                          int_coords.x + int_coords.y * 4 + (int_coords.z%2) * 16);
+
+                if ((tex_data[depth_index][indices.x+1] & (1 << indices.y)) != 0)
+                {
+                    hit = true;
+
+                    if (ctx.depth_state.x < stack_depth)
+                    {
+                        bool next_tex_missing = true;
+
+                        uint base_offset = BASE_OFFSET_LOOKUP;
+                        if (base_offset != 0xffffffff)
+                        {
+                            uint offset =
+                                base_offset
+                                + bitCount(
+                                    tex_data[depth_index][indices.x+1]
+                                    & ((1 << indices.y)-1))
+                                + indices.x * bitCount(tex_data[depth_index][1]);
+
+                            tex_data[depth_index+1].x = offset;
+                            next_tex_missing =
+                                (residency_mask[offset >> 5] >> (offset & 0x1fu) & 1u) == 0;
+                        }
+
+                        if (next_tex_missing)
+                        {
+                            ctx.depth_state.y = ctx.depth_state.x;
+                            ctx.depth_state.x = stack_depth+1;
+                            break;
+                        }
+
+                        FLOAT_RECURSION(node_size, CHUNK_SIZE);
+                        FIXED_RECURSION(LOG_CHUNK_SIZE);
+                    }
+
+                    ++ctx.depth_state.x;
+
+                    break;
+                }
+                else
+                {
+                    FLOAT_STEP;
+                    FIXED_STEP;
+                    CHECK_INTERRUPT;
+                }
+            }
+
+            if (!hit)
+            {
+                if (ctx.depth_state.x > 0)
+                {
+                    --ctx.depth_state.x;
+
+                    FLOAT_RESTORE(node_size);
+                    FLOAT_STEP;
+
+                    FIXED_RESTORE(log_node_size);
+                    FIXED_STEP;
+
+                    CHECK_INTERRUPT
+                }
+                else break; // no hit (probably an error)
+            }
+            else if (ctx.depth_state.x > stack_depth) break; // hit
+        }
+    }
+
+    return hit;
+}
+
 vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
 {
+    TraversalContext ctx;
+    if (RegionTraversal_Base(ctx, org, dir))
+    {
+        float t = 0.0;
+        vec3 output_value = vec3(0.0);
+
+        float level_size = 1.0;
+        for (uint index = 0; index < min(ctx.depth_state.y, stack_depth); index++)
+        {
+            float voxel_count = ((index & 1) != 0 ? CHUNK_SIZE : node_size);
+            t += BACKUP_HITT(index);
+            level_size /= voxel_count;
+        }
+
+        t += HITT;
+        output_value = HITNORMAL;
+
+#if 0
+        vec3 chunk_coords =
+            (vec3(int_coords) + vec3(0.5)) / (CHUNK_SIZE * node_size);
+        vec3 texture_coords = TextureCoordsDDAContextSave(ctx_cache[depth-1]);
+
+        payload = texture(payloads[nonuniformEXT(current_tex - leaves_begin)],
+                          texture_coords - vec3(0.5)/node_size + chunk_coords).xyz;
+#endif
+
+        payload = vec3(1.0);
+
+        return vec4(output_value, t);
+    }
+    else
+        return vec4(vec3(0.0), -1.0);
+
+#if 0
     int iteration_count = 0;
 
     uint tex_index[STACK_SIZE];
@@ -136,7 +420,7 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
 
     while (true)
     {
-        ITERATION_CONTROL;
+        //ITERATION_CONTROL;
 
         hit = false;
 
@@ -150,7 +434,7 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
 #endif
             )
             {
-                ITERATION_CONTROL;
+                //ITERATION_CONTROL;
 
 #ifdef FIXED_CONTEXT
                 data[depth] = texture(masks[nonuniformEXT(current_tex)],
@@ -163,6 +447,7 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
                 if (data[depth] != uvec2(0, 0))
                 {
                     hit = true;
+
                     if (depth < stack_depth)
                     {
                         tex_index[depth] = current_tex;
@@ -272,7 +557,7 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
 #endif
             )
             {
-                ITERATION_CONTROL;
+                //ITERATION_CONTROL;
 
 #ifdef FIXED_CONTEXT
                 ivec3 int_coords = FixedPointDDACurrentVoxel(alt_ctx);
@@ -487,6 +772,7 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
         //return vec4((HitNormalDDAContext(ctx) * 0.5 + vec3(0.5)) * 0.1, -1.0);
 #endif
     }
+#endif
 }
 
 vec3 CircleIntersection(float radius, float org_height, float ray_polar)
