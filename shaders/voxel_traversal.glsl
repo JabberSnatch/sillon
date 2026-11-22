@@ -230,7 +230,7 @@ ivec3 FixedPointDDAHitP_Base(ivec3 forg,
     ivec3 d = FixedQuotient(face_distance >> FACTOR, fdir);
 
     //#define TEST(U, VW) (d.U >= 0) && all(lessThan(abs(local_forg.VW + FixedProduct(fdir.VW, (d.U).xx)), ivec2(voxel_radius)))
-#define TEST(U, VW) BoxTest(d.U, fdir.VW, local_forg.VW >> FACTOR, voxel_radius >> FACTOR)
+#define TEST(U, VW) BoxTest(d.U, fdir.VW, local_forg.VW >> FACTOR, (voxel_radius >> FACTOR) + ((1 << FACTOR) - 1))
 
     ivec3 test = ivec3(int(TEST(x, yz)), int(TEST(y, zx)), int(TEST(z, xy)));
 

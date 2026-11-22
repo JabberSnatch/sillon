@@ -520,6 +520,36 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
         float t = 0.0;
         vec3 output_value = vec3(0.0);
 
+#ifdef FIXED_CONTEXT
+        uint max_index = min(ctx.depth_state.y, stack_depth);
+        ivec3 voxel_coordinates = FixedPointDDACurrentVoxel(ctx.dda);
+        int total_log_size = ctx.dda.log_size;
+        for (uint index = 0; index < max_index; index++)
+        {
+            uint rev_index = max_index - 1 - index;
+            voxel_coordinates =
+                voxel_coordinates +
+                (FixedPointDDABackupCurrentVoxel(ctx.dda_cache[rev_index]) << total_log_size);
+
+            int log_level_size = ctx.dda_cache[rev_index].log_size;
+            total_log_size += log_level_size;
+        }
+
+        ivec3 forg = clamp(FloatToFixed(org), 0, (FIXED_PRECISION-1));
+        ivec3 fdir = ivec3(sign(dir)) * min(abs(FloatToFixed(dir)), FIXED_PRECISION-1);
+        int voxel_size = FIXED_PRECISION >> total_log_size;
+        ivec3 hitp = FixedPointDDAHitP_Base(forg, fdir, voxel_coordinates, voxel_size, -1);
+
+        ivec3 offset = abs(hitp - (voxel_coordinates * voxel_size + voxel_size / 2));
+        ivec3 normal = ivec3(
+            greaterThanEqual(offset, ivec3(max(offset.x, max(offset.y, offset.z)))));
+
+        vec3 ray = FixedToFloat(hitp - forg);
+        t = length(ray);
+        output_value = vec3(-normal * sign(fdir));
+
+#else
+
         float level_size = 1.0;
         for (uint index = 0; index < min(ctx.depth_state.y, stack_depth); index++)
         {
@@ -530,6 +560,7 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
 
         t += HITT;
         output_value = HITNORMAL;
+#endif
 
 #if 0
         vec3 chunk_coords =
