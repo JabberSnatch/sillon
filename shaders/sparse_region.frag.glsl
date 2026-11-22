@@ -137,12 +137,12 @@ struct TraversalContext
 #ifdef FIXED_CONTEXT
 
 #define RUN_CONDITION ctx.dda.mask.w == 1
-#define TEXDATA_LOOKUP                                              \
-    texture(masks[nonuniformEXT(tex_data[depth_index].x)],          \
-            FixedPointDDATextureCoords(ctx.dda)).xy
+#define TEXDATA_LOOKUP                                                 \
+    texelFetch(masks[nonuniformEXT(tex_data[depth_index].x)],          \
+               FixedPointDDACurrentVoxel(ctx.dda), 0).xy
 #define BASE_OFFSET_LOOKUP                                              \
-    texture(offsets[nonuniformEXT(tex_data[depth_index].x)],            \
-            FixedPointDDABackupTextureCoords(ctx.dda_cache[ctx.depth_state.x-1])).x
+    texelFetch(offsets[nonuniformEXT(tex_data[depth_index].x)],         \
+               FixedPointDDABackupCurrentVoxel(ctx.dda_cache[ctx.depth_state.x-1]), 0).x
 #define CURRENT_VOXEL_LOOKUP FixedPointDDACurrentVoxel(ctx.dda)
 #define BACKUP_HITT(INDEX)                                              \
     FixedPointDDABackupHitT(ctx.dda_cache[INDEX], ctx.dda.direction) * level_size
@@ -198,15 +198,15 @@ struct TraversalContext
 
 #endif
 
-bool RegionTraversal_Base(inout TraversalContext ctx, vec3 org, vec3 dir, inout float error)
+bool RegionTraversal_Base(out TraversalContext ctx, vec3 org, vec3 dir, out float error)
 {
     bool hit = false;
+    error = 1.0;
 
     int iteration_count = 0;
     uvec3 tex_data[(STACK_SIZE+1) / 2];
 
     ctx.depth_state = uvec2(0, stack_depth);
-    //uvec2 depth_state = uvec2(0, stack_depth);
 
 #ifdef FLOAT_CONTEXT
     vec3 org_cache[STACK_SIZE];
@@ -342,7 +342,7 @@ bool RegionTraversal_Base(inout TraversalContext ctx, vec3 org, vec3 dir, inout 
                     FIXED_RESTORE(log_node_size);
                     FIXED_STEP;
 
-                    CHECK_INTERRUPT
+                    CHECK_INTERRUPT;
                 }
                 else break; // no hit (probably an error)
             }
@@ -358,7 +358,161 @@ vec4 RegionTraversal4(vec3 org, vec3 dir, inout vec3 payload)
 #ifdef TRAVERSAL_BASE
     TraversalContext ctx;
     float error = 1.0;
-    if (RegionTraversal_Base(ctx, org, dir, error))
+
+#if 1
+    bool hit = false;
+
+    {
+        int iteration_count = 0;
+        uvec3 tex_data[(STACK_SIZE+1) / 2];
+
+        ctx.depth_state = uvec2(0, stack_depth);
+
+#ifdef FLOAT_CONTEXT
+        vec3 org_cache[STACK_SIZE];
+        ctx.ref_dda = InitDDAContext(org, dir, node_size);
+#endif
+
+#ifdef FIXED_CONTEXT
+        int log_node_size = int(log(node_size) / log(2));
+        ctx.dda = FixedPointDDAInit(org, dir, log_node_size);
+#endif
+
+        tex_data[0].x = 0;
+        while (true)
+        {
+            ITERATION_CONTROL_BOOL;
+            hit = false;
+            uint depth_index = ctx.depth_state.x >> 1;
+
+            if ((ctx.depth_state.x & 1) == 0)
+            {
+                while (RUN_CONDITION)
+                {
+                    ITERATION_CONTROL_BOOL;
+
+                    tex_data[depth_index].yz = TEXDATA_LOOKUP;
+                    if (tex_data[depth_index].yz != uvec2(0, 0))
+                    {
+                        hit = true;
+
+                        if (ctx.depth_state.x < stack_depth)
+                        {
+                            FLOAT_RECURSION(node_size, CHUNK_SIZE);
+                            FIXED_RECURSION(LOG_CHUNK_SIZE);
+                        }
+
+                        ++ctx.depth_state.x;
+
+                        break;
+                    }
+                    else
+                    {
+                        FLOAT_STEP;
+                        FIXED_STEP;
+                        CHECK_INTERRUPT;
+                    }
+                }
+
+                if (!hit)
+                {
+                    if (ctx.depth_state.x > 0)
+                    {
+                        --ctx.depth_state.x;
+
+                        FLOAT_RESTORE(CHUNK_SIZE);
+                        FLOAT_STEP;
+
+                        FIXED_RESTORE(LOG_CHUNK_SIZE);
+                        FIXED_STEP;
+
+                        CHECK_INTERRUPT;
+                    }
+                    else break; // no hit
+                }
+                else if (ctx.depth_state.x > stack_depth) break; // hit
+            }
+
+            else // ((ctx.depth_state.x & 1) != 0)
+            {
+                while (RUN_CONDITION)
+                {
+                    ITERATION_CONTROL_BOOL;
+
+                    uvec3 int_coords = CURRENT_VOXEL_LOOKUP;
+                    uvec2 indices = // (side_index, voxel_index)
+                        uvec2(int_coords.z / 2,
+                              int_coords.x + int_coords.y * 4 + (int_coords.z%2) * 16);
+
+                    if ((tex_data[depth_index][indices.x+1] & (1 << indices.y)) != 0)
+                    {
+                        hit = true;
+
+                        if (ctx.depth_state.x < stack_depth)
+                        {
+                            bool next_tex_missing = true;
+
+                            uint base_offset = BASE_OFFSET_LOOKUP;
+                            if (base_offset != 0xffffffff)
+                            {
+                                uint offset =
+                                    base_offset
+                                    + bitCount(
+                                        tex_data[depth_index][indices.x+1]
+                                        & ((1 << indices.y)-1))
+                                    + indices.x * bitCount(tex_data[depth_index][1]);
+
+                                tex_data[depth_index+1].x = offset;
+                                next_tex_missing =
+                                    (residency_mask[offset >> 5] >> (offset & 0x1fu) & 1u) == 0;
+                            }
+
+                            if (next_tex_missing)
+                            {
+                                ctx.depth_state.y = ctx.depth_state.x;
+                                ctx.depth_state.x = stack_depth+1;
+                                break;
+                            }
+
+                            FLOAT_RECURSION(CHUNK_SIZE, node_size);
+                            FIXED_RECURSION(log_node_size);
+                        }
+
+                        ++ctx.depth_state.x;
+
+                        break;
+                    }
+                    else
+                    {
+                        FLOAT_STEP;
+                        FIXED_STEP;
+                        CHECK_INTERRUPT;
+                    }
+                }
+
+                if (!hit)
+                {
+                    if (ctx.depth_state.x > 0)
+                    {
+                        --ctx.depth_state.x;
+
+                        FLOAT_RESTORE(node_size);
+                        FLOAT_STEP;
+
+                        FIXED_RESTORE(log_node_size);
+                        FIXED_STEP;
+
+                        CHECK_INTERRUPT;
+                    }
+                    else break; // no hit (probably an error)
+                }
+                else if (ctx.depth_state.x > stack_depth) break; // hit
+            }
+        }
+    }
+#endif
+
+    if (hit)
     {
         if (error != error)
             return vec4(vec3(error), 1.0);
@@ -1025,7 +1179,7 @@ void main()
     {
         float frag_depth = trav.w + entry_depth;
 
-#if 1
+#if 0
         color.xyz = frag_depth.xxx;
         //color.xyz = trav.xyz * 0.5 + vec3(0.5);
         color.w = 1.0;
