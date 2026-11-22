@@ -94,7 +94,7 @@ float IterationCheck(inout int iteration_count)
     return 1.0;
 }
 
-#if 1
+#if 0
 
 #define ITERATION_CONTROL \
     if (IterationCheck(iteration_count) == 0.0) { payload = vec3(0.0 / 0.0); return vec4(1.0); }

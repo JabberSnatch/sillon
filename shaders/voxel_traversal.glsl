@@ -384,7 +384,7 @@ FixedPointDDA FixedPointDDAInit_Base(ivec3 forg, vec3 dir, int log_voxel_count)
 #endif
 
     //ctx.step_sign = ivec3(sign(dir));
-    ctx.direction = FloatToFixed(dir);
+    ctx.direction = ivec3(sign(dir)) * min(abs(FloatToFixed(dir)), FIXED_PRECISION-1);
     ivec3 step_sign = sign(ctx.direction);
 
     //ctx.size = 1 << log_voxel_count;
@@ -407,7 +407,7 @@ FixedPointDDA FixedPointDDAInit_Base(ivec3 forg, vec3 dir, int log_voxel_count)
         ctx.max_t = FixedProduct(edge_distance, ctx.delta_t);
 #endif
 
-        ctx.rdelta_t = 1.0 / (abs(dir) * voxel_count);
+        ctx.rdelta_t = min(1.0 / (abs(dir) * voxel_count), vec3(3.4028235e38));
         ctx.rmax_t = FixedToFloat(edge_distance) * ctx.rdelta_t;
     }
 
@@ -515,7 +515,8 @@ FixedPointDDA FixedPointDDARestore(inout FixedPointDDABackup save, vec3 dir, int
 #endif
 
     //ctx.step_sign = ivec3(sign(dir));
-    ctx.direction = FloatToFixed(dir);
+    //ctx.direction = FloatToFixed(dir);
+    ctx.direction = ivec3(sign(dir)) * min(abs(FloatToFixed(dir)), FIXED_PRECISION-1);
 
     //float voxel_count = float(1 << log_voxel_count);
     float voxel_count = float(1 << save.log_size);
@@ -524,7 +525,8 @@ FixedPointDDA FixedPointDDARestore(inout FixedPointDDABackup save, vec3 dir, int
     ctx.max_t = save.max_t;
 #endif
 
-    ctx.rdelta_t = 1.0 / (abs(dir) * voxel_count);
+    //ctx.rdelta_t = 1.0 / (abs(dir) * voxel_count);
+    ctx.rdelta_t = min(1.0 / (abs(dir) * voxel_count), vec3(3.4028235e38));
     ctx.rmax_t = save.rmax_t;
     //ctx.size = 1 << log_voxel_count;
     //ctx.log_size = log_voxel_count;
