@@ -198,25 +198,17 @@ struct TraversalContext
 
 #endif
 
-bool RegionTraversal_Base(out TraversalContext ctx, vec3 org, vec3 dir, out float error)
+bool RegionTraversal_Base(out TraversalContext ctx, ivec3 org, ivec3 dir)
 {
     bool hit = false;
-    error = 1.0;
 
     int iteration_count = 0;
     uvec3 tex_data[(STACK_SIZE+1) / 2];
 
     ctx.depth_state = uvec2(0, stack_depth);
 
-#ifdef FLOAT_CONTEXT
-    vec3 org_cache[STACK_SIZE];
-    ctx.ref_dda = InitDDAContext(org, dir, node_size);
-#endif
-
-#ifdef FIXED_CONTEXT
     int log_node_size = int(log(node_size) / log(2));
-    ctx.dda = FixedPointDDAInit(org, dir, log_node_size);
-#endif
+    ctx.dda = FixedPointDDAInit_Base(org, dir, log_node_size);
 
     tex_data[0].x = 0;
     while (true)
@@ -348,6 +340,42 @@ bool RegionTraversal_Base(out TraversalContext ctx, vec3 org, vec3 dir, out floa
             }
             else if (ctx.depth_state.x > stack_depth) break; // hit
         }
+    }
+
+    return hit;
+}
+
+bool RegionTraversal_Fixed(inout ivec3 org, inout ivec3 dir)
+{
+    TraversalContext ctx;
+    bool hit = false;
+    hit = RegionTraversal_Base(ctx, org, dir);
+
+    if (hit)
+    {
+        uint max_index = min(ctx.depth_state.y, stack_depth);
+        ivec3 voxel_coordinates = FixedPointDDACurrentVoxel(ctx.dda);
+        int total_log_size = ctx.dda.log_size;
+        for (uint index = 0; index < max_index; index++)
+        {
+            uint rev_index = max_index - 1 - index;
+            voxel_coordinates =
+                voxel_coordinates +
+                (FixedPointDDABackupCurrentVoxel(ctx.dda_cache[rev_index]) << total_log_size);
+
+            int log_level_size = ctx.dda_cache[rev_index].log_size;
+            total_log_size += log_level_size;
+        }
+
+        int voxel_size = FIXED_PRECISION >> total_log_size;
+        ivec3 hitp = FixedPointDDAHitP_Base(org, dir, voxel_coordinates, voxel_size, -1);
+
+        ivec3 offset = abs(hitp - (voxel_coordinates * voxel_size + voxel_size / 2));
+        ivec3 normal = ivec3(
+            greaterThanEqual(offset, ivec3(max(offset.x, max(offset.y, offset.z)))));
+
+        dir = -normal * sign(dir);
+        org = hitp;
     }
 
     return hit;
@@ -1197,6 +1225,29 @@ void main()
     vec3 base_color = vec3(0.0);
     vec3 org = root_org;
 
+#if 1
+    ivec3 forg = FixedPointDDARayOrigin(org);
+    ivec3 fdir = FixedPointDDARayDirection(dir);
+    bool hit = RegionTraversal_Fixed(forg, fdir);
+
+    if (hit)
+    {
+        vec3 base_color = vec3(1.0);
+        vec3 hitn = vec3(fdir);
+        vec3 hitp = FixedToFloat(forg);
+        fdir = FixedPointDDARayDirection(light_dir);
+        float shadow = RegionTraversal_Fixed(forg, fdir) ? 0.0 : 1.0;
+        vec3 diffuse = max(0.0, dot(light_dir, hitn)) * ClearSky_Irradiance(hitp, light_dir);
+        color.xyz = base_color * (shadow.xxx * diffuse);
+    }
+    else
+    {
+        color.xyz = ClearSky_Irradiance(org, dir);
+    }
+
+#endif
+
+#if 0
     vec4 trav = RegionTraversal4(org, dir, base_color);
     vec3 payload = base_color;
 
@@ -1320,5 +1371,8 @@ void main()
     }
     else
         color.xyz = ClearSky_Irradiance(org, dir);
+#endif
+
+
     color.w = 1.0;
 }
