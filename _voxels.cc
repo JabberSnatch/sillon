@@ -103,6 +103,7 @@ struct voxel_state_t
 
     float time = 0.f;
 
+    bool hide_gui = false;
     float framerate_average = 0.f;
     std::string framerate_label;
     bool enable_indirect_light = false;
@@ -1184,15 +1185,18 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
     bool old_indirect_light_state = _state->enable_indirect_light;
     bool reset_progressive_counter = false;
-    {
-        if (!(_state->frame_index % 10))
-        {
-            _state->framerate_label = std::to_string(_state->framerate_average);
-            _state->framerate_average = 0.f;
-        }
-        _state->framerate_average += _input->time_delta / 10.f;
 
-        guitk::BeginRecord(_state->gui_context, _input, _past_input);
+    if (!(_state->frame_index % 10))
+    {
+        _state->framerate_label = std::to_string(_state->framerate_average);
+        _state->framerate_average = 0.f;
+    }
+    _state->framerate_average += _input->time_delta / 10.f;
+
+    guitk::BeginRecord(_state->gui_context, _input, _past_input);
+
+    if (!_state->hide_gui)
+    {
         guitk::BeginFrame(_state->gui_context, "MainFrame");
 
         guitk::Label(_state->gui_context, _state->framerate_label.c_str());
@@ -1244,10 +1248,10 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
             reset_progressive_counter = true;
 
         guitk::EndFrame(_state->gui_context);
-
-        guitk::WidgetStates const* gui_record = guitk::EndRecord(_state->gui_context);
-        _state->current_gui_record = gui_record;
     }
+
+    guitk::WidgetStates const* gui_record = guitk::EndRecord(_state->gui_context);
+    _state->current_gui_record = gui_record;
 
     _state->time += _input->time_delta;
 
@@ -1270,6 +1274,9 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
 
         reset_progressive_counter = true;
     }
+
+    if (!_input->key_down['h'] && _past_input->key_down['h'])
+        _state->hide_gui = !_state->hide_gui;
 
     if (!_input->key_down['c'] && _past_input->key_down['c'])
         _state->enable_indirect_light = !_state->enable_indirect_light;
