@@ -1175,6 +1175,27 @@ vec3 ClearSky_Irradiance(vec3 position, vec3 direction)
     return irradiance;
 }
 
+#define SAMPLE_COUNT 4
+vec3 GenerateRay(uint pixelID, uint pixel_count, uint sample_index, vec3 normal)
+{
+    vec2 owen_sample = OwenPlastic(
+        pixel_count * SAMPLE_COUNT * sample_offset +
+        pixelID * SAMPLE_COUNT + sample_index, 0);
+
+    float sin_theta = sqrt(1.0 - owen_sample.x*owen_sample.x);
+    float phi = owen_sample.y * 3.14159265 * 2.0;
+    vec3 ts_sample = vec3(
+        cos(phi) * sin_theta,
+        sin(phi) * sin_theta,
+        owen_sample.x
+    );
+
+    mat3 tb_mat = genTB(normal);
+    vec3 current_ray = normalize(tb_mat * ts_sample);
+
+    return current_ray;
+}
+
 void main()
 {
     vec3 box_scale = region_scale;
@@ -1228,17 +1249,61 @@ void main()
 #if 1
     ivec3 forg = FixedPointDDARayOrigin(org);
     ivec3 fdir = FixedPointDDARayDirection(dir);
+    ivec3 light_fdir = FixedPointDDARayDirection(light_dir);
     bool hit = RegionTraversal_Fixed(forg, fdir);
+
+    vec3 indirect = vec3(0.0);
+    vec3 exit_color = vec3(0.0);
+    vec3 current_weight = vec3(1.0);
 
     if (hit)
     {
         vec3 base_color = vec3(1.0);
+
+#if 0
         vec3 hitn = vec3(fdir);
         vec3 hitp = FixedToFloat(forg);
-        fdir = FixedPointDDARayDirection(light_dir);
+        fdir = light_fdir;
         float shadow = RegionTraversal_Fixed(forg, fdir) ? 0.0 : 1.0;
         vec3 diffuse = max(0.0, dot(light_dir, hitn)) * ClearSky_Irradiance(hitp, light_dir);
         color.xyz = base_color * (shadow.xxx * diffuse);
+#endif
+
+        vec3 previous_hitp = FixedToFloat(forg);
+        vec3 previous_hitn = vec3(fdir);
+
+        for (uint sample_index = 0; sample_index < SAMPLE_COUNT; ++sample_index)
+        {
+            if (dot(previous_hitn, light_dir) > 0.0)
+            {
+                ivec3 direct_org = forg;
+                ivec3 direct_dir = light_fdir;
+                if (!RegionTraversal_Fixed(direct_org, direct_dir))
+                    indirect += max(0.0, dot(previous_hitn, light_dir))
+                        * current_weight
+                        * ClearSky_Irradiance(previous_hitp, light_dir);
+            }
+
+            vec3 current_ray = GenerateRay(pixelID, pixelCount, sample_index, previous_hitn);
+
+            fdir = FixedPointDDARayDirection(current_ray);
+
+            float next_weight = dot(previous_hitn, current_ray);
+            if (!RegionTraversal_Fixed(forg, fdir))
+            {
+                exit_color =
+                    ClearSky_Irradiance(previous_hitp, current_ray)
+                    * current_weight
+                    * next_weight;
+                break;
+            }
+
+            current_weight *= next_weight;
+            previous_hitp = FixedToFloat(forg);
+            previous_hitn = vec3(fdir);
+        }
+
+        color.xyz = indirect + exit_color;
     }
     else
     {
@@ -1292,7 +1357,6 @@ void main()
             vec3 current_weight = vec3(1.0) * payload;
 
 #if 1
-#define SAMPLE_COUNT 4
             for (uint sample_index = 0; sample_index < SAMPLE_COUNT; ++sample_index)
             {
                 vec3 previous_hitp = previous_org + previous_dir*previous_hit.w;
