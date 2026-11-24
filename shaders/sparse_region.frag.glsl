@@ -1255,6 +1255,7 @@ void main()
     vec3 indirect = vec3(0.0);
     vec3 exit_color = vec3(0.0);
     vec3 current_weight = vec3(1.0);
+    float depth = 1.0;
 
     if (hit)
     {
@@ -1271,6 +1272,7 @@ void main()
 
         vec3 previous_hitp = FixedToFloat(forg);
         vec3 previous_hitn = vec3(fdir);
+        depth = length(previous_hitp - org);
 
         for (uint sample_index = 0; sample_index < SAMPLE_COUNT; ++sample_index)
         {
@@ -1309,6 +1311,8 @@ void main()
     {
         color.xyz = ClearSky_Irradiance(org, dir);
     }
+
+    gl_FragDepth = depth;
 
 #endif
 
