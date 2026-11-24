@@ -1241,11 +1241,8 @@ bool Update(void* _pstate, vktk::Context* _vulkan,
         if (guitk::Slider(_state->gui_context, &_state->fov, "Field Of View", 5.f, 150.f, guitk::SliderFlag_LogScale))
             reset_progressive_counter = true;
 
-        if (guitk::Slider(_state->gui_context, &_state->exposure, "Exposure", 0.01f, 100.f, guitk::SliderFlag_LogScale))
-            reset_progressive_counter = true;
-
-        if (guitk::Slider(_state->gui_context, &_state->tonemapping, "Tonemap", 0.f, 2.99f))
-            reset_progressive_counter = true;
+        guitk::Slider(_state->gui_context, &_state->exposure, "Exposure", 0.01f, 100.f, guitk::SliderFlag_LogScale);
+        guitk::Slider(_state->gui_context, &_state->tonemapping, "Tonemap", 0.f, 2.99f);
 
         guitk::EndFrame(_state->gui_context);
     }
