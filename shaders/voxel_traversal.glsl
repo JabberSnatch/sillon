@@ -23,12 +23,17 @@ struct DDAContext
 
 ivec3 FloatToFixed(vec3 value)
 {
-    return ivec3(value * vec3(1073741824.0));
+    return ivec3(value * vec3(FIXED_PRECISION));
 }
 
 vec3 FixedToFloat(ivec3 value)
 {
-    return vec3(value) / vec3(1073741824.0);
+    return vec3(value) / vec3(FIXED_PRECISION);
+}
+
+vec2 FixedToFloat(ivec2 value)
+{
+    return vec2(value) / vec2(FIXED_PRECISION);
 }
 
 #if 0

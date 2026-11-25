@@ -345,38 +345,90 @@ bool RegionTraversal_Base(out TraversalContext ctx, ivec3 org, ivec3 dir)
     return hit;
 }
 
-bool RegionTraversal_Fixed(inout ivec3 org, inout ivec3 dir)
+ivec4 TraversalContext_Flatten(TraversalContext ctx)
 {
-    TraversalContext ctx;
+    ivec4 voxel_coordinates;
+    uint max_index = min(ctx.depth_state.y, stack_depth);
+    voxel_coordinates.xyz = FixedPointDDACurrentVoxel(ctx.dda);
+    voxel_coordinates.w = ctx.dda.log_size;
+    for (uint index = 0; index < max_index; index++)
+    {
+        uint rev_index = max_index - 1 - index;
+        voxel_coordinates.xyz =
+            voxel_coordinates.xyz +
+            (FixedPointDDABackupCurrentVoxel(ctx.dda_cache[rev_index]) << voxel_coordinates.w);
+
+        int log_level_size = ctx.dda_cache[rev_index].log_size;
+        voxel_coordinates.w += log_level_size;
+    }
+    return voxel_coordinates;
+}
+
+void RegionTraversal_HitData(inout ivec3 org, inout ivec3 dir, ivec4 voxel_coordinates)
+{
+    int voxel_size = FIXED_PRECISION >> voxel_coordinates.w;
+    ivec3 hitp = FixedPointDDAHitP_Base(org, dir, voxel_coordinates.xyz, voxel_size, -1);
+
+    ivec3 offset = abs(hitp - (voxel_coordinates.xyz * voxel_size + voxel_size / 2));
+    ivec3 normal = ivec3(
+        greaterThanEqual(offset, ivec3(max(offset.x, max(offset.y, offset.z)))));
+
+    dir = -normal * sign(dir);
+    org = hitp;
+}
+
+bool RegionTraversal_Query(inout TraversalContext ctx, ivec3 org, ivec3 dir)
+{
+    return RegionTraversal_Base(ctx, org, dir);
+}
+
+//bool RegionTraversal_Fixed(inout ivec3 org, inout ivec3 dir)
+bool RegionTraversal_Fixed(inout TraversalContext ctx, inout ivec3 org, inout ivec3 dir)
+{
+    //TraversalContext ctx;
     bool hit = false;
     hit = RegionTraversal_Base(ctx, org, dir);
 
     if (hit)
     {
-        uint max_index = min(ctx.depth_state.y, stack_depth);
-        ivec3 voxel_coordinates = FixedPointDDACurrentVoxel(ctx.dda);
-        int total_log_size = ctx.dda.log_size;
-        for (uint index = 0; index < max_index; index++)
-        {
-            uint rev_index = max_index - 1 - index;
-            voxel_coordinates =
-                voxel_coordinates +
-                (FixedPointDDABackupCurrentVoxel(ctx.dda_cache[rev_index]) << total_log_size);
+        ivec4 voxel_coordinates = TraversalContext_Flatten(ctx);
 
-            int log_level_size = ctx.dda_cache[rev_index].log_size;
-            total_log_size += log_level_size;
-        }
+#if 0
+        int voxel_size = FIXED_PRECISION >> voxel_coordinates.w;
+        ivec3 hitp = FixedPointDDAHitP_Base(org, dir, voxel_coordinates.xyz, voxel_size, -1);
 
-        int voxel_size = FIXED_PRECISION >> total_log_size;
-        ivec3 hitp = FixedPointDDAHitP_Base(org, dir, voxel_coordinates, voxel_size, -1);
-
-        ivec3 offset = abs(hitp - (voxel_coordinates * voxel_size + voxel_size / 2));
+        ivec3 offset = abs(hitp - (voxel_coordinates.xyz * voxel_size + voxel_size / 2));
         ivec3 normal = ivec3(
             greaterThanEqual(offset, ivec3(max(offset.x, max(offset.y, offset.z)))));
 
         dir = -normal * sign(dir);
         org = hitp;
+#endif
+        RegionTraversal_HitData(org, dir, voxel_coordinates);
     }
+
+    return hit;
+}
+
+bool RegionTraversal_Fixed(inout TraversalContext ctx,
+                           inout ivec3 org, inout ivec3 dir, out vec2 uv)
+{
+    bool hit = false;
+    hit = RegionTraversal_Base(ctx, org, dir);
+
+    if (hit)
+    {
+        ivec4 voxel_coordinates = TraversalContext_Flatten(ctx);
+        RegionTraversal_HitData(org, dir, voxel_coordinates);
+
+        int voxel_size = FIXED_PRECISION >> voxel_coordinates.w;
+        ivec3 uv_mask = 1 - abs(dir);
+        ivec3 uvw = (org & (voxel_size-1)) * uv_mask;
+        ivec2 fuv = (uv_mask.x == 0) ? uvw.yz : ((uv_mask.y == 0) ? uvw.xz : uvw.xy);
+        uv = FixedToFloat(fuv << voxel_coordinates.w);
+    }
+    else
+        uv = vec2(0.0);
 
     return hit;
 }
@@ -1247,10 +1299,14 @@ void main()
     vec3 org = root_org;
 
 #if 1
+    TraversalContext main_ctx;
+
     ivec3 forg = FixedPointDDARayOrigin(org);
     ivec3 fdir = FixedPointDDARayDirection(dir);
     ivec3 light_fdir = FixedPointDDARayDirection(light_dir);
-    bool hit = RegionTraversal_Fixed(forg, fdir);
+    //bool hit = RegionTraversal_Fixed(forg, fdir);
+    vec2 hit_uv;
+    bool hit = RegionTraversal_Fixed(main_ctx, forg, fdir, hit_uv);
 
     vec3 indirect = vec3(0.0);
     vec3 exit_color = vec3(0.0);
@@ -1259,7 +1315,9 @@ void main()
 
     if (hit)
     {
-        vec3 base_color = vec3(1.0);
+        vec3 base_color = vec3(hit_uv.xy, 0.0);//vec3(1.0);
+        vec2 threshold = step(vec2(0.0), abs(hit_uv.xy * 2.0 - 1.0) - 0.95);
+        base_color = vec3(1.0 - min(dot(threshold, threshold), 0.9));
 
 #if 0
         vec3 hitn = vec3(fdir);
@@ -1278,9 +1336,12 @@ void main()
         {
             if (dot(previous_hitn, light_dir) > 0.0)
             {
+                TraversalContext light_ctx;
                 ivec3 direct_org = forg;
                 ivec3 direct_dir = light_fdir;
-                if (!RegionTraversal_Fixed(direct_org, direct_dir))
+                //if (!RegionTraversal_Fixed(direct_org, direct_dir))
+                //if (!RegionTraversal_Fixed(light_ctx, direct_org, direct_dir))
+                if (!RegionTraversal_Query(light_ctx, forg, light_fdir))
                     indirect += max(0.0, dot(previous_hitn, light_dir))
                         * current_weight
                         * ClearSky_Irradiance(previous_hitp, light_dir);
@@ -1291,7 +1352,8 @@ void main()
             fdir = FixedPointDDARayDirection(current_ray);
 
             float next_weight = dot(previous_hitn, current_ray);
-            if (!RegionTraversal_Fixed(forg, fdir))
+            //if (!RegionTraversal_Fixed(forg, fdir))
+            if (!RegionTraversal_Fixed(main_ctx, forg, fdir))
             {
                 exit_color =
                     ClearSky_Irradiance(previous_hitp, current_ray)
@@ -1305,7 +1367,7 @@ void main()
             previous_hitn = vec3(fdir);
         }
 
-        color.xyz = indirect + exit_color;
+        color.xyz = base_color * (indirect + exit_color);
     }
     else
     {
