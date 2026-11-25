@@ -198,7 +198,7 @@ int BoxTest(int d, ivec2 dir, ivec2 org, int radius)
     ivec2 sum = org + product;
     return (OverflowBit(d) == 0
             && (d >= 0)
-            && all(lessThan(abs(sum), ivec2(radius))))
+            && all(lessThanEqual(abs(sum), ivec2(radius))))
         ? 1
         : 0;
 }

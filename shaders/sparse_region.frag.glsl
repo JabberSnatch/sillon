@@ -1312,7 +1312,7 @@ void main()
         color.xyz = ClearSky_Irradiance(org, dir);
     }
 
-    gl_FragDepth = depth;
+    gl_FragDepth = depth + entry_depth;
 
 #endif
 
