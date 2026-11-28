@@ -228,7 +228,7 @@ bool RegionTraversal_Base(out TraversalContext ctx, ivec3 org, ivec3 dir)
                 {
                     hit = true;
 
-                    if (ctx.depth_state.x < stack_depth)
+                    if (ctx.depth_state.x < ctx.depth_state.y)
                     {
                         FLOAT_RECURSION(node_size, CHUNK_SIZE);
                         FIXED_RECURSION(LOG_CHUNK_SIZE);
@@ -262,7 +262,7 @@ bool RegionTraversal_Base(out TraversalContext ctx, ivec3 org, ivec3 dir)
                 }
                 else break; // no hit
             }
-            else if (ctx.depth_state.x > stack_depth) break; // hit
+            else if (ctx.depth_state.x > ctx.depth_state.y) break; // hit
         }
 
         else // ((ctx.depth_state.x & 1) != 0)
@@ -280,7 +280,7 @@ bool RegionTraversal_Base(out TraversalContext ctx, ivec3 org, ivec3 dir)
                 {
                     hit = true;
 
-                    if (ctx.depth_state.x < stack_depth)
+                    if (ctx.depth_state.x < ctx.depth_state.y)
                     {
                         bool next_tex_missing = true;
 
@@ -338,7 +338,7 @@ bool RegionTraversal_Base(out TraversalContext ctx, ivec3 org, ivec3 dir)
                 }
                 else break; // no hit (probably an error)
             }
-            else if (ctx.depth_state.x > stack_depth) break; // hit
+            else if (ctx.depth_state.x > ctx.depth_state.y) break; // hit
         }
     }
 
@@ -1288,8 +1288,14 @@ void main()
                 : vec3(0.0, 0.0, test.z ? sign_bit.z : 0.0));
 #undef TEST
 
+        if (test == bvec3(false))
+            discard;
+
         float distance = (sign_bit.x != 0.0) ? d.x : ((sign_bit.y != 0.0) ? d.y : d.z);
-        root_org = local_camera + dir * distance;
+        vec3 temp = local_camera + dir * distance;
+        root_org = mix(local_camera + dir * distance,
+                       (box_scale * (-sign(dir) * 0.5 + 0.5)),
+                       abs(sign_bit));
     }
 
     float entry_depth = distance(local_camera, root_org);
